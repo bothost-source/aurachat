@@ -21,24 +21,21 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.0'
+          flutter-version: '3.19.0'
           channel: 'stable'
 
-      - name: Create Flutter Project
+      - name: Save code and create project
         run: |
-          mkdir -p /tmp/tarrific-code
-          cp -r lib /tmp/tarrific-code/
-          cp pubspec.yaml /tmp/tarrific-code/
+          mkdir -p /tmp/my-code
+          cp -r lib /tmp/my-code/
+          cp pubspec.yaml /tmp/my-code/
           cd /tmp
           flutter create --org com.tarrific tarrific_chat
-          cp -r /tmp/tarrific-code/lib/* tarrific_chat/lib/
-          cp /tmp/tarrific-code/pubspec.yaml tarrific_chat/
+          rm -rf tarrific_chat/lib
+          cp -r /tmp/my-code/lib tarrific_chat/
+          cp /tmp/my-code/pubspec.yaml tarrific_chat/
           cd tarrific_chat
           flutter pub get
-
-      - name: Build Android APK
-        run: |
-          cd /tmp/tarrific_chat
           flutter build apk --release
           mkdir -p $GITHUB_WORKSPACE/build/app/outputs/flutter-apk
           cp build/app/outputs/flutter-apk/app-release.apk $GITHUB_WORKSPACE/build/app/outputs/flutter-apk/
@@ -68,18 +65,19 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.0'
+          flutter-version: '3.19.0'
           channel: 'stable'
 
-      - name: Create Flutter Project
+      - name: Save code and create project
         run: |
-          mkdir -p /tmp/tarrific-code
-          cp -r lib /tmp/tarrific-code/
-          cp pubspec.yaml /tmp/tarrific-code/
+          mkdir -p /tmp/my-code
+          cp -r lib /tmp/my-code/
+          cp pubspec.yaml /tmp/my-code/
           cd /tmp
           flutter create --org com.tarrific tarrific_chat
-          cp -r /tmp/tarrific-code/lib/* tarrific_chat/lib/
-          cp /tmp/tarrific-code/pubspec.yaml tarrific_chat/
+          rm -rf tarrific_chat/lib
+          cp -r /tmp/my-code/lib tarrific_chat/
+          cp /tmp/my-code/pubspec.yaml tarrific_chat/
           cd tarrific_chat
           flutter config --enable-web
           flutter pub get
