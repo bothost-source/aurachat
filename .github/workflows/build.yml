@@ -24,7 +24,7 @@ jobs:
           flutter-version: '3.24.0'
           channel: 'stable'
 
-      - name: Create Flutter Project & Patch Android
+      - name: Create Flutter Project
         run: |
           mkdir -p /tmp/tarrific-code
           cp -r lib /tmp/tarrific-code/
@@ -34,36 +34,6 @@ jobs:
           cp -r /tmp/tarrific-code/lib/* tarrific_chat/lib/
           cp /tmp/tarrific-code/pubspec.yaml tarrific_chat/
           cd tarrific_chat
-          
-          # Patch Android build.gradle for compatibility
-          sed -i "s/ext.kotlin_version = '<latest-version>'/ext.kotlin_version = '1.9.0'/g" android/build.gradle
-          sed -i "s/com.android.tools.build:gradle:[0-9.]*/com.android.tools.build:gradle:8.1.0/g" android/build.gradle
-          
-          # Fix settings.gradle
-          cat > android/settings.gradle << 'EOF'
-pluginManagement {
-    def flutterSdkPath = {
-        def properties = new Properties()
-        file("local.properties").withInputStream { properties.load(it) }
-        def flutterSdkPath = properties.getProperty("flutter.sdk")
-        assert flutterSdkPath != null, "flutter.sdk not set in local.properties"
-        return flutterSdkPath
-    }()
-    includeBuild("$flutterSdkPath/packages/flutter_tools/gradle")
-    repositories {
-        google()
-        mavenCentral()
-        gradlePluginPortal()
-    }
-}
-plugins {
-    id "dev.flutter.flutter-plugin-loader" version "1.0.0"
-    id "com.android.application" version "8.1.0" apply false
-    id "org.jetbrains.kotlin.android" version "1.9.0" apply false
-}
-include ":app"
-EOF
-          
           flutter pub get
 
       - name: Build Android APK
@@ -101,7 +71,7 @@ EOF
           flutter-version: '3.24.0'
           channel: 'stable'
 
-      - name: Create Flutter Project & Build Web
+      - name: Create Flutter Project
         run: |
           mkdir -p /tmp/tarrific-code
           cp -r lib /tmp/tarrific-code/
