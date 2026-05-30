@@ -10,7 +10,7 @@ class ChatProvider extends ChangeNotifier {
   bool _isLoading = false;
   String? _searchQuery;
 
-  List<<ChatModel> get chats => _searchQuery == null || _searchQuery!.isEmpty
+  List<ChatModel> get chats => _searchQuery == null || _searchQuery!.isEmpty
       ? _chats
       : _chats.where((c) => 
           c.displayName.toLowerCase().contains(_searchQuery!.toLowerCase()) ||
