@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import '../themes/app_theme.dart';
 import '../providers/chat_provider.dart';
 import '../providers/auth_provider.dart';
-import 'chats_list/chats_list_screen.dart';
+import 'chat_list/chats_list_screen.dart';
 import 'status/status_screen.dart';
 import 'calls/calls_screen.dart';
 import 'settings/settings_screen.dart';
