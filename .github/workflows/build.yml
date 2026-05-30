@@ -1,5 +1,10 @@
 name: Build TARRIFIC CHAT
 
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
 on:
   push:
     branches: [main, master]
@@ -24,7 +29,6 @@ jobs:
           flutter-version: '3.22.0'
           channel: 'stable'
 
-      # Generate android/ folder if missing, then build
       - name: Create Android project & Build APK
         run: |
           flutter create . --platforms=android
@@ -59,7 +63,6 @@ jobs:
           flutter-version: '3.22.0'
           channel: 'stable'
 
-      # Generate web/ folder if missing, then build
       - name: Create Web project & Build
         run: |
           flutter config --enable-web
