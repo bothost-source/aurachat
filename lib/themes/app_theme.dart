@@ -368,7 +368,7 @@ class AppGradients {
     end: Alignment.bottomCenter,
   );
 
-  static const LinearGradient glass = LinearGradient(
+  static final LinearGradient glass = LinearGradient(  // CHANGED: const → final
     colors: [Color(0xFF2C2C2E).withOpacity(0.7), Color(0xFF1C1C1E).withOpacity(0.5)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
