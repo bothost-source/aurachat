@@ -4,22 +4,22 @@ import '../models/message_model.dart';
 import '../models/user_model.dart';
 
 class ChatProvider extends ChangeNotifier {
-  List<ChatModel> _chats = [];
+  List<<ChatModel> _chats = [];
   List<MessageModel> _messages = [];
   ChatModel? _selectedChat;
   bool _isLoading = false;
   String? _searchQuery;
 
-  List<ChatModel> get chats => _searchQuery == null || _searchQuery!.isEmpty
+  List<<ChatModel> get chats => _searchQuery == null || _searchQuery!.isEmpty
       ? _chats
       : _chats.where((c) => 
           c.displayName.toLowerCase().contains(_searchQuery!.toLowerCase()) ||
           (c.lastMessage?.content.toLowerCase().contains(_searchQuery!.toLowerCase()) ?? false)
         ).toList();
 
-  List<ChatModel> get pinnedChats => chats.where((c) => c.isPinned).toList();
-  List<ChatModel> get unpinnedChats => chats.where((c) => !c.isPinned).toList();
-  List<ChatModel> get archivedChats => _chats.where((c) => c.isArchived).toList();
+  List<<ChatModel> get pinnedChats => chats.where((c) => c.isPinned).toList();
+  List<<ChatModel> get unpinnedChats => chats.where((c) => !c.isPinned).toList();
+  List<<ChatModel> get archivedChats => _chats.where((c) => c.isArchived).toList();
   int get totalUnread => _chats.fold(0, (sum, c) => sum + c.unreadCount);
   ChatModel? get selectedChat => _selectedChat;
   bool get isLoading => _isLoading;
@@ -256,7 +256,7 @@ class ChatProvider extends ChangeNotifier {
           senderId: 'bot_1',
           senderName: 'TARRIFIC Bot',
           type: MessageType.text,
-          content: 'Hello! I'm your AI assistant. How can I help your business today?',
+          content: "Hello! I'm your AI assistant. How can I help your business today?",
           status: MessageStatus.read,
           createdAt: now.subtract(const Duration(days: 2)),
           readBy: ['me'],
