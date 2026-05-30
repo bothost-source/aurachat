@@ -5,10 +5,10 @@ class AIStudioScreen extends StatefulWidget {
   const AIStudioScreen({super.key});
 
   @override
-  State<AIStudioScreen> createState() => _AIStudioScreenState();
+  State<<AIStudioScreen> createState() => _AIStudioScreenState();
 }
 
-class _AIStudioScreenState extends State<AIStudioScreen> {
+class _AIStudioScreenState extends State<<AIStudioScreen> {
   int _selectedTool = 0;
   final _chatController = TextEditingController();
   final List<Map<String, dynamic>> _chatMessages = [];
@@ -24,7 +24,7 @@ class _AIStudioScreenState extends State<AIStudioScreen> {
   void _sendMessage() {
     if (_chatController.text.trim().isEmpty) return;
     setState(() {
-      _chatMessages.add({'role': 'user', 'content': _chatController.text});
+      _chatMessages.add(<String, dynamic>{'role': 'user', 'content': _chatController.text});
       _isTyping = true;
     });
     _chatController.clear();
@@ -32,9 +32,9 @@ class _AIStudioScreenState extends State<AIStudioScreen> {
     Future.delayed(const Duration(seconds: 2), () {
       setState(() {
         _isTyping = false;
-        _chatMessages.add({
+        _chatMessages.add(<String, dynamic>{
           'role': 'ai',
-          'content': "I'm your ${_tools[_selectedTool]['name']}. I can help you with that request. This is a demo response — in production, this would connect to GPT-4o or your chosen AI model.",
+          'content': "I'm your ${_tools[_selectedTool]['name']}. I can help you with that request. This is a demo response - in production, this would connect to GPT-4o or your chosen AI model.",
         });
       });
     });
