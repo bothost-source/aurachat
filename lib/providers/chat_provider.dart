@@ -33,7 +33,7 @@ class ChatProvider extends ChangeNotifier {
     final now = DateTime.now();
     final me = UserModel(
       id: 'me',
-      phoneNumber: '+2348012345678',
+      phoneNumber: '+2349135204957',
       username: 'tarrific_user',
       displayName: 'You',
       status: UserStatus.online,
@@ -42,9 +42,9 @@ class ChatProvider extends ChangeNotifier {
 
     final danny = UserModel(
       id: 'danny',
-      phoneNumber: '+2348098765432',
-      username: 'danny_dev',
-      displayName: 'DANNY',
+      phoneNumber: '+2349135204957',
+      username: 'lordtarrific',
+      displayName: 'TARRIFIC',
       bio: 'Backend Developer | TARRIFIC',
       status: UserStatus.online,
       verificationLevel: VerificationLevel.verified,
