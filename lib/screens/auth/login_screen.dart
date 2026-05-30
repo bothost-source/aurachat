@@ -1,6 +1,9 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:intl_phone_field/intl_phone_field.dart';
+import 'package:intl_phone_field/phone_number.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../themes/app_theme.dart';
 import '../../services/notification_service.dart';
 import 'otp_screen.dart';
@@ -14,80 +17,94 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _phoneController = TextEditingController();
-  String _selectedCountry = '+234';
+  PhoneNumber? _phoneNumber;
   bool _isLoading = false;
+  String? _errorMessage;
 
-  final List<Map<String, String>> _countries = [
-    {'code': '+234', 'name': 'Nigeria', 'flag': '🇳🇬'},
-    {'code': '+1', 'name': 'United States', 'flag': '🇺🇸'},
-    {'code': '+44', 'name': 'United Kingdom', 'flag': '🇬🇧'},
-    {'code': '+91', 'name': 'India', 'flag': '🇮🇳'},
-    {'code': '+86', 'name': 'China', 'flag': '🇨🇳'},
-    {'code': '+81', 'name': 'Japan', 'flag': '🇯🇵'},
-    {'code': '+49', 'name': 'Germany', 'flag': '🇩🇪'},
-    {'code': '+33', 'name': 'France', 'flag': '🇫🇷'},
-    {'code': '+7', 'name': 'Russia', 'flag': '🇷🇺'},
-    {'code': '+55', 'name': 'Brazil', 'flag': '🇧🇷'},
-    {'code': '+27', 'name': 'South Africa', 'flag': '🇿🇦'},
-    {'code': '+254', 'name': 'Kenya', 'flag': '🇰🇪'},
-    {'code': '+20', 'name': 'Egypt', 'flag': '🇪🇬'},
-    {'code': '+212', 'name': 'Morocco', 'flag': '🇲🇦'},
-    {'code': '+233', 'name': 'Ghana', 'flag': '🇬🇭'},
-  ];
+  // Demo: In production, these come from your backend database
+  // Format: phone number without + (e.g., "2341313565656")
+  final Set<String> _registeredNumbers = {
+    '2341313565656',
+    '2348012345678',
+  };
+  
+  final Set<String> _bannedNumbers = {
+    '2349999999999',
+    '2348888888888',
+  };
 
   String _generateOTP() {
     final random = Random();
     return List.generate(6, (_) => random.nextInt(10)).join();
   }
 
-  void _showCountryPicker() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppTheme.bgModal,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (context) => Container(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(width: 40, height: 4, decoration: BoxDecoration(color: AppTheme.divider, borderRadius: BorderRadius.circular(2))),
-            const SizedBox(height: 20),
-            const Text('Select Country', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
-            const SizedBox(height: 16),
-            Expanded(
-              child: ListView.builder(
-                itemCount: _countries.length,
-                itemBuilder: (context, index) {
-                  final country = _countries[index];
-                  final isSelected = country['code'] == _selectedCountry;
-                  return ListTile(
-                    leading: Text(country['flag']!, style: const TextStyle(fontSize: 24)),
-                    title: Text(country['name']!, style: const TextStyle(color: AppTheme.textPrimary)),
-                    trailing: Text(country['code']!, style: TextStyle(color: isSelected ? AppTheme.primaryGreen : AppTheme.textSecondary, fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal)),
-                    onTap: () {
-                      setState(() => _selectedCountry = country['code']!);
-                      Navigator.pop(context);
-                    },
-                    tileColor: isSelected ? AppTheme.primaryGreen.withOpacity(0.1) : null,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+  // Save registered number locally (for demo purposes)
+  Future<void> _saveRegisteredNumber(String phone) async {
+    final prefs = await SharedPreferences.getInstance();
+    final registered = prefs.getStringList('registered_numbers') ?? [];
+    if (!registered.contains(phone)) {
+      registered.add(phone);
+      await prefs.setStringList('registered_numbers', registered);
+    }
+  }
+
+  // Get all registered numbers
+  Future<Set<String>> _getRegisteredNumbers() async {
+    final prefs = await SharedPreferences.getInstance();
+    final registered = prefs.getStringList('registered_numbers') ?? [];
+    return {..._registeredNumbers, ...registered};
+  }
+
+  // Get all banned numbers
+  Future<Set<String>> _getBannedNumbers() async {
+    final prefs = await SharedPreferences.getInstance();
+    final banned = prefs.getStringList('banned_numbers') ?? [];
+    return {..._bannedNumbers, ...banned};
   }
 
   void _requestOTP() async {
-    if (_phoneController.text.isEmpty) return;
-    setState(() => _isLoading = true);
+    if (_phoneNumber == null || _phoneNumber!.number.isEmpty) {
+      setState(() => _errorMessage = 'Please enter a valid phone number');
+      return;
+    }
+
+    // Clean the number for checking
+    String cleanNumber = _phoneNumber!.completeNumber.replaceAll('+', '').replaceAll(' ', '');
     
-    await Future.delayed(const Duration(seconds: 2));
-    
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    await Future.delayed(const Duration(seconds: 1)); // Simulate network
+
+    // Check if number is banned
+    final bannedNumbers = await _getBannedNumbers();
+    if (bannedNumbers.contains(cleanNumber)) {
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'This number has been permanently banned. Contact support.';
+      });
+      return;
+    }
+
+    // Check if number is already registered
+    final registeredNumbers = await _getRegisteredNumbers();
+    if (registeredNumbers.contains(cleanNumber)) {
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'This number is already registered. Please log in instead.';
+      });
+      // Optionally: Navigate to login with this number
+      return;
+    }
+
+    // Generate OTP
     final otp = _generateOTP();
-    final fullPhone = '$_selectedCountry ${_phoneController.text}';
+    final fullPhone = _phoneNumber!.completeNumber;
+    
+    // Save as registered (for demo - in production, save after OTP verification)
+    await _saveRegisteredNumber(cleanNumber);
     
     // Show local notification with OTP
     await NotificationService.showOTP(otp, fullPhone);
@@ -101,6 +118,7 @@ class _LoginScreenState extends State<LoginScreen> {
           builder: (context) => OtpScreen(
             phoneNumber: fullPhone,
             expectedOtp: otp,
+            cleanPhoneNumber: cleanNumber,
           ),
         ),
       );
@@ -132,46 +150,77 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 8),
               Text('TARRIFIC CHAT will send you a one-time password to verify your number.', style: TextStyle(fontSize: 15, color: AppTheme.textSecondary, height: 1.5)),
               const SizedBox(height: 40),
-              Container(
-                decoration: BoxDecoration(
-                  color: AppTheme.bgInput,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppTheme.divider),
+              
+              // NEW: Real phone validation with country picker
+              IntlPhoneField(
+                controller: _phoneController,
+                decoration: InputDecoration(
+                  hintText: 'Phone number',
+                  hintStyle: TextStyle(color: AppTheme.textTertiary),
+                  filled: true,
+                  fillColor: AppTheme.bgInput,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide(color: AppTheme.divider),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide(color: AppTheme.divider),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: const BorderSide(color: AppTheme.primaryGreen, width: 2),
+                  ),
+                  errorBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: const BorderSide(color: AppTheme.error, width: 2),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
                 ),
-                child: Row(
-                  children: [
-                    InkWell(
-                      onTap: _showCountryPicker,
-                      borderRadius: const BorderRadius.horizontal(left: Radius.circular(16)),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
-                        child: Row(
-                          children: [
-                            Text(_countries.firstWhere((c) => c['code'] == _selectedCountry)['flag']!, style: const TextStyle(fontSize: 20)),
-                            const SizedBox(width: 8),
-                            Text(_selectedCountry, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
-                            const Icon(Icons.arrow_drop_down, color: AppTheme.textTertiary),
-                          ],
-                        ),
-                      ),
-                    ),
-                    Container(width: 1, height: 24, color: AppTheme.divider),
-                    Expanded(
-                      child: TextField(
-                        controller: _phoneController,
-                        keyboardType: TextInputType.phone,
-                        style: const TextStyle(fontSize: 16, color: AppTheme.textPrimary),
-                        decoration: InputDecoration(
-                          hintText: 'Phone number',
-                          hintStyle: TextStyle(color: AppTheme.textTertiary),
-                          border: InputBorder.none,
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                style: const TextStyle(fontSize: 16, color: AppTheme.textPrimary),
+                dropdownIcon: const Icon(Icons.arrow_drop_down, color: AppTheme.textTertiary),
+                dropdownTextStyle: const TextStyle(color: AppTheme.textPrimary),
+                flagsButtonPadding: const EdgeInsets.symmetric(horizontal: 12),
+                initialCountryCode: 'NG', // Default to Nigeria
+                languageCode: 'en',
+                onChanged: (phone) {
+                  setState(() {
+                    _phoneNumber = phone;
+                    _errorMessage = null;
+                  });
+                },
+                onCountryChanged: (country) {
+                  print('Country changed to: ${country.name}');
+                },
+                invalidNumberMessage: 'Invalid phone number for this country',
+                disableLengthCheck: false, // Enforces country-specific length
               ),
+              
+              if (_errorMessage != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppTheme.error.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppTheme.error.withOpacity(0.3)),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.error_outline, color: AppTheme.error, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _errorMessage!,
+                            style: TextStyle(color: AppTheme.error, fontSize: 13),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              
               const SizedBox(height: 24),
               Container(
                 padding: const EdgeInsets.all(16),
@@ -219,4 +268,11 @@ class _LoginScreenState extends State<LoginScreen> {
       ),
     );
   }
+
+  @override
+  void dispose() {
+    _phoneController.dispose();
+    super.dispose();
+  }
 }
+
