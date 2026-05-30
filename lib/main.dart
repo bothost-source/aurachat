@@ -35,6 +35,13 @@ import 'screens/settings/bot_settings_screen.dart';
 import 'screens/invite/invite_friends_screen.dart';
 import 'screens/saved/saved_messages_screen.dart';
 import 'screens/archive/archived_chats_screen.dart';
+import 'services/notification_service.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await NotificationService.init();
+  runApp(const MyApp());
+}
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
