@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
 
-enum MessageType { text, image, video, audio, document, location, contact, sticker, poll, forwarded, reply, botCommand, system }
+enum MessageType { text, image, video, audio, voice, document, location, contact, sticker, poll, forwarded, reply, botCommand, system }
 enum MessageStatus { sending, sent, delivered, read, failed }
 enum ContentFlag { none, spam, illegal, harassment, violence, explicit, misinformation, copyright }
 
