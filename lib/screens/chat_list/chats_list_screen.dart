@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../themes/app_theme.dart';
 import '../../providers/chat_provider.dart';
 import '../../models/chat_model.dart';
+import '../../models/message_model.dart';
 import '../../models/user_model.dart';
 
 class ChatsListScreen extends StatefulWidget {
