@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../themes/app_theme.dart';
 import '../../providers/bot_provider.dart';
+import '../../services/ai_service.dart';
 
 class BotCreatorScreen extends StatefulWidget {
   const BotCreatorScreen({super.key});
@@ -15,14 +17,50 @@ class _BotCreatorScreenState extends State<BotCreatorScreen> {
   final _usernameController = TextEditingController();
   final _descriptionController = TextEditingController();
   final _aboutController = TextEditingController();
+  final _apiKeyController = TextEditingController(); // NEW
   bool _aiPowered = false;
-  String _selectedModel = 'GPT-4o';
+  String _selectedModel = 'Gemini Pro'; // Changed default to free option
   bool _isLoading = false;
+  bool _showApiKey = false; // NEW
 
-  final List<String> _aiModels = ['GPT-4o', 'GPT-4o Mini', 'Claude 3.5', 'Gemini Pro'];
+  final List<Map<String, String>> _aiModels = [
+    {'name': 'Gemini Pro', 'provider': 'Google', 'free': 'true'},
+    {'name': 'GPT-4o', 'provider': 'OpenAI', 'free': 'false'},
+    {'name': 'GPT-4o Mini', 'provider': 'OpenAI', 'free': 'false'},
+    {'name': 'Claude 3.5', 'provider': 'Anthropic', 'free': 'false'},
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedApiKey();
+  }
+
+  // NEW: Load saved API key
+  Future<void> _loadSavedApiKey() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedKey = prefs.getString('ai_api_key');
+    if (savedKey != null) {
+      _apiKeyController.text = savedKey;
+      AIService.setApiKey(savedKey);
+    }
+  }
+
+  // NEW: Save API key
+  Future<void> _saveApiKey(String key) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('ai_api_key', key);
+    AIService.setApiKey(key);
+  }
 
   void _createBot() async {
     if (_nameController.text.isEmpty || _usernameController.text.isEmpty) return;
+    
+    // NEW: Save API key if provided
+    if (_apiKeyController.text.isNotEmpty) {
+      await _saveApiKey(_apiKeyController.text);
+    }
+    
     setState(() => _isLoading = true);
     await context.read<BotProvider>().createBot(
       name: _nameController.text,
@@ -31,6 +69,7 @@ class _BotCreatorScreenState extends State<BotCreatorScreen> {
       about: _aboutController.text.isEmpty ? null : _aboutController.text,
       aiPowered: _aiPowered,
       aiModel: _aiPowered ? _selectedModel : null,
+      apiKey: _apiKeyController.text.isEmpty ? null : _apiKeyController.text, // NEW
     );
     setState(() => _isLoading = false);
     if (mounted) {
@@ -88,7 +127,7 @@ class _BotCreatorScreenState extends State<BotCreatorScreen> {
                 children: [
                   SwitchListTile(
                     title: const Text('AI-Powered Bot', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
-                    subtitle: const Text('Enable GPT-4o intelligence for your bot', style: TextStyle(fontSize: 13, color: AppTheme.textTertiary)),
+                    subtitle: const Text('Enable AI intelligence for your bot', style: TextStyle(fontSize: 13, color: AppTheme.textTertiary)),
                     value: _aiPowered,
                     onChanged: (v) => setState(() => _aiPowered = v),
                     activeColor: AppTheme.primaryGreen,
@@ -109,18 +148,103 @@ class _BotCreatorScreenState extends State<BotCreatorScreen> {
                     const SizedBox(height: 12),
                     Wrap(
                       spacing: 8,
-                      children: _aiModels.map((model) => ChoiceChip(
-                        label: Text(model),
-                        selected: _selectedModel == model,
-                        onSelected: (selected) {
-                          if (selected) setState(() => _selectedModel = model);
-                        },
-                        selectedColor: AppTheme.primaryGreen.withOpacity(0.2),
-                        labelStyle: TextStyle(
-                          color: _selectedModel == model ? AppTheme.primaryGreen : AppTheme.textSecondary,
-                          fontWeight: _selectedModel == model ? FontWeight.w600 : FontWeight.normal,
+                      children: _aiModels.map((model) {
+                        final isSelected = _selectedModel == model['name'];
+                        final isFree = model['free'] == 'true';
+                        return ChoiceChip(
+                          label: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(model['name']!),
+                              if (isFree) ...[
+                                const SizedBox(width: 4),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.primaryGreen,
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: const Text('FREE', style: TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold)),
+                                ),
+                              ],
+                            ],
+                          ),
+                          selected: isSelected,
+                          onSelected: (selected) {
+                            if (selected) setState(() => _selectedModel = model['name']!);
+                          },
+                          selectedColor: AppTheme.primaryGreen.withOpacity(0.2),
+                          labelStyle: TextStyle(
+                            color: isSelected ? AppTheme.primaryGreen : AppTheme.textSecondary,
+                            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    
+                    // NEW: API Key Input
+                    const SizedBox(height: 16),
+                    const Divider(color: AppTheme.divider),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'API Key (Required for AI)',
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: AppTheme.textPrimary),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _apiKeyController,
+                      obscureText: !_showApiKey,
+                      style: const TextStyle(color: AppTheme.textPrimary, fontSize: 14),
+                      decoration: InputDecoration(
+                        hintText: 'Paste your API key here',
+                        hintStyle: TextStyle(color: AppTheme.textTertiary),
+                        filled: true,
+                        fillColor: AppTheme.bgInput,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            _showApiKey ? Icons.visibility_off : Icons.visibility,
+                            color: AppTheme.textTertiary,
+                          ),
+                          onPressed: () => setState(() => _showApiKey = !_showApiKey),
                         ),
-                      )).toList(),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    InkWell(
+                      onTap: () {
+                        // Show help dialog
+                        showDialog(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            backgroundColor: AppTheme.bgModal,
+                            title: const Text('How to get API Key', style: TextStyle(color: AppTheme.textPrimary)),
+                            content: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _buildApiHelpItem('1. Gemini (FREE)', 'Go to aistudio.google.com', 'Get API Key'),
+                                const SizedBox(height: 12),
+                                _buildApiHelpItem('2. OpenAI', 'Go to platform.openai.com', 'Create API Key'),
+                              ],
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(context),
+                                child: const Text('Got it', style: TextStyle(color: AppTheme.primaryGreen)),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                      child: Text(
+                        'Where do I get an API key?',
+                        style: TextStyle(
+                          color: AppTheme.primaryGreen,
+                          fontSize: 13,
+                          decoration: TextDecoration.underline,
+                        ),
+                      ),
                     ),
                   ],
                 ],
@@ -150,6 +274,17 @@ class _BotCreatorScreenState extends State<BotCreatorScreen> {
     );
   }
 
+  Widget _buildApiHelpItem(String title, String url, String action) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: const TextStyle(fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+        Text(url, style: TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
+        Text(action, style: TextStyle(color: AppTheme.primaryGreen, fontSize: 12)),
+      ],
+    );
+  }
+
   Widget _buildTextField(String label, TextEditingController controller, String hint, {int maxLines = 1, Widget? prefix}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -173,5 +308,15 @@ class _BotCreatorScreenState extends State<BotCreatorScreen> {
         ),
       ],
     );
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _usernameController.dispose();
+    _descriptionController.dispose();
+    _aboutController.dispose();
+    _apiKeyController.dispose();
+    super.dispose();
   }
 }
