@@ -20,7 +20,7 @@ class ChatProvider extends ChangeNotifier {
   List<<ChatModel> get pinnedChats => chats.where((c) => c.isPinned).toList();
   List<<ChatModel> get unpinnedChats => chats.where((c) => !c.isPinned).toList();
   List<<ChatModel> get archivedChats => _chats.where((c) => c.isArchived).toList();
-  int get totalUnread => _chats.fold(0, (sum, c) => sum + c.unreadCount);
+  int get totalUnread => _chats.fold<int>(0, (sum, c) => sum + c.unreadCount);
   ChatModel? get selectedChat => _selectedChat;
   bool get isLoading => _isLoading;
   List<MessageModel> get messages => _messages;
