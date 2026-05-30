@@ -5,7 +5,7 @@ class AIStudioScreen extends StatefulWidget {
       AIStudioScreen({super.key});
 
   @override
-  State<<AIStudioScreen> createState() => _AIStudioScreenState();
+  State<AIStudioScreen> createState() => _AIStudioScreenState();
 }
 
 class _AIStudioScreenState extends State<<AIStudioScreen> {
