@@ -2,9 +2,14 @@ import 'package:flutter/material.dart';
 import '../../themes/app_theme.dart';
 
 class OtpScreen extends StatefulWidget {
-  final String phoneNumber;  // ADDED
-  
-  const OtpScreen({super.key, required this.phoneNumber});  // ADDED required
+  final String phoneNumber;
+  final String expectedOtp;
+
+  const OtpScreen({
+    super.key,
+    required this.phoneNumber,
+    required this.expectedOtp,
+  });
 
   @override
   State<OtpScreen> createState() => _OtpScreenState();
@@ -49,10 +54,26 @@ class _OtpScreenState extends State<OtpScreen> {
   }
 
   void _verifyOTP() async {
+    final enteredOtp = _controllers.map((c) => c.text).join();
+    
     setState(() => _isLoading = true);
-    await Future.delayed(const Duration(seconds: 2));
+    await Future.delayed(const Duration(seconds: 1));
     setState(() => _isLoading = false);
-    if (mounted) Navigator.pushReplacementNamed(context, '/setup_profile');
+
+    if (enteredOtp == widget.expectedOtp) {
+      // Correct OTP
+      if (mounted) Navigator.pushReplacementNamed(context, '/setup_profile');
+    } else {
+      // Wrong OTP
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Invalid OTP. Please try again.'),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+      }
+    }
   }
 
   @override
@@ -75,7 +96,7 @@ class _OtpScreenState extends State<OtpScreen> {
                   children: [
                     const TextSpan(text: 'Enter the 6-digit code sent to '),
                     TextSpan(
-                      text: widget.phoneNumber,  // FIXED: use actual number
+                      text: widget.phoneNumber,
                       style: const TextStyle(fontWeight: FontWeight.w600, color: AppTheme.textPrimary),
                     ),
                   ],
