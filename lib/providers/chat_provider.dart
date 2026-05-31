@@ -1,418 +1,292 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../models/chat_model.dart';
 import '../models/message_model.dart';
-import '../models/user_model.dart';
+import '../services/firebase_chat_service.dart';
+import '../services/connectivity.dart';
 
+// ============================================================================
+// CHAT PROVIDER — State management with Firebase backend
+// ============================================================================
 class ChatProvider extends ChangeNotifier {
+  final FirebaseChatService _firebaseService = FirebaseChatService();
+
   List<ChatModel> _chats = [];
   List<MessageModel> _messages = [];
   ChatModel? _selectedChat;
-  bool _isLoading = false;
   String? _searchQuery;
+  bool _isLoading = false;
+  String? _error;
+  List<String> _typingUsers = [];
 
-  List<ChatModel> get chats => _searchQuery == null || _searchQuery!.isEmpty
-      ? _chats
-      : _chats.where((c) => 
-          c.displayName.toLowerCase().contains(_searchQuery!.toLowerCase()) ||
-          (c.lastMessage?.content.toLowerCase().contains(_searchQuery!.toLowerCase()) ?? false)
-        ).toList();
+  // Streams
+  StreamSubscription<List<ChatModel>>? _chatsSubscription;
+  StreamSubscription<List<MessageModel>>? _messagesSubscription;
+  StreamSubscription<List<String>>? _typingSubscription;
 
-  List<ChatModel> get pinnedChats => chats.where((c) => c.isPinned).toList();
-  List<ChatModel> get unpinnedChats => chats.where((c) => !c.isPinned).toList();
-  List<ChatModel> get archivedChats => _chats.where((c) => c.isArchived).toList();
-  int get totalUnread => _chats.fold<int>(0, (sum, c) => sum + c.unreadCount);
+  // Getters
+  List<ChatModel> get chats => _filterChats(_chats);
+  List<ChatModel> get pinnedChats => _filterChats(_chats.where((c) => c.isPinned).toList());
+  List<ChatModel> get unpinnedChats => _filterChats(_chats.where((c) => !c.isPinned).toList());
+  List<MessageModel> get messages => _messages;
   ChatModel? get selectedChat => _selectedChat;
   bool get isLoading => _isLoading;
-  List<MessageModel> get messages => _messages;
+  String? get error => _error;
+  List<String> get typingUsers => _typingUsers;
+  bool get isTyping => _typingUsers.isNotEmpty;
+  String get typingText => _typingUsers.length == 1 
+      ? 'typing...' 
+      : '${_typingUsers.length} people typing...';
 
   ChatProvider() {
-    _loadMockData();
+    _firebaseService.initialize();
+    _loadChats();
   }
 
-  void _loadMockData() {
-    final now = DateTime.now();
-    final me = UserModel(
-      id: 'me',
-      phoneNumber: '+2349135204957',
-      username: 'tarrific_user',
-      displayName: 'You',
-      status: UserStatus.online,
-      createdAt: now.subtract(const Duration(days: 30)),
-    );
+  // ==========================================================================
+  // CHAT LOADING
+  // ==========================================================================
 
-    final danny = UserModel(
-      id: 'danny',
-      phoneNumber: '+2349135204957',
-      username: 'lordtarrific',
-      displayName: 'TARRIFIC',
-      bio: 'Backend Developer | TARRIFIC',
-      status: UserStatus.online,
-      verificationLevel: VerificationLevel.verified,
-      createdAt: now.subtract(const Duration(days: 60)),
-    );
-
-    final nicky = UserModel(
-      id: 'nicky',
-      phoneNumber: '+2348076543210',
-      username: 'nicky_tech',
-      displayName: 'NICKY TECH',
-      bio: 'Mobile Developer | AI Explorer',
-      status: UserStatus.recently,
-      verificationLevel: VerificationLevel.verified,
-      createdAt: now.subtract(const Duration(days: 45)),
-    );
-
-    final zeus = UserModel(
-      id: 'zeus',
-      phoneNumber: '+2348065432109',
-      username: 'zeus_ai',
-      displayName: 'ZEUS',
-      bio: 'AI Engineer | TARRIFIC',
-      status: UserStatus.offline,
-      lastSeen: now.subtract(const Duration(hours: 2)),
-      createdAt: now.subtract(const Duration(days: 50)),
-    );
-
-    final gui = UserModel(
-      id: 'gui',
-      phoneNumber: '+2348054321098',
-      username: 'gui_vii',
-      displayName: 'GUI - VII',
-      bio: 'UI/UX Designer | TARRIFIC',
-      status: UserStatus.online,
-      createdAt: now.subtract(const Duration(days: 40)),
-    );
-
-    _chats = [
-      // Self-chat (Saved Messages)
-      ChatModel(
-        id: 'self_chat',
-        type: ChatType.self,
-        name: 'Saved Messages',
-        isSelfChat: true,
-        selfChatLabel: 'Saved Messages',
-        participants: [me],
-        lastMessage: MessageModel(
-          id: 'msg_1',
-          chatId: 'self_chat',
-          senderId: 'me',
-          type: MessageType.text,
-          content: 'Remember to check the new UI update',
-          status: MessageStatus.read,
-          createdAt: now.subtract(const Duration(minutes: 30)),
-          readBy: ['me'],
-        ),
-        unreadCount: 0,
-        isPinned: true,
-        pinOrder: 1,
-        createdAt: now.subtract(const Duration(days: 30)),
-      ),
-
-      // Private chats
-      ChatModel(
-        id: 'chat_danny',
-        type: ChatType.private,
-        name: 'DANNY',
-        participants: [danny],
-        lastMessage: MessageModel(
-          id: 'msg_2',
-          chatId: 'chat_danny',
-          senderId: 'danny',
-          senderName: 'DANNY',
-          type: MessageType.text,
-          content: 'Check the new UI update. It looks fire! 🔥',
-          status: MessageStatus.read,
-          createdAt: now.subtract(const Duration(minutes: 45)),
-          readBy: ['me'],
-        ),
-        unreadCount: 0,
-        isPinned: true,
-        pinOrder: 2,
-        createdAt: now.subtract(const Duration(days: 20)),
-      ),
-
-      ChatModel(
-        id: 'chat_nicky',
-        type: ChatType.private,
-        name: 'NICKY TECH',
-        participants: [nicky],
-        lastMessage: MessageModel(
-          id: 'msg_3',
-          chatId: 'chat_nicky',
-          senderId: 'nicky',
-          senderName: 'NICKY TECH',
-          type: MessageType.text,
-          content: 'This feature is awesome! The AI moderation is working perfectly.',
-          status: MessageStatus.delivered,
-          createdAt: now.subtract(const Duration(hours: 2)),
-          deliveredTo: ['me'],
-        ),
-        unreadCount: 2,
-        isPinned: true,
-        pinOrder: 3,
-        createdAt: now.subtract(const Duration(days: 15)),
-      ),
-
-      ChatModel(
-        id: 'chat_zeus',
-        type: ChatType.private,
-        name: 'ZEUS',
-        participants: [zeus],
-        lastMessage: MessageModel(
-          id: 'msg_4',
-          chatId: 'chat_zeus',
-          senderId: 'zeus',
-          senderName: 'ZEUS',
-          type: MessageType.text,
-          content: "Let's deploy it today. The bot API is ready.",
-          status: MessageStatus.read,
-          createdAt: now.subtract(const Duration(hours: 5)),
-          readBy: ['me'],
-        ),
-        unreadCount: 0,
-        createdAt: now.subtract(const Duration(days: 10)),
-      ),
-
-      ChatModel(
-        id: 'chat_gui',
-        type: ChatType.private,
-        name: 'GUI - VII',
-        participants: [gui],
-        lastMessage: MessageModel(
-          id: 'msg_5',
-          chatId: 'chat_gui',
-          senderId: 'gui',
-          senderName: 'GUI - VII',
-          type: MessageType.text,
-          content: 'Working on the AI module. Need to finish the dark theme gradients.',
-          status: MessageStatus.read,
-          createdAt: now.subtract(const Duration(hours: 8)),
-          readBy: ['me'],
-        ),
-        unreadCount: 0,
-        createdAt: now.subtract(const Duration(days: 8)),
-      ),
-
-      // Group chat
-      ChatModel(
-        id: 'chat_dev_team',
-        type: ChatType.group,
-        name: 'Dev Team',
-        description: 'TARRIFIC CHAT Development Team',
-        participants: [danny, nicky, zeus, gui, me],
-        adminIds: ['danny', 'me'],
-        creatorId: 'danny',
-        memberCount: 5,
-        lastMessage: MessageModel(
-          id: 'msg_6',
-          chatId: 'chat_dev_team',
-          senderId: 'danny',
-          senderName: 'DANNY',
-          type: MessageType.text,
-          content: 'DANNY: Push the code to staging. We need to test the new features.',
-          status: MessageStatus.read,
-          createdAt: now.subtract(const Duration(hours: 12)),
-          readBy: ['me', 'nicky', 'zeus'],
-        ),
-        unreadCount: 0,
-        createdAt: now.subtract(const Duration(days: 25)),
-      ),
-
-      // Channel
-      ChatModel(
-        id: 'chat_updates',
-        type: ChatType.channel,
-        name: 'TARRIFIC Updates',
-        description: 'Official updates and announcements',
-        participants: [me],
-        adminIds: ['nicky'],
-        creatorId: 'nicky',
-        subscriberCount: 12500,
-        isPublic: true,
-        lastMessage: MessageModel(
-          id: 'msg_7',
-          chatId: 'chat_updates',
-          senderId: 'nicky',
-          senderName: 'NICKY TECH',
-          type: MessageType.text,
-          content: '🚀 New features are live! Check out the AI Studio and Bot Creator.',
-          status: MessageStatus.read,
-          createdAt: now.subtract(const Duration(days: 1)),
-          readBy: ['me'],
-        ),
-        unreadCount: 1,
-        createdAt: now.subtract(const Duration(days: 30)),
-      ),
-
-      // Bot chat
-      ChatModel(
-        id: 'chat_tarrific_bot',
-        type: ChatType.bot,
-        name: 'TARRIFIC Bot',
-        participants: [me],
-        lastMessage: MessageModel(
-          id: 'msg_8',
-          chatId: 'chat_tarrific_bot',
-          senderId: 'bot_1',
-          senderName: 'TARRIFIC Bot',
-          type: MessageType.text,
-          content: "Hello! I'm your AI assistant. How can I help your business today?",
-          status: MessageStatus.read,
-          createdAt: now.subtract(const Duration(days: 2)),
-          readBy: ['me'],
-        ),
-        unreadCount: 0,
-        createdAt: now.subtract(const Duration(days: 20)),
-      ),
-    ];
-
+  void _loadChats() {
+    _isLoading = true;
+    _error = null;
     notifyListeners();
+
+    _chatsSubscription?.cancel();
+    _chatsSubscription = _firebaseService.getUserChats().listen(
+      (chats) {
+        _chats = chats;
+        _isLoading = false;
+        _error = null;
+        notifyListeners();
+      },
+      onError: (e) {
+        _error = e.toString();
+        _isLoading = false;
+        notifyListeners();
+      },
+    );
   }
+
+  Future<void> refreshChats() async {
+    _loadChats();
+  }
+
+  // ==========================================================================
+  // CHAT SELECTION
+  // ==========================================================================
 
   void selectChat(ChatModel chat) {
     _selectedChat = chat;
-    _loadMessages(chat.id);
+    _messages = [];
+    _typingUsers = [];
     notifyListeners();
+
+    // Subscribe to messages
+    _messagesSubscription?.cancel();
+    _messagesSubscription = _firebaseService.getMessages(chat.id).listen(
+      (messages) {
+        _messages = messages.reversed.toList(); // Oldest first for display
+        notifyListeners();
+      },
+    );
+
+    // Subscribe to typing indicators
+    _typingSubscription?.cancel();
+    _typingSubscription = _firebaseService.getTypingUsers(chat.id).listen(
+      (users) {
+        _typingUsers = users;
+        notifyListeners();
+      },
+    );
+
+    // Mark as read
+    _firebaseService.markAsRead(chat.id);
   }
 
-  void _loadMessages(String chatId) {
-    final now = DateTime.now();
-    _messages = [
-      MessageModel(
-        id: 'm1',
-        chatId: chatId,
-        senderId: 'other',
-        senderName: 'DANNY',
-        type: MessageType.text,
-        content: 'Hey! Have you seen the new design mockups?',
-        status: MessageStatus.read,
-        createdAt: now.subtract(const Duration(hours: 3)),
-        readBy: ['me'],
+  void selectChatById(String chatId) {
+    final chat = _chats.firstWhere(
+      (c) => c.id == chatId,
+      orElse: () => ChatModel(
+        id: chatId,
+        displayName: 'Unknown',
+        participants: [],
+        createdAt: DateTime.now(),
       ),
-      MessageModel(
-        id: 'm2',
-        chatId: chatId,
-        senderId: 'me',
-        type: MessageType.text,
-        content: 'Yeah, they look incredible! The dark theme is perfect.',
-        status: MessageStatus.read,
-        createdAt: now.subtract(const Duration(hours: 3, minutes: 55)),
-        readBy: ['other'],
-      ),
-      MessageModel(
-        id: 'm3',
-        chatId: chatId,
-        senderId: 'other',
-        senderName: 'DANNY',
-        type: MessageType.image,
-        content: '',
-        mediaUrl: 'https://example.com/design.png',
-        status: MessageStatus.read,
-        createdAt: now.subtract(const Duration(hours: 2)),
-        readBy: ['me'],
-      ),
-      MessageModel(
-        id: 'm4',
-        chatId: chatId,
-        senderId: 'me',
-        type: MessageType.text,
-        content: 'This is exactly what we need. The green accents pop so well on the black background.',
-        status: MessageStatus.read,
-        createdAt: now.subtract(const Duration(hours: 2, minutes: 50)),
-        readBy: ['other'],
-      ),
-      MessageModel(
-        id: 'm5',
-        chatId: chatId,
-        senderId: 'other',
-        senderName: 'DANNY',
-        type: MessageType.text,
-        content: 'Check the new UI update. It looks fire! 🔥',
-        status: MessageStatus.read,
-        createdAt: now.subtract(const Duration(minutes: 45)),
-        readBy: ['me'],
-      ),
-    ];
+    );
+    selectChat(chat);
   }
 
-  void sendMessage(String content, {MessageType type = MessageType.text}) {
+  // ==========================================================================
+  // MESSAGING
+  // ==========================================================================
+
+  Future<void> sendMessage(String content, {MessageType type = MessageType.text}) async {
     if (_selectedChat == null) return;
+    if (content.trim().isEmpty) return;
 
-    final message = MessageModel(
-      id: 'msg_${DateTime.now().millisecondsSinceEpoch}',
-      chatId: _selectedChat!.id,
+    final chatId = _selectedChat!.id;
+
+    // Optimistic update — add to local list immediately
+    final tempMessage = MessageModel(
+      id: 'temp_${DateTime.now().millisecondsSinceEpoch}',
+      chatId: chatId,
       senderId: 'me',
-      type: type,
       content: content,
+      type: type,
       status: MessageStatus.sending,
       createdAt: DateTime.now(),
     );
 
-    _messages.add(message);
+    _messages.add(tempMessage);
     notifyListeners();
 
-    // Simulate sending
-    Future.delayed(const Duration(milliseconds: 500), () {
-      final index = _messages.indexWhere((m) => m.id == message.id);
-      if (index != -1) {
-        _messages[index] = _messages[index].copyWith(status: MessageStatus.sent);
-        notifyListeners();
-      }
-    });
+    try {
+      await _firebaseService.sendMessage(
+        chatId: chatId,
+        content: content,
+        type: type,
+      );
 
-    Future.delayed(const Duration(seconds: 2), () {
-      final index = _messages.indexWhere((m) => m.id == message.id);
+      // Remove temp message, real one will come from Firestore
+      _messages.removeWhere((m) => m.id == tempMessage.id);
+      notifyListeners();
+    } catch (e) {
+      // Update temp message to failed status
+      final index = _messages.indexWhere((m) => m.id == tempMessage.id);
       if (index != -1) {
-        _messages[index] = _messages[index].copyWith(
-          status: MessageStatus.delivered,
-          deliveredTo: ['other'],
-        );
+        _messages[index] = _messages[index].copyWith(status: MessageStatus.failed);
         notifyListeners();
       }
-    });
+    }
+  }
+
+  Future<void> retryFailedMessage(String messageId) async {
+    final message = _messages.firstWhere((m) => m.id == messageId);
+    if (message.status != MessageStatus.failed) return;
+
+    // Update to sending
+    final index = _messages.indexWhere((m) => m.id == messageId);
+    _messages[index] = message.copyWith(status: MessageStatus.sending);
+    notifyListeners();
+
+    try {
+      await _firebaseService.sendMessage(
+        chatId: message.chatId,
+        content: message.content,
+        type: message.type,
+      );
+      _messages.removeAt(index);
+      notifyListeners();
+    } catch (e) {
+      _messages[index] = message.copyWith(status: MessageStatus.failed);
+      notifyListeners();
+    }
+  }
+
+  // ==========================================================================
+  // TYPING
+  // ==========================================================================
+
+  Timer? _typingTimer;
+
+  void setTyping(bool isTyping) {
+    if (_selectedChat == null) return;
+
+    _firebaseService.setTypingStatus(_selectedChat!.id, isTyping);
+
+    // Auto-stop typing after 3 seconds of inactivity
+    _typingTimer?.cancel();
+    if (isTyping) {
+      _typingTimer = Timer(const Duration(seconds: 3), () {
+        _firebaseService.setTypingStatus(_selectedChat!.id, false);
+      });
+    }
+  }
+
+  // ==========================================================================
+  // CHAT ACTIONS
+  // ==========================================================================
+
+  Future<void> createDirectChat(String otherUserId) async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final chatId = await _firebaseService.createDirectChat(otherUserId);
+      await refreshChats();
+
+      // Select the new chat
+      final newChat = _chats.firstWhere((c) => c.id == chatId);
+      selectChat(newChat);
+    } catch (e) {
+      _error = e.toString();
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> createGroupChat({
+    required String name,
+    String? description,
+    required List<String> memberIds,
+    bool isPublic = true,
+  }) async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final chatId = await _firebaseService.createGroupChat(
+        name: name,
+        description: description,
+        memberIds: memberIds,
+        isPublic: isPublic,
+      );
+      await refreshChats();
+    } catch (e) {
+      _error = e.toString();
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> createChannel({
+    required String name,
+    String? description,
+    bool isPublic = true,
+  }) async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final chatId = await _firebaseService.createChannel(
+        name: name,
+        description: description,
+        isPublic: isPublic,
+      );
+      await refreshChats();
+    } catch (e) {
+      _error = e.toString();
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  void addChat(ChatModel chat) {
+    // For local-only chats (before Firebase migration)
+    if (!_chats.any((c) => c.id == chat.id)) {
+      _chats.add(chat);
+      notifyListeners();
+    }
   }
 
   void pinChat(String chatId) {
     final index = _chats.indexWhere((c) => c.id == chatId);
     if (index != -1) {
-      _chats[index] = _chats[index].copyWith(isPinned: true, pinOrder: _chats.where((c) => c.isPinned).length + 1);
-      notifyListeners();
-    }
-  }
-
-  void unpinChat(String chatId) {
-    final index = _chats.indexWhere((c) => c.id == chatId);
-    if (index != -1) {
-      _chats[index] = _chats[index].copyWith(isPinned: false, pinOrder: 0);
-      notifyListeners();
-    }
-  }
-
-  void archiveChat(String chatId) {
-    final index = _chats.indexWhere((c) => c.id == chatId);
-    if (index != -1) {
-      _chats[index] = _chats[index].copyWith(isArchived: true, isPinned: false);
-      notifyListeners();
-    }
-  }
-
-  void unarchiveChat(String chatId) {
-    final index = _chats.indexWhere((c) => c.id == chatId);
-    if (index != -1) {
-      _chats[index] = _chats[index].copyWith(isArchived: false);
-      notifyListeners();
-    }
-  }
-
-  void deleteChat(String chatId) {
-    _chats.removeWhere((c) => c.id == chatId);
-    notifyListeners();
-  }
-
-  void markAsRead(String chatId) {
-    final index = _chats.indexWhere((c) => c.id == chatId);
-    if (index != -1) {
-      _chats[index] = _chats[index].copyWith(unreadCount: 0);
+      _chats[index] = _chats[index].copyWith(isPinned: !_chats[index].isPinned);
       notifyListeners();
     }
   }
@@ -420,35 +294,74 @@ class ChatProvider extends ChangeNotifier {
   void muteChat(String chatId, ChatMuteDuration duration) {
     final index = _chats.indexWhere((c) => c.id == chatId);
     if (index != -1) {
-      DateTime? expiry;
-      final now = DateTime.now();
-      switch (duration) {
-        case ChatMuteDuration.oneHour:
-          expiry = now.add(const Duration(hours: 1));
-          break;
-        case ChatMuteDuration.eightHours:
-          expiry = now.add(const Duration(hours: 8));
-          break;
-        case ChatMuteDuration.twoDays:
-          expiry = now.add(const Duration(days: 2));
-          break;
-        case ChatMuteDuration.forever:
-          expiry = null;
-          break;
-        default:
-          break;
-      }
-      _chats[index] = _chats[index].copyWith(
-        isMuted: duration != ChatMuteDuration.off,
-        muteDuration: duration,
-        muteExpiry: expiry,
-      );
+      _chats[index] = _chats[index].copyWith(isMuted: true);
       notifyListeners();
     }
   }
+
+  void archiveChat(String chatId) {
+    final index = _chats.indexWhere((c) => c.id == chatId);
+    if (index != -1) {
+      _chats[index] = _chats[index].copyWith(isArchived: true);
+      notifyListeners();
+    }
+  }
+
+  void markAsRead(String chatId) {
+    _firebaseService.markAsRead(chatId);
+
+    final index = _chats.indexWhere((c) => c.id == chatId);
+    if (index != -1) {
+      _chats[index] = _chats[index].copyWith(unreadCount: 0);
+      notifyListeners();
+    }
+  }
+
+  void clearAllChats() {
+    _chats = [];
+    _messages = [];
+    _selectedChat = null;
+    notifyListeners();
+  }
+
+  // ==========================================================================
+  // SEARCH
+  // ==========================================================================
 
   void setSearchQuery(String? query) {
     _searchQuery = query;
     notifyListeners();
   }
+
+  List<ChatModel> _filterChats(List<ChatModel> chats) {
+    if (_searchQuery == null || _searchQuery!.isEmpty) return chats;
+
+    final query = _searchQuery!.toLowerCase();
+    return chats.where((chat) {
+      return chat.displayName.toLowerCase().contains(query) ||
+          chat.participants.any((p) => 
+              p.username.toLowerCase().contains(query) ||
+              p.displayName.toLowerCase().contains(query));
+    }).toList();
+  }
+
+  Future<List<Map<String, dynamic>>> searchUsers(String query) async {
+    return await _firebaseService.searchUsers(query);
+  }
+
+  // ==========================================================================
+  // CLEANUP
+  // ==========================================================================
+
+  @override
+  void dispose() {
+    _chatsSubscription?.cancel();
+    _messagesSubscription?.cancel();
+    _typingSubscription?.cancel();
+    _typingTimer?.cancel();
+    _firebaseService.dispose();
+    super.dispose();
+  }
 }
+
+enum ChatMuteDuration { oneHour, eightHours, twoDays, forever }
