@@ -36,9 +36,11 @@ import 'screens/invite/invite_friends_screen.dart';
 import 'screens/saved/saved_messages_screen.dart';
 import 'screens/archive/archived_chats_screen.dart';
 import 'services/notification_service.dart';
+import 'services/internet_check.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  ConnectivityService().initialize();
   await NotificationService.init();
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
