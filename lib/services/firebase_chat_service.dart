@@ -517,7 +517,7 @@ class FirebaseChatService {
 
     return ChatModel(
       id: doc.id,
-      displayName: data['name'] ?? data['displayName'] ?? 'Unknown',
+      name: data['name'] ?? data['displayName'] ?? 'Unknown',
       avatarUrl: data['avatarUrl'],
       participants: (data['participants'] as List<dynamic>?)
           ?.map((p) => UserModel(
