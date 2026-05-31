@@ -1,14 +1,53 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../themes/app_theme.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/theme_provider.dart';
 
-class SettingsScreen extends StatelessWidget {
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  final _apiKeyController = TextEditingController();
+  bool _showApiKey = false;
+  bool _isLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadApiKey();
+  }
+
+  Future<void> _loadApiKey() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedKey = prefs.getString('ai_api_key');
+    if (savedKey != null) {
+      _apiKeyController.text = savedKey;
+    }
+  }
+
+  Future<void> _saveApiKey() async {
+    final key = _apiKeyController.text.trim();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('ai_api_key', key);
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('API Key saved!'),
+        backgroundColor: AppTheme.success,
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
+    final themeProvider = context.watch<ThemeProvider>();
     final user = auth.currentUser;
 
     return Scaffold(
@@ -20,7 +59,9 @@ class SettingsScreen extends StatelessWidget {
         actions: [
           IconButton(
             icon: const Icon(Icons.qr_code, color: AppTheme.textPrimary),
-            onPressed: () {},
+            onPressed: () {
+              // TODO: Show QR code
+            },
           ),
         ],
       ),
@@ -52,13 +93,20 @@ class SettingsScreen extends StatelessWidget {
                           children: [
                             Text(
                               user?.displayName ?? 'Your Name',
-                              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: AppTheme.textPrimary),
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.textPrimary,
+                              ),
                             ),
                             if (user?.isVerified ?? false) ...[
                               const SizedBox(width: 6),
                               Container(
                                 padding: const EdgeInsets.all(2),
-                                decoration: const BoxDecoration(color: AppTheme.verifiedBlue, shape: BoxShape.circle),
+                                decoration: const BoxDecoration(
+                                  color: AppTheme.verifiedBlue,
+                                  shape: BoxShape.circle,
+                                ),
                                 child: const Icon(Icons.check, size: 10, color: Colors.white),
                               ),
                             ],
@@ -73,7 +121,10 @@ class SettingsScreen extends StatelessWidget {
                           const SizedBox(height: 4),
                           Text(
                             user!.bio!,
-                            style: const TextStyle(fontSize: 13, color: AppTheme.textTertiary),
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: AppTheme.textTertiary,
+                            ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -108,7 +159,9 @@ class SettingsScreen extends StatelessWidget {
             icon: Icons.verified_user_outlined,
             iconColor: AppTheme.verifiedBlue,
             title: 'Verification',
-            subtitle: user?.isVerified ?? false ? 'Verified account' : 'Apply for verification',
+            subtitle: user?.isVerified ?? false
+                ? 'Verified account'
+                : 'Apply for verification (\$4.99)',
             trailing: user?.isVerified ?? false
                 ? Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -116,10 +169,21 @@ class SettingsScreen extends StatelessWidget {
                       color: AppTheme.verifiedBlue.withOpacity(0.2),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Text('VERIFIED', style: TextStyle(fontSize: 10, color: AppTheme.verifiedBlue, fontWeight: FontWeight.bold)),
+                    child: const Text(
+                      'VERIFIED',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: AppTheme.verifiedBlue,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   )
                 : null,
-            onTap: () {},
+            onTap: () {
+              if (!(user?.isVerified ?? false)) {
+                _showVerificationDialog();
+              }
+            },
           ),
 
           // Preferences Section
@@ -143,15 +207,19 @@ class SettingsScreen extends StatelessWidget {
             iconColor: AppTheme.accentPink,
             title: 'Appearance',
             subtitle: 'Theme, chat background, font size',
-            onTap: () {},
+            onTap: () => _showAppearanceDialog(themeProvider),
           ),
           _buildSettingTile(
             icon: Icons.language,
             iconColor: AppTheme.accentCyan,
             title: 'Language',
             subtitle: 'English (device default)',
-            onTap: () {},
+            onTap: () => _showLanguageDialog(),
           ),
+
+          // NEW: AI API Key Section
+          _buildSectionHeader('AI Settings'),
+          _buildApiKeySection(),
 
           // Bots & AI Section
           _buildSectionHeader('Bots & AI'),
@@ -184,7 +252,7 @@ class SettingsScreen extends StatelessWidget {
             iconColor: AppTheme.info,
             title: 'Help Center',
             subtitle: 'FAQ, contact support',
-            onTap: () {},
+            onTap: () => _showHelpDialog(),
           ),
           _buildSettingTile(
             icon: Icons.policy_outlined,
@@ -198,7 +266,7 @@ class SettingsScreen extends StatelessWidget {
             iconColor: AppTheme.textSecondary,
             title: 'Privacy Policy',
             subtitle: 'How we handle your data',
-            onTap: () {},
+            onTap: () => _showPrivacyPolicy(),
           ),
           _buildSettingTile(
             icon: Icons.report_outlined,
@@ -230,7 +298,7 @@ class SettingsScreen extends StatelessWidget {
             title: 'Delete Account',
             titleColor: AppTheme.error,
             subtitle: 'Permanently remove your account',
-            onTap: () {},
+            onTap: () => _showDeleteAccountDialog(),
           ),
 
           const SizedBox(height: 40),
@@ -246,12 +314,413 @@ class SettingsScreen extends StatelessWidget {
     );
   }
 
+  // NEW: API Key Section
+  Widget _buildApiKeySection() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.bgSecondary,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.key, color: AppTheme.primaryGreen, size: 20),
+              const SizedBox(width: 8),
+              const Text(
+                'AI API Key',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textPrimary,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Add your API key to use AI features. Get a FREE key from Google AI Studio.',
+            style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _apiKeyController,
+            obscureText: !_showApiKey,
+            style: const TextStyle(color: AppTheme.textPrimary, fontSize: 14),
+            decoration: InputDecoration(
+              hintText: 'Paste API key here',
+              hintStyle: TextStyle(color: AppTheme.textTertiary),
+              filled: true,
+              fillColor: AppTheme.bgInput,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
+              ),
+              suffixIcon: IconButton(
+                icon: Icon(
+                  _showApiKey ? Icons.visibility_off : Icons.visibility,
+                  color: AppTheme.textTertiary,
+                ),
+                onPressed: () => setState(() => _showApiKey = !_showApiKey),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: _saveApiKey,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryGreen,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text('Save API Key'),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          InkWell(
+            onTap: () {
+              showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  backgroundColor: AppTheme.bgModal,
+                  title: const Text(
+                    'How to Get API Key',
+                    style: TextStyle(color: AppTheme.textPrimary),
+                  ),
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildStep('1', 'Go to aistudio.google.com'),
+                      _buildStep('2', 'Sign in with Google'),
+                      _buildStep('3', 'Click "Get API Key"'),
+                      _buildStep('4', 'Copy and paste it here'),
+                    ],
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text(
+                        'Got it',
+                        style: TextStyle(color: AppTheme.primaryGreen),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+            child: Text(
+              'Where do I get an API key?',
+              style: TextStyle(
+                color: AppTheme.primaryGreen,
+                fontSize: 13,
+                decoration: TextDecoration.underline,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStep(String number, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Container(
+            width: 24,
+            height: 24,
+            decoration: BoxDecoration(
+              color: AppTheme.primaryGreen,
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Text(
+                number,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Text(text, style: TextStyle(color: AppTheme.textSecondary)),
+        ],
+      ),
+    );
+  }
+
+  // NEW: Verification Purchase Dialog
+  void _showVerificationDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.bgModal,
+        title: const Text(
+          'Get Verified',
+          style: TextStyle(color: AppTheme.textPrimary),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.verified, size: 64, color: AppTheme.verifiedBlue),
+            const SizedBox(height: 16),
+            const Text(
+              'Verified Badge',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Get verified and unlock all premium features:',
+              style: TextStyle(color: AppTheme.textSecondary),
+            ),
+            const SizedBox(height: 12),
+            _buildPremiumFeature(Icons.check_circle, 'Verified badge on profile'),
+            _buildPremiumFeature(Icons.wallpaper, 'All premium wallpapers'),
+            _buildPremiumFeature(Icons.sticker, 'All sticker packs'),
+            _buildPremiumFeature(Icons.timer, '48h & 3-day status duration'),
+            const SizedBox(height: 16),
+            const Text(
+              '\$4.99 one-time',
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: AppTheme.primaryGreen,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Later', style: TextStyle(color: AppTheme.textSecondary)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              // TODO: Process payment
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Payment processing...'),
+                  backgroundColor: AppTheme.primaryGreen,
+                ),
+              );
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryGreen),
+            child: const Text('Buy Now'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPremiumFeature(IconData icon, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Icon(icon, color: AppTheme.primaryGreen, size: 20),
+          const SizedBox(width: 12),
+          Text(text, style: TextStyle(color: AppTheme.textSecondary)),
+        ],
+      ),
+    );
+  }
+
+  // NEW: Appearance Dialog
+  void _showAppearanceDialog(ThemeProvider themeProvider) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.bgModal,
+        title: const Text('Appearance', style: TextStyle(color: AppTheme.textPrimary)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.dark_mode, color: AppTheme.textPrimary),
+              title: const Text('Dark Theme', style: TextStyle(color: AppTheme.textPrimary)),
+              trailing: Switch(
+                value: themeProvider.isDarkMode,
+                onChanged: (v) => themeProvider.toggleTheme(),
+                activeColor: AppTheme.primaryGreen,
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.light_mode, color: AppTheme.textPrimary),
+              title: const Text('Light Theme', style: TextStyle(color: AppTheme.textPrimary)),
+              trailing: Switch(
+                value: !themeProvider.isDarkMode,
+                onChanged: (v) => themeProvider.toggleTheme(),
+                activeColor: AppTheme.primaryGreen,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Done', style: TextStyle(color: AppTheme.primaryGreen)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // NEW: Language Dialog
+  void _showLanguageDialog() {
+    final languages = ['English', 'Spanish', 'French', 'German', 'Chinese', 'Arabic', 'Hindi'];
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.bgModal,
+        title: const Text('Language', style: TextStyle(color: AppTheme.textPrimary)),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: languages.length,
+            itemBuilder: (context, index) => ListTile(
+              title: Text(languages[index], style: const TextStyle(color: AppTheme.textPrimary)),
+              onTap: () {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Language changed to ${languages[index]}')),
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // NEW: Help Dialog
+  void _showHelpDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.bgModal,
+        title: const Text('Help Center', style: TextStyle(color: AppTheme.textPrimary)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildHelpItem(Icons.question_answer, 'FAQ', 'Common questions'),
+            _buildHelpItem(Icons.email, 'Email Support', 'support@tarrific.chat'),
+            _buildHelpItem(Icons.chat, 'Live Chat', 'Chat with our team'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close', style: TextStyle(color: AppTheme.primaryGreen)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHelpItem(IconData icon, String title, String subtitle) {
+    return ListTile(
+      leading: Icon(icon, color: AppTheme.primaryGreen),
+      title: Text(title, style: const TextStyle(color: AppTheme.textPrimary)),
+      subtitle: Text(subtitle, style: TextStyle(color: AppTheme.textSecondary)),
+      onTap: () {},
+    );
+  }
+
+  // NEW: Privacy Policy
+  void _showPrivacyPolicy() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.bgModal,
+        title: const Text('Privacy Policy', style: TextStyle(color: AppTheme.textPrimary)),
+        content: const SingleChildScrollView(
+          child: Text(
+            'TARRIFIC CHAT respects your privacy. We encrypt all messages and do not share your data with third parties.\n\n'
+            'Key points:\n'
+            '• Messages are encrypted end-to-end\n'
+            '• We do not sell your data\n'
+            '• You can delete your account anytime\n'
+            '• AI processing is done securely',
+            style: TextStyle(color: AppTheme.textSecondary, height: 1.5),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close', style: TextStyle(color: AppTheme.primaryGreen)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // NEW: Delete Account Dialog
+  void _showDeleteAccountDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.bgModal,
+        title: const Text('Delete Account?', style: TextStyle(color: AppTheme.error)),
+        content: const Text(
+          'This will permanently delete your account and all data. This action cannot be undone.',
+          style: TextStyle(color: AppTheme.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel', style: TextStyle(color: AppTheme.textSecondary)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              // TODO: Delete account
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Account deletion requested'),
+                  backgroundColor: AppTheme.error,
+                ),
+              );
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.error),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSectionHeader(String title) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
       child: Text(
         title.toUpperCase(),
-        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.textTertiary, letterSpacing: 1.2),
+        style: const TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: AppTheme.textTertiary,
+          letterSpacing: 1.2,
+        ),
       ),
     );
   }
@@ -275,8 +744,17 @@ class SettingsScreen extends StatelessWidget {
         ),
         child: Icon(icon, color: iconColor, size: 20),
       ),
-      title: Text(title, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: titleColor ?? AppTheme.textPrimary)),
-      subtitle: subtitle != null ? Text(subtitle, style: const TextStyle(fontSize: 13, color: AppTheme.textTertiary)) : null,
+      title: Text(
+        title,
+        style: TextStyle(
+          fontSize: 15,
+          fontWeight: FontWeight.w500,
+          color: titleColor ?? AppTheme.textPrimary,
+        ),
+      ),
+      subtitle: subtitle != null
+          ? Text(subtitle, style: const TextStyle(fontSize: 13, color: AppTheme.textTertiary))
+          : null,
       trailing: trailing ?? const Icon(Icons.arrow_forward_ios, size: 16, color: AppTheme.textTertiary),
       onTap: onTap,
     );
@@ -289,7 +767,10 @@ class SettingsScreen extends StatelessWidget {
         backgroundColor: AppTheme.bgModal,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('Log Out?', style: TextStyle(color: AppTheme.textPrimary)),
-        content: const Text('You will need to log in again to access your messages.', style: TextStyle(color: AppTheme.textSecondary)),
+        content: const Text(
+          'You will need to log in again to access your messages.',
+          style: TextStyle(color: AppTheme.textSecondary),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -306,5 +787,11 @@ class SettingsScreen extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _apiKeyController.dispose();
+    super.dispose();
   }
 }
