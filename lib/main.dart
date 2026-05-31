@@ -37,10 +37,15 @@ import 'screens/saved/saved_messages_screen.dart';
 import 'screens/archive/archived_chats_screen.dart';
 import 'services/notification_service.dart';
 import 'services/internet_check.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'services/firebase_chat_service.dart';
+import 'services/connectivity.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   ConnectivityService().initialize();
+  FirebaseChatService().initialize();
+  await Firebase.initializeApp();
   await NotificationService.init();
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
