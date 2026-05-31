@@ -524,6 +524,7 @@ class FirebaseChatService {
             id: p is String ? p : p['userId'] ?? '',
             username: p is Map ? p['username'] ?? '' : '',
             displayName: p is Map ? p['displayName'] ?? '' : '',
+            phoneNumber: '',
           ))
           .toList() ?? [],
       isGroup: type == 'group',
