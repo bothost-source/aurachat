@@ -3,13 +3,15 @@ import 'package:flutter/foundation.dart';
 import '../models/chat_model.dart';
 import '../models/message_model.dart';
 import '../services/firebase_chat_service.dart';
+import '../services/ai_moderation_service.dart';
 import '../services/connectivity.dart';
 
 // ============================================================================
-// CHAT PROVIDER — State management with Firebase backend
+// CHAT PROVIDER — With AI Moderation
 // ============================================================================
 class ChatProvider extends ChangeNotifier {
   final FirebaseChatService _firebaseService = FirebaseChatService();
+  final AIModerationService _moderationService = AIModerationService();
 
   List<ChatModel> _chats = [];
   List<MessageModel> _messages = [];
@@ -37,6 +39,14 @@ class ChatProvider extends ChangeNotifier {
   String get typingText => _typingUsers.length == 1 
       ? 'typing...' 
       : '${_typingUsers.length} people typing...';
+
+  // AI Moderation status
+  bool _aiModerationEnabled = true;
+  bool get aiModerationEnabled => _aiModerationEnabled;
+  void toggleAIModeration() {
+    _aiModerationEnabled = !_aiModerationEnabled;
+    notifyListeners();
+  }
 
   ChatProvider() {
     _firebaseService.initialize();
@@ -82,16 +92,14 @@ class ChatProvider extends ChangeNotifier {
     _typingUsers = [];
     notifyListeners();
 
-    // Subscribe to messages
     _messagesSubscription?.cancel();
     _messagesSubscription = _firebaseService.getMessages(chat.id).listen(
       (messages) {
-        _messages = messages.reversed.toList(); // Oldest first for display
+        _messages = messages.reversed.toList();
         notifyListeners();
       },
     );
 
-    // Subscribe to typing indicators
     _typingSubscription?.cancel();
     _typingSubscription = _firebaseService.getTypingUsers(chat.id).listen(
       (users) {
@@ -100,7 +108,6 @@ class ChatProvider extends ChangeNotifier {
       },
     );
 
-    // Mark as read
     _firebaseService.markAsRead(chat.id);
   }
 
@@ -118,16 +125,61 @@ class ChatProvider extends ChangeNotifier {
   }
 
   // ==========================================================================
-  // MESSAGING
+  // MESSAGING WITH AI MODERATION
   // ==========================================================================
 
-  Future<void> sendMessage(String content, {MessageType type = MessageType.text}) async {
-    if (_selectedChat == null) return;
-    if (content.trim().isEmpty) return;
+  Future<ModerationResult?> sendMessage(String content, {MessageType type = MessageType.text}) async {
+    if (_selectedChat == null) return null;
+    if (content.trim().isEmpty) return null;
 
+    // 1. Check user ban status first
+    final currentUserId = _firebaseService.currentUserId;
+    if (currentUserId != null) {
+      final strikeStatus = await _moderationService.checkUserStrikes(currentUserId);
+      if (strikeStatus.isBanned) {
+        return ModerationResult(
+          isFlagged: true,
+          flag: ContentFlag.none,
+          reason: 'You are banned: ${strikeStatus.statusText}',
+          confidence: 1.0,
+          action: ModerationAction.block,
+        );
+      }
+    }
+
+    // 2. AI Moderation scan
+    if (_aiModerationEnabled) {
+      final moderationResult = await _moderationService.scanMessage(content, type: type);
+
+      if (moderationResult.action == ModerationAction.block) {
+        // Block message entirely
+        if (currentUserId != null) {
+          await _moderationService.addStrike(currentUserId, moderationResult.flag);
+        }
+        return moderationResult;
+      }
+
+      if (moderationResult.action == ModerationAction.restrict) {
+        // Send but flag it
+        await _sendWithFlag(content, type, moderationResult);
+        return moderationResult;
+      }
+
+      if (moderationResult.action == ModerationAction.warn) {
+        // Allow but warn user
+        await _sendNormal(content, type);
+        return moderationResult;
+      }
+    }
+
+    // 3. Normal send
+    await _sendNormal(content, type);
+    return ModerationResult.clean();
+  }
+
+  Future<void> _sendNormal(String content, MessageType type) async {
     final chatId = _selectedChat!.id;
 
-    // Optimistic update — add to local list immediately
     final tempMessage = MessageModel(
       id: 'temp_${DateTime.now().millisecondsSinceEpoch}',
       chatId: chatId,
@@ -148,11 +200,46 @@ class ChatProvider extends ChangeNotifier {
         type: type,
       );
 
-      // Remove temp message, real one will come from Firestore
       _messages.removeWhere((m) => m.id == tempMessage.id);
       notifyListeners();
     } catch (e) {
-      // Update temp message to failed status
+      final index = _messages.indexWhere((m) => m.id == tempMessage.id);
+      if (index != -1) {
+        _messages[index] = _messages[index].copyWith(status: MessageStatus.failed);
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<void> _sendWithFlag(String content, MessageType type, ModerationResult moderation) async {
+    final chatId = _selectedChat!.id;
+
+    final tempMessage = MessageModel(
+      id: 'temp_${DateTime.now().millisecondsSinceEpoch}',
+      chatId: chatId,
+      senderId: 'me',
+      content: content,
+      type: type,
+      status: MessageStatus.sending,
+      createdAt: DateTime.now(),
+      contentFlag: moderation.flag,
+      isRestricted: true,
+      restrictionNote: moderation.reason,
+    );
+
+    _messages.add(tempMessage);
+    notifyListeners();
+
+    try {
+      await _firebaseService.sendMessage(
+        chatId: chatId,
+        content: content,
+        type: type,
+      );
+
+      _messages.removeWhere((m) => m.id == tempMessage.id);
+      notifyListeners();
+    } catch (e) {
       final index = _messages.indexWhere((m) => m.id == tempMessage.id);
       if (index != -1) {
         _messages[index] = _messages[index].copyWith(status: MessageStatus.failed);
@@ -165,7 +252,6 @@ class ChatProvider extends ChangeNotifier {
     final message = _messages.firstWhere((m) => m.id == messageId);
     if (message.status != MessageStatus.failed) return;
 
-    // Update to sending
     final index = _messages.indexWhere((m) => m.id == messageId);
     _messages[index] = message.copyWith(status: MessageStatus.sending);
     notifyListeners();
@@ -195,7 +281,6 @@ class ChatProvider extends ChangeNotifier {
 
     _firebaseService.setTypingStatus(_selectedChat!.id, isTyping);
 
-    // Auto-stop typing after 3 seconds of inactivity
     _typingTimer?.cancel();
     if (isTyping) {
       _typingTimer = Timer(const Duration(seconds: 3), () {
@@ -216,7 +301,6 @@ class ChatProvider extends ChangeNotifier {
       final chatId = await _firebaseService.createDirectChat(otherUserId);
       await refreshChats();
 
-      // Select the new chat
       final newChat = _chats.firstWhere((c) => c.id == chatId);
       selectChat(newChat);
     } catch (e) {
@@ -237,7 +321,7 @@ class ChatProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final chatId = await _firebaseService.createGroupChat(
+      await _firebaseService.createGroupChat(
         name: name,
         description: description,
         memberIds: memberIds,
@@ -261,7 +345,7 @@ class ChatProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final chatId = await _firebaseService.createChannel(
+      await _firebaseService.createChannel(
         name: name,
         description: description,
         isPublic: isPublic,
@@ -276,7 +360,6 @@ class ChatProvider extends ChangeNotifier {
   }
 
   void addChat(ChatModel chat) {
-    // For local-only chats (before Firebase migration)
     if (!_chats.any((c) => c.id == chat.id)) {
       _chats.add(chat);
       notifyListeners();
@@ -347,6 +430,32 @@ class ChatProvider extends ChangeNotifier {
 
   Future<List<Map<String, dynamic>>> searchUsers(String query) async {
     return await _firebaseService.searchUsers(query);
+  }
+
+  // ==========================================================================
+  // MODERATION
+  // ==========================================================================
+
+  Future<void> reportMessage({
+    required String messageId,
+    required String reason,
+    String? details,
+  }) async {
+    if (_selectedChat == null) return;
+
+    await _moderationService.reportMessage(
+      messageId: messageId,
+      chatId: _selectedChat!.id,
+      reporterId: _firebaseService.currentUserId ?? 'unknown',
+      reason: reason,
+      details: details,
+    );
+  }
+
+  Future<UserStrikeStatus> checkMyStrikes() async {
+    final userId = _firebaseService.currentUserId;
+    if (userId == null) return UserStrikeStatus(strikes: 0, isBanned: false);
+    return await _moderationService.checkUserStrikes(userId);
   }
 
   // ==========================================================================
