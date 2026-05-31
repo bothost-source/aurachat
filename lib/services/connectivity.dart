@@ -1,11 +1,8 @@
 import 'dart:async';
 import 'dart:io';
-// connectivity.dart
-// Change this line at the top:
 import 'package:flutter/material.dart';
-import '../themes/app_theme.dart';  // ← CORRECT path from lib/services/
-// (was: ../../themes/app_theme.dart — too many ../)
-
+import 'package:connectivity_plus/connectivity_plus.dart';
+import '../../themes/app_theme.dart';
 
 // ============================================================================
 // CONNECTIVITY SERVICE — Singleton that monitors network state
