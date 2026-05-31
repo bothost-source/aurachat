@@ -29,7 +29,7 @@ class FirebaseChatService {
   Timer? _syncTimer;
 
   // Get current user ID
-  String? get _currentUserId => _auth.currentUser?.uid;
+  String? get currentUserId => _auth.currentUser?.uid;
   bool get _isAuthenticated => _currentUserId != null;
 
   // Initialize service
