@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import '../../themes/app_theme.dart';
 import '../../providers/chat_provider.dart';
 import '../../services/connectivity.dart';
+import '../../services/ai_moderation_service.dart';
 import '../../models/chat_model.dart';
 import '../../models/message_model.dart';
 import '../../models/user_model.dart';
@@ -33,7 +34,6 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _onTextChanged() {
     setState(() {});
-    // Notify typing status
     if (_messageController.text.isNotEmpty) {
       context.read<ChatProvider>().setTyping(true);
     }
@@ -47,93 +47,16 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  // Pick image from gallery
-  Future<void> _pickImage() async {
-    try {
-      final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
-      if (image != null) {
-        // Upload to Firebase Storage then send message
-        // TODO: Implement Firebase Storage upload
-        _sendMessage('📷 Photo', MessageType.image);
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
-      }
-    }
-  }
-
-  // Take photo with camera
-  Future<void> _takePhoto() async {
-    try {
-      final XFile? photo = await _picker.pickImage(source: ImageSource.camera);
-      if (photo != null) {
-        _sendMessage('📷 Photo', MessageType.image);
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
-      }
-    }
-  }
-
-  // Pick document
-  Future<void> _pickDocument() async {
-    try {
-      final result = await FilePicker.platform.pickFiles();
-      if (result != null) {
-        _sendMessage('📎 ${result.files.first.name}', MessageType.document);
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
-      }
-    }
-  }
-
-  // Send location
-  void _sendLocation() {
-    _sendMessage('📍 Location shared', MessageType.location);
-  }
-
-  // Send contact
-  void _sendContact() {
-    _sendMessage('👤 Contact shared', MessageType.contact);
-  }
-
-  // Send poll
-  void _sendPoll() {
-    _sendMessage('📊 Poll', MessageType.poll);
-  }
-
-  // Send GIF
-  void _sendGif() {
-    _sendMessage('GIF', MessageType.gif);
-  }
-
-  // Record audio
-  void _toggleRecording() {
-    setState(() => _isRecording = !_isRecording);
-    if (!_isRecording) {
-      _sendMessage('🎙️ Voice message', MessageType.voice);
-    }
-  }
-
-  // Send message with Firebase
-  void _sendMessage(String content, [MessageType type = MessageType.text]) {
+  // Send message with moderation
+  Future<void> _sendMessage(String content, [MessageType type = MessageType.text]) async {
     if (content.trim().isEmpty) return;
+
+    final chatProvider = context.read<ChatProvider>();
 
     // Check connectivity
     final connectivity = ConnectivityService().currentState;
     if (connectivity == NetworkState.offline) {
-      // Message will be queued by FirebaseChatService
-      context.read<ChatProvider>().sendMessage(content.trim(), type: type);
+      chatProvider.sendMessage(content.trim(), type: type);
       _messageController.clear();
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -146,24 +69,181 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
-    context.read<ChatProvider>().sendMessage(content.trim(), type: type);
-    _messageController.clear();
+    // Send with moderation check
+    final result = await chatProvider.sendMessage(content.trim(), type: type);
 
-    // Scroll to bottom
-    Future.delayed(const Duration(milliseconds: 100), () {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          0,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
-      }
-    });
+    if (result != null && result.isFlagged) {
+      _handleModerationResult(result);
+    }
+
+    if (result == null || result.action != ModerationAction.block) {
+      _messageController.clear();
+
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (_scrollController.hasClients) {
+          _scrollController.animateTo(
+            0,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+        }
+      });
+    }
+  }
+
+  void _handleModerationResult(ModerationResult result) {
+    switch (result.action) {
+      case ModerationAction.block:
+        _showBanDialog(result);
+        break;
+      case ModerationAction.restrict:
+        _showRestrictedSnack(result);
+        break;
+      case ModerationAction.warn:
+        _showWarningSnack(result);
+        break;
+      case ModerationAction.allow:
+        break;
+    }
+  }
+
+  void _showBanDialog(ModerationResult result) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.bgSecondary,
+        icon: const Icon(Icons.block, color: Colors.red, size: 48),
+        title: const Text('Message Blocked', style: TextStyle(color: Colors.red)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              result.reason,
+              style: const TextStyle(color: AppTheme.textSecondary),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: FutureBuilder<UserStrikeStatus>(
+                future: context.read<ChatProvider>().checkMyStrikes(),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) return const SizedBox.shrink();
+                  return Text(
+                    snapshot.data!.statusText,
+                    style: const TextStyle(color: Colors.red, fontWeight: FontWeight.w600),
+                    textAlign: TextAlign.center,
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('I Understand', style: TextStyle(color: AppTheme.primaryGreen)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showRestrictedSnack(ModerationResult result) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.warning_amber, color: Colors.white),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text('Message flagged: ${result.reason}'),
+            ),
+          ],
+        ),
+        backgroundColor: Colors.orange.shade800,
+        duration: const Duration(seconds: 4),
+        action: SnackBarAction(
+          label: 'DISMISS',
+          textColor: Colors.white,
+          onPressed: () {},
+        ),
+      ),
+    );
+  }
+
+  void _showWarningSnack(ModerationResult result) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Warning: ${result.reason}'),
+        backgroundColor: Colors.blue.shade800,
+        duration: const Duration(seconds: 3),
+      ),
+    );
   }
 
   // Retry failed message
   void _retryMessage(String messageId) {
     context.read<ChatProvider>().retryFailedMessage(messageId);
+  }
+
+  // Report message
+  void _showReportDialog(MessageModel message) {
+    final reasonController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.bgSecondary,
+        title: const Text('Report Message', style: TextStyle(color: AppTheme.textPrimary)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Report this message from ${message.senderName ?? 'Unknown'}?',
+              style: const TextStyle(color: AppTheme.textSecondary),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: reasonController,
+              style: const TextStyle(color: AppTheme.textPrimary),
+              decoration: InputDecoration(
+                hintText: 'Reason for report (optional)',
+                hintStyle: TextStyle(color: AppTheme.textTertiary),
+                filled: true,
+                fillColor: AppTheme.bgInput,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel', style: TextStyle(color: AppTheme.textTertiary)),
+          ),
+          TextButton(
+            onPressed: () {
+              context.read<ChatProvider>().reportMessage(
+                messageId: message.id,
+                reason: 'User reported',
+                details: reasonController.text.isNotEmpty ? reasonController.text : null,
+              );
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Report submitted')),
+              );
+            },
+            child: const Text('Report', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -183,19 +263,26 @@ class _ChatScreenState extends State<ChatScreen> {
       body: Column(
         children: [
           // AI Moderation Banner
-          if (messages.any((m) => m.isFlaggedByAI))
+          if (chatProvider.aiModerationEnabled)
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              color: AppTheme.warning.withOpacity(0.1),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              color: AppTheme.accentBlue.withOpacity(0.1),
               child: Row(
                 children: [
-                  Icon(Icons.shield_outlined, color: AppTheme.warning, size: 18),
-                  const SizedBox(width: 10),
+                  Icon(Icons.shield_outlined, color: AppTheme.accentBlue, size: 16),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'AI Moderation is active. Some messages may be restricted.',
-                      style: TextStyle(fontSize: 12, color: AppTheme.warning, fontWeight: FontWeight.w500),
+                      'AI Moderation is active',
+                      style: TextStyle(fontSize: 11, color: AppTheme.accentBlue, fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: () => chatProvider.toggleAIModeration(),
+                    child: Text(
+                      'Disable',
+                      style: TextStyle(fontSize: 11, color: AppTheme.textTertiary),
                     ),
                   ),
                 ],
@@ -211,8 +298,7 @@ class _ChatScreenState extends State<ChatScreen> {
               itemCount: messages.length,
               itemBuilder: (context, index) {
                 final message = messages[messages.length - 1 - index];
-                final isMe = message.senderId == 'me' || 
-                    message.senderId == context.read<ChatProvider>().currentUserId;
+                final isMe = message.senderId == 'me';
                 final showAvatar = !isMe && (index == messages.length - 1 || 
                     messages[messages.length - index].senderId != message.senderId);
                 return _buildMessageBubble(message, isMe, showAvatar);
@@ -375,11 +461,11 @@ class _ChatScreenState extends State<ChatScreen> {
       actions: [
         IconButton(
           icon: const Icon(Icons.videocam, color: AppTheme.textPrimary),
-          onPressed: () => _makeVideoCall(chat.displayName),
+          onPressed: () {},
         ),
         IconButton(
           icon: const Icon(Icons.call, color: AppTheme.textPrimary),
-          onPressed: () => _makeVoiceCall(chat.displayName),
+          onPressed: () {},
         ),
         PopupMenuButton<String>(
           icon: const Icon(Icons.more_vert, color: AppTheme.textPrimary),
@@ -398,10 +484,8 @@ class _ChatScreenState extends State<ChatScreen> {
               case 'mute':
                 break;
               case 'wallpaper':
-                _showWallpaperPicker();
                 break;
               case 'report':
-                Navigator.pushNamed(context, '/report');
                 break;
               case 'block':
                 break;
@@ -422,7 +506,6 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  // Show group/channel info
   void _showGroupInfo(ChatModel chat) {
     showModalBottomSheet(
       context: context,
@@ -553,76 +636,6 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  // Wallpaper picker
-  void _showWallpaperPicker() {
-    final wallpapers = [
-      AppTheme.bgPrimary,
-      const Color(0xFF1a1a2e),
-      const Color(0xFF16213e),
-      const Color(0xFF0f3460),
-      const Color(0xFF533483),
-      const Color(0xFF1b1b2f),
-    ];
-
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppTheme.bgModal,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (context) => Container(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(width: 40, height: 4, decoration: BoxDecoration(color: AppTheme.divider, borderRadius: BorderRadius.circular(2))),
-            const SizedBox(height: 20),
-            const Text(
-              'Choose Wallpaper',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: AppTheme.textPrimary,
-              ),
-            ),
-            const SizedBox(height: 16),
-            GridView.count(
-              shrinkWrap: true,
-              crossAxisCount: 3,
-              mainAxisSpacing: 12,
-              crossAxisSpacing: 12,
-              children: wallpapers.map((color) => GestureDetector(
-                onTap: () {
-                  // TODO: Save wallpaper preference
-                  Navigator.pop(context);
-                },
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: color,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppTheme.divider),
-                  ),
-                ),
-              )).toList(),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _makeVideoCall(String name) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Video call to $name')),
-    );
-  }
-
-  void _makeVoiceCall(String name) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Voice call to $name')),
-    );
-  }
-
   PopupMenuItem<String> _buildMenuItem(String value, String text, IconData icon, {Color? color}) {
     return PopupMenuItem(
       value: value,
@@ -638,190 +651,236 @@ class _ChatScreenState extends State<ChatScreen> {
     final isRestricted = message.isRestricted || message.contentFlag != ContentFlag.none;
     final isFailed = message.status == MessageStatus.failed;
 
-    return Align(
-      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: EdgeInsets.only(
-          left: isMe ? 60 : 4,
-          right: isMe ? 4 : 60,
-          bottom: 4,
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            if (!isMe && showAvatar)
-              Container(
-                width: 28,
-                height: 28,
-                margin: const EdgeInsets.only(right: 6),
-                decoration: BoxDecoration(
-                  color: AppTheme.bgElevated,
-                  shape: BoxShape.circle,
-                ),
-                child: Center(
-                  child: Text(
-                    message.senderName?.isNotEmpty == true ? message.senderName![0].toUpperCase() : '?',
-                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primaryGreen),
-                  ),
-                ),
-              )
-            else if (!isMe)
-              const SizedBox(width: 34),
-
-            Flexible(
-              child: GestureDetector(
-                onTap: isFailed ? () => _retryMessage(message.id) : null,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    return GestureDetector(
+      onLongPress: () => _showMessageOptions(message),
+      child: Align(
+        alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+        child: Container(
+          margin: EdgeInsets.only(
+            left: isMe ? 60 : 4,
+            right: isMe ? 4 : 60,
+            bottom: 4,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              if (!isMe && showAvatar)
+                Container(
+                  width: 28,
+                  height: 28,
+                  margin: const EdgeInsets.only(right: 6),
                   decoration: BoxDecoration(
-                    color: isFailed
-                        ? Colors.red.withOpacity(0.1)
-                        : isRestricted
-                            ? AppTheme.warning.withOpacity(0.1)
-                            : isMe
-                                ? AppTheme.sentMessage
-                                : AppTheme.receivedMessage,
-                    borderRadius: BorderRadius.only(
-                      topLeft: const Radius.circular(16),
-                      topRight: const Radius.circular(16),
-                      bottomLeft: Radius.circular(isMe ? 16 : 4),
-                      bottomRight: Radius.circular(isMe ? 4 : 16),
+                    color: AppTheme.bgElevated,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Center(
+                    child: Text(
+                      message.senderName?.isNotEmpty == true ? message.senderName![0].toUpperCase() : '?',
+                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primaryGreen),
                     ),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (isFailed)
-                        Container(
-                          margin: const EdgeInsets.only(bottom: 6),
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.red.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.error_outline, size: 12, color: Colors.red),
-                              const SizedBox(width: 4),
-                              const Text(
-                                'Tap to retry',
-                                style: TextStyle(fontSize: 11, color: Colors.red, fontWeight: FontWeight.w500),
-                              ),
-                            ],
-                          ),
-                        ),
+                )
+              else if (!isMe)
+                const SizedBox(width: 34),
 
-                      if (isRestricted)
-                        Container(
-                          margin: const EdgeInsets.only(bottom: 6),
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: AppTheme.warning.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.warning_amber, size: 12, color: AppTheme.warning),
-                              const SizedBox(width: 4),
-                              Text(
-                                message.restrictionNote ?? 'Restricted by AI',
-                                style: TextStyle(fontSize: 11, color: AppTheme.warning, fontWeight: FontWeight.w500),
-                              ),
-                            ],
-                          ),
-                        ),
-
-                      if (message.isReply && message.replyToMessage != null)
-                        Container(
-                          margin: const EdgeInsets.only(bottom: 6),
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(8),
-                            border: const Border(left: BorderSide(color: AppTheme.primaryGreen, width: 3)),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                message.replyToMessage!.senderName ?? 'Unknown',
-                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.primaryGreen),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                message.replyToMessage!.content,
-                                style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
-                          ),
-                        ),
-
-                      if (message.isForwarded)
-                        Container(
-                          margin: const EdgeInsets.only(bottom: 4),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.forward, size: 12, color: AppTheme.textTertiary),
-                              const SizedBox(width: 4),
-                              Text(
-                                'Forwarded from ${message.forwardFromName ?? 'Unknown'}',
-                                style: TextStyle(fontSize: 11, color: AppTheme.textTertiary),
-                              ),
-                            ],
-                          ),
-                        ),
-
-                      Text(
-                        isRestricted ? '⚠️ This content has been restricted' : message.content,
-                        style: TextStyle(
-                          fontSize: 15,
-                          color: isRestricted ? AppTheme.warning : AppTheme.textPrimary,
-                          height: 1.4,
-                        ),
+              Flexible(
+                child: GestureDetector(
+                  onTap: isFailed ? () => _retryMessage(message.id) : null,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: isFailed
+                          ? Colors.red.withOpacity(0.1)
+                          : isRestricted
+                              ? AppTheme.warning.withOpacity(0.1)
+                              : isMe
+                                  ? AppTheme.sentMessage
+                                  : AppTheme.receivedMessage,
+                      borderRadius: BorderRadius.only(
+                        topLeft: const Radius.circular(16),
+                        topRight: const Radius.circular(16),
+                        bottomLeft: Radius.circular(isMe ? 16 : 4),
+                        bottomRight: Radius.circular(isMe ? 4 : 16),
                       ),
-
-                      const SizedBox(height: 4),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            message.formattedTime,
-                            style: TextStyle(fontSize: 11, color: AppTheme.textTertiary),
-                          ),
-                          if (message.isEdited) ...[
-                            const SizedBox(width: 4),
-                            Text('edited', style: TextStyle(fontSize: 10, color: AppTheme.textTertiary, fontStyle: FontStyle.italic)),
-                          ],
-                          if (isMe) ...[
-                            const SizedBox(width: 4),
-                            if (message.status == MessageStatus.sending)
-                              SizedBox(
-                                width: 12,
-                                height: 12,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: AppTheme.textTertiary,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (isFailed)
+                          Container(
+                            margin: const EdgeInsets.only(bottom: 6),
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.red.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.error_outline, size: 12, color: Colors.red),
+                                const SizedBox(width: 4),
+                                const Text(
+                                  'Tap to retry',
+                                  style: TextStyle(fontSize: 11, color: Colors.red, fontWeight: FontWeight.w500),
                                 ),
-                              )
-                            else
-                              Icon(
-                                message.status == MessageStatus.read ? Icons.done_all : Icons.done,
-                                size: 14,
-                                color: message.status == MessageStatus.read ? AppTheme.accentCyan : AppTheme.textTertiary,
-                              ),
+                              ],
+                            ),
+                          ),
+
+                        if (isRestricted)
+                          Container(
+                            margin: const EdgeInsets.only(bottom: 6),
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: AppTheme.warning.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.warning_amber, size: 12, color: AppTheme.warning),
+                                const SizedBox(width: 4),
+                                Text(
+                                  message.restrictionNote ?? 'Restricted by AI',
+                                  style: TextStyle(fontSize: 11, color: AppTheme.warning, fontWeight: FontWeight.w500),
+                                ),
+                              ],
+                            ),
+                          ),
+
+                        if (message.isReply && message.replyToMessage != null)
+                          Container(
+                            margin: const EdgeInsets.only(bottom: 6),
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(8),
+                              border: const Border(left: BorderSide(color: AppTheme.primaryGreen, width: 3)),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  message.replyToMessage!.senderName ?? 'Unknown',
+                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.primaryGreen),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  message.replyToMessage!.content,
+                                  style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          ),
+
+                        if (message.isForwarded)
+                          Container(
+                            margin: const EdgeInsets.only(bottom: 4),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.forward, size: 12, color: AppTheme.textTertiary),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Forwarded from ${message.forwardFromName ?? 'Unknown'}',
+                                  style: TextStyle(fontSize: 11, color: AppTheme.textTertiary),
+                                ),
+                              ],
+                            ),
+                          ),
+
+                        Text(
+                          isRestricted ? '⚠️ This content has been restricted' : message.content,
+                          style: TextStyle(
+                            fontSize: 15,
+                            color: isRestricted ? AppTheme.warning : AppTheme.textPrimary,
+                            height: 1.4,
+                          ),
+                        ),
+
+                        const SizedBox(height: 4),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              message.formattedTime,
+                              style: TextStyle(fontSize: 11, color: AppTheme.textTertiary),
+                            ),
+                            if (message.isEdited) ...[
+                              const SizedBox(width: 4),
+                              Text('edited', style: TextStyle(fontSize: 10, color: AppTheme.textTertiary, fontStyle: FontStyle.italic)),
+                            ],
+                            if (isMe) ...[
+                              const SizedBox(width: 4),
+                              if (message.status == MessageStatus.sending)
+                                SizedBox(
+                                  width: 12,
+                                  height: 12,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: AppTheme.textTertiary,
+                                  ),
+                                )
+                              else
+                                Icon(
+                                  message.status == MessageStatus.read ? Icons.done_all : Icons.done,
+                                  size: 14,
+                                  color: message.status == MessageStatus.read ? AppTheme.accentCyan : AppTheme.textTertiary,
+                                ),
+                            ],
                           ],
-                        ],
-                      ),
-                    ],
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showMessageOptions(MessageModel message) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.bgModal,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(width: 40, height: 4, decoration: BoxDecoration(color: AppTheme.divider, borderRadius: BorderRadius.circular(2))),
+            const SizedBox(height: 20),
+            ListTile(
+              leading: const Icon(Icons.reply, color: AppTheme.textSecondary),
+              title: const Text('Reply', style: TextStyle(color: AppTheme.textPrimary)),
+              onTap: () => Navigator.pop(context),
+            ),
+            ListTile(
+              leading: const Icon(Icons.forward, color: AppTheme.textSecondary),
+              title: const Text('Forward', style: TextStyle(color: AppTheme.textPrimary)),
+              onTap: () => Navigator.pop(context),
+            ),
+            ListTile(
+              leading: const Icon(Icons.copy, color: AppTheme.textSecondary),
+              title: const Text('Copy', style: TextStyle(color: AppTheme.textPrimary)),
+              onTap: () => Navigator.pop(context),
+            ),
+            ListTile(
+              leading: const Icon(Icons.report, color: Colors.red),
+              title: const Text('Report', style: TextStyle(color: Colors.red)),
+              onTap: () {
+                Navigator.pop(context);
+                _showReportDialog(message);
+              },
             ),
           ],
         ),
@@ -889,7 +948,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         ),
                         IconButton(
                           icon: const Icon(Icons.attach_file, color: AppTheme.textTertiary),
-                          onPressed: () => _showAttachmentMenu(),
+                          onPressed: () {},
                         ),
                       ],
                     ),
@@ -900,8 +959,6 @@ class _ChatScreenState extends State<ChatScreen> {
                   onTap: () {
                     if (_messageController.text.trim().isNotEmpty) {
                       _sendMessage(_messageController.text.trim());
-                    } else {
-                      _toggleRecording();
                     }
                   },
                   child: Container(
@@ -914,9 +971,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
-                      _messageController.text.trim().isNotEmpty
-                          ? Icons.send
-                          : (_isRecording ? Icons.stop : Icons.mic),
+                      _messageController.text.trim().isNotEmpty ? Icons.send : Icons.mic,
                       color: _messageController.text.trim().isNotEmpty ? Colors.white : AppTheme.primaryGreen,
                       size: 20,
                     ),
@@ -926,59 +981,6 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  void _showAttachmentMenu() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppTheme.bgModal,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (context) => Container(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(width: 40, height: 4, decoration: BoxDecoration(color: AppTheme.divider, borderRadius: BorderRadius.circular(2))),
-            const SizedBox(height: 24),
-            GridView.count(
-              shrinkWrap: true,
-              crossAxisCount: 4,
-              mainAxisSpacing: 16,
-              crossAxisSpacing: 16,
-              children: [
-                _buildAttachmentItem(Icons.image, 'Gallery', AppTheme.accentPurple, _pickImage),
-                _buildAttachmentItem(Icons.camera_alt, 'Camera', AppTheme.error, _takePhoto),
-                _buildAttachmentItem(Icons.insert_drive_file, 'Document', AppTheme.accentBlue, _pickDocument),
-                _buildAttachmentItem(Icons.location_on, 'Location', AppTheme.success, _sendLocation),
-                _buildAttachmentItem(Icons.person, 'Contact', AppTheme.warning, _sendContact),
-                _buildAttachmentItem(Icons.poll, 'Poll', AppTheme.accentPink, _sendPoll),
-                _buildAttachmentItem(Icons.gif, 'GIF', AppTheme.accentCyan, _sendGif),
-                _buildAttachmentItem(Icons.mic, 'Audio', AppTheme.primaryGreen, _toggleRecording),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAttachmentItem(IconData icon, String label, Color color, VoidCallback onTap) {
-    return InkWell(
-      onTap: onTap,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(color: color.withOpacity(0.15), shape: BoxShape.circle),
-            child: Icon(icon, color: color, size: 24),
-          ),
-          const SizedBox(height: 8),
-          Text(label, style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
-        ],
       ),
     );
   }
