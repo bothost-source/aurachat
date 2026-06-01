@@ -5,7 +5,7 @@ enum BotCapability { messaging, inline, payments, games, stickers, customKeyboar
 
 @immutable
 class BotModel {
-  final String id;
+  final String botId;
   final String name;
   final String username;
   final String? description;
