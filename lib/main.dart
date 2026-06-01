@@ -42,10 +42,19 @@ import 'services/firebase_chat_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize services with error handling
   ConnectivityService().initialize();
-  FirebaseChatService().initialize();
-  await Firebase.initializeApp();
-  await NotificationService.init();
+  
+  try {
+    FirebaseChatService().initialize();
+    await Firebase.initializeApp();
+    await NotificationService.init();
+  } catch (e) {
+    print('Firebase init error: $e');
+    // Continue without Firebase - app will still open
+  }
+  
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
