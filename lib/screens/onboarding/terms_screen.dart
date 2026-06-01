@@ -127,7 +127,7 @@ class _TermsScreenState extends State<TermsScreen> {
                   _buildParagraph('We reserve the right, at our sole discretion, to modify or replace these Terms at any time. We will provide notice of any material changes. Your continued use of the Service after any changes constitutes acceptance of the new Terms.'),
                   _buildSection('11. Contact Us'),
                   _buildParagraph('If you have any questions about these Terms, please contact us at:'),
-                  _buildBulletPoint('Email: aurachat@gmail.com'),
+                  _buildBulletPoint('Email: supportaurachat@gmail.com'),
                   _buildBulletPoint('Support: supportaurachat@gmail.com'),
                   _buildBulletPoint('Address: TARRIFIC HQ, Lagos, Nigeria'),
                   const SizedBox(height: 40),
