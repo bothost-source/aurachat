@@ -26,9 +26,13 @@ class ConnectivityService {
     _connectivity.onConnectivityChanged.listen((results) async {
       if (_isDisposed) return;
 
-      final hasConnection = results.isNotEmpty && results.any((r) => 
-  r != ConnectivityResult.none && r != ConnectivityResult.bluetooth
-);
+  bool hasConnection = false;
+  for (final r in results) {
+    if (r == ConnectivityResult.wifi || r == ConnectivityResult.mobile || r == ConnectivityResult.ethernet) {
+       hasConnection = true;
+       break;
+      }
+     }
 
       if (hasConnection) {
         // Don't immediately say online — verify with actual ping
