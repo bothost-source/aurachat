@@ -374,14 +374,6 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
-  void muteChat(String chatId, ChatMuteDuration duration) {
-    final index = _chats.indexWhere((c) => c.id == chatId);
-    if (index != -1) {
-      _chats[index] = _chats[index].copyWith(isMuted: true);
-      notifyListeners();
-    }
-  }
-
   void archiveChat(String chatId) {
     final index = _chats.indexWhere((c) => c.id == chatId);
     if (index != -1) {
