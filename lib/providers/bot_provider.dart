@@ -108,7 +108,7 @@ class BotProvider extends ChangeNotifier {
   }
 
   void updateBot(String botId, BotModel updatedBot) {
-    final index = _myBots.indexWhere((b) => b.id == botId);
+    final index = _myBots.indexWhere((b) => b.botId == botId);
     if (index != -1) {
       _myBots[index] = updatedBot;
       notifyListeners();
@@ -116,12 +116,12 @@ class BotProvider extends ChangeNotifier {
   }
 
   void deleteBot(String botId) {
-    _myBots.removeWhere((b) => b.id == botId);
+    _myBots.removeWhere((b) => b.botId == botId);
     notifyListeners();
   }
 
   void regenerateToken(String botId) {
-    final index = _myBots.indexWhere((b) => b.id == botId);
+    final index = _myBots.indexWhere((b) => b.botId == botId);
     if (index != -1) {
       final newToken = 'bot${_generateToken()}';
       _myBots[index] = _myBots[index].copyWith(token: newToken);
