@@ -40,6 +40,9 @@ class ChatProvider extends ChangeNotifier {
       ? 'typing...' 
       : '${_typingUsers.length} people typing...';
 
+  // ✅ FIX 3: Added totalUnread getter
+  int get totalUnread => _chats.fold(0, (sum, chat) => sum + chat.unreadCount);
+
   // AI Moderation status
   bool _aiModerationEnabled = true;
   bool get aiModerationEnabled => _aiModerationEnabled;
@@ -415,7 +418,7 @@ class ChatProvider extends ChangeNotifier {
     return chats.where((chat) {
       return chat.displayName.toLowerCase().contains(query) ||
           chat.participants.any((p) => 
-             (p.username ?? '').toLowerCase().contains(query)
+             (p.username ?? '').toLowerCase().contains(query) ||  // ✅ FIX 2: Added || and null-safe
               p.displayName.toLowerCase().contains(query));
     }).toList();
   }
