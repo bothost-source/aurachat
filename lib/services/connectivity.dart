@@ -27,12 +27,9 @@ class ConnectivityService {
       if (_isDisposed) return;
 
   bool hasConnection = false;
-  for (final r in results) {
-    if (r == ConnectivityResult.wifi || r == ConnectivityResult.mobile || r == ConnectivityResult.ethernet) {
-       hasConnection = true;
-       break;
-      }
-     }
+  if (results == ConnectivityResult.wifi || results == ConnectivityResult.mobile || results == ConnectivityResult.ethernet) {
+  hasConnection = true;
+  }
 
       if (hasConnection) {
         // Don't immediately say online — verify with actual ping
