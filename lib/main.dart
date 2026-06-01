@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';  // ADD THIS
 import 'themes/app_theme.dart';
 import 'providers/auth_provider.dart';
 import 'providers/chat_provider.dart';
@@ -37,23 +38,18 @@ import 'screens/saved/saved_messages_screen.dart';
 import 'screens/archive/archived_chats_screen.dart';
 import 'services/notification_service.dart';
 import 'services/connectivity.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'services/firebase_chat_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // Initialize services with error handling
-  ConnectivityService().initialize();
   await NotificationService.init();
+  ConnectivityService().initialize();
   
-  try {
-    FirebaseChatService().initialize();
-    await Firebase.initializeApp();    
-  } catch (e) {
-    print('Firebase init error: $e');
-    // Continue without Firebase - app will still open
-  }
+  // SUPABASE INIT (replace Firebase)
+  await Supabase.initialize(
+    url: 'https://eocvhkbjjqeinycdgshj.supabase.co',
+    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVvY3Zoa2JqanFlaW55Y2Rnc2hqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAzNDMxODEsImV4cCI6MjA5NTkxOTE4MX0.Eqd4jqB7BpROM7LyXX4GoW0UBWkltKXuf1XrT0CwQQQ',
+  );
   
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
