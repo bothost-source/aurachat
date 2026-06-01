@@ -18,7 +18,7 @@ class BotProvider extends ChangeNotifier {
     final now = DateTime.now();
     _myBots = [
       BotModel(
-        id: 'bot_1',
+        botId: 'bot_1',
         name: 'TARRIFIC Assistant',
         username: 'tarrific_assistant_bot',
         description: 'Your personal AI assistant for TARRIFIC CHAT',
@@ -49,7 +49,7 @@ class BotProvider extends ChangeNotifier {
 
     _publicBots = [
       BotModel(
-        id: 'bot_pub_1',
+        botId: 'bot_pub_1',
         name: 'Crypto Alert Bot',
         username: 'crypto_alert_bot',
         description: 'Real-time cryptocurrency price alerts',
@@ -61,7 +61,7 @@ class BotProvider extends ChangeNotifier {
         lastActivity: now.subtract(const Duration(minutes: 1)),
       ),
       BotModel(
-        id: 'bot_pub_2',
+        botId: 'bot_pub_2',
         name: 'Weather Bot',
         username: 'weather_now_bot',
         description: 'Get weather updates for any location',
@@ -90,8 +90,7 @@ class BotProvider extends ChangeNotifier {
 
     await Future.delayed(const Duration(seconds: 2));
 
-    final bot = BotModel(
-      id: 'bot_${DateTime.now().millisecondsSinceEpoch}',
+    final bot = BotModel(Duratiobotd: 'bot_${DateTime.now().millisecondsSinceEpoch}',
       name: name,
       username: username,
       description: description,
