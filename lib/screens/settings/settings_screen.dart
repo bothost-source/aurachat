@@ -495,7 +495,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 12),
             _buildPremiumFeature(Icons.check_circle, 'Verified badge on profile'),
             _buildPremiumFeature(Icons.wallpaper, 'All premium wallpapers'),
-            _buildPremiumFeature(Icons.sticker, 'All sticker packs'),
+            _buildPremiumFeature(Icons.emoji_emotions, 'All sticker packs'),
             _buildPremiumFeature(Icons.timer, '48h & 3-day status duration'),
             const SizedBox(height: 16),
             const Text(
