@@ -53,7 +53,7 @@ class FirebaseChatService {
   Future<String> createDirectChat(String otherUserId) async {
     if (!_isAuthenticated) throw Exception('Not authenticated');
 
-    final currentUserId = _currentUserId!;
+    final userId = currentUserId;
     final chatId = _getDirectChatId(currentUserId, otherUserId);
 
     final chatRef = _firestore.collection('chats').doc(chatId);
@@ -84,7 +84,7 @@ class FirebaseChatService {
   }) async {
     if (!_isAuthenticated) throw Exception('Not authenticated');
 
-    final currentUserId = currentUserId!;
+    final userId = currentUserId;
     final allMembers = [currentUserId, ...memberIds.where((id) => id != currentUserId)];
 
     final chatRef = _firestore.collection('chats').doc();
@@ -119,7 +119,7 @@ class FirebaseChatService {
   }) async {
     if (!_isAuthenticated) throw Exception('Not authenticated');
 
-    final currentUserId = currentUserId!;
+    final userId = currentUserId;
     final chatRef = _firestore.collection('chats').doc();
 
     await chatRef.set({
@@ -158,7 +158,7 @@ class FirebaseChatService {
   Stream<List<ChatModel>> getUserGroups() {
     if (!_isAuthenticated) return Stream.value([]);
 
-    final currentUserId = currentUserId!;
+    final userId = currentUserId;
 
     return _firestore
         .collection('chats')
@@ -433,7 +433,7 @@ class FirebaseChatService {
   Future<void> setTypingStatus(String chatId, bool isTyping) async {
     if (!_isAuthenticated) return;
 
-    final currentUserId = _currentUserId!;
+    final userId = currentUserId;
 
     await _firestore
         .collection('chats')
