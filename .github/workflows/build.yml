@@ -38,13 +38,16 @@ jobs:
         run: |
           # Create android/app folder if not exists
           mkdir -p android/app
-          # Copy google-services.json from repo
+          
+          # Copy google-services.json from repo root
           if [ -f "google-services.json" ]; then
             cp google-services.json android/app/google-services.json
           fi
-          # Add Firebase plugin to build.gradle
-          sed -i 's/id "com.android.application"/id "com.android.application"\n    id "com.google.gms.google-services"/' android/app/build.gradle
-          # Add Firebase classpath to project build.gradle
+          
+          # Add Firebase plugin to APP-LEVEL build.gradle (line 3 area)
+          sed -i '2a\    id "com.google.gms.google-services"' android/app/build.gradle
+          
+          # Add Firebase classpath to PROJECT-LEVEL build.gradle
           sed -i 's/dependencies {/dependencies {\n        classpath "com.google.gms:google-services:4.4.1"/' android/build.gradle
 
       - name: Build APK
