@@ -110,7 +110,7 @@ class BotModel {
     Map<String, dynamic>? analytics,
   }) {
     return BotModel(
-      botId: Id ?? this.botId,
+      botId: botId ?? this.botId,
       name: name ?? this.name,
       username: username ?? this.username,
       description: description ?? this.description,
