@@ -45,11 +45,11 @@ void main() async {
   
   // Initialize services with error handling
   ConnectivityService().initialize();
+  await NotificationService.init();
   
   try {
     FirebaseChatService().initialize();
-    await Firebase.initializeApp();
-    await NotificationService.init();
+    await Firebase.initializeApp();    
   } catch (e) {
     print('Firebase init error: $e');
     // Continue without Firebase - app will still open
