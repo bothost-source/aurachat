@@ -241,7 +241,7 @@ class FirebaseChatService {
   // Actually send to Firebase
   Future<void> _sendToFirebase(MessageModel message, String chatId) async {
     try {
-      final currentUserId = currentUserId!;
+      final userId = currentUserId;
 
       // Add message to Firestore
       await _firestore
@@ -381,7 +381,7 @@ class FirebaseChatService {
   Future<void> markAsRead(String chatId) async {
     if (!_isAuthenticated) return;
 
-    final currentUserId = currentUserId!;
+    final userId = currentUserId;
 
     // Get unread messages
     final messages = await _firestore
@@ -413,7 +413,7 @@ class FirebaseChatService {
   Future<void> markAsDelivered(String chatId, String messageId) async {
     if (!_isAuthenticated) return;
 
-    final currentUserId = currentUserId!;
+    final userId = currentUserId;
 
     await _firestore
         .collection('chats')
