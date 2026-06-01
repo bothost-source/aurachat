@@ -159,7 +159,6 @@ class _BotCreatorScreenState extends State<BotCreatorScreen> {
     final botId = DateTime.now().millisecondsSinceEpoch.toString();
 
     await context.read<BotProvider>().createBot(
-      botId: botId,
       name: _nameController.text,
       username: _usernameController.text,
       description: _descriptionController.text.isEmpty ? null : _descriptionController.text,
