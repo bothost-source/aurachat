@@ -90,7 +90,8 @@ class BotProvider extends ChangeNotifier {
 
     await Future.delayed(const Duration(seconds: 2));
 
-    final bot = BotModel(Duratiobotd: 'bot_${DateTime.now().millisecondsSinceEpoch}',
+    final bot = BotModel(
+      botId: 'bot_${DateTime.now().millisecondsSinceEpoch}',
       name: name,
       username: username,
       description: description,
