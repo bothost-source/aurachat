@@ -116,7 +116,7 @@ class ChatProvider extends ChangeNotifier {
       (c) => c.id == chatId,
       orElse: () => ChatModel(
         id: chatId,
-        displayName: 'Unknown',
+        name: 'Unknown',
         participants: [],
         createdAt: DateTime.now(),
       ),
