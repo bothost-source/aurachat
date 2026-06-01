@@ -395,11 +395,12 @@ class FirebaseChatService {
 
     for (final doc in messages.docs) {
       final readBy = List<String>.from(doc.data()['readBy'] ?? []);
-      if (!readBy.contains(currentUserId)) {
-        readBy: userId != null ? <String>[userId!] : <String>[],
-        batch.update(doc.reference, {'readBy': readBy});
-      }
-    }
+if (userId != null && !readBy.contains(userId)) {
+  readBy.add(userId);
+  batch.update(doc.reference, {'readBy': readBy});
+  }
+ }
+
 
     await batch.commit();
 
