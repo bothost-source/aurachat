@@ -1,164 +1,224 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';  // ADD THIS IMPORT
-import '../../themes/app_theme.dart';
+import 'package:provider/provider.dart';
+import '../../providers/auth_provider.dart';
 
-class OtpScreen extends StatefulWidget {
-  final String phoneNumber;
-  final String expectedOtp;
-  final String cleanPhoneNumber;
-
-  const OtpScreen({
-    super.key,
-    required this.phoneNumber,
-    required this.expectedOtp,
-    required this.cleanPhoneNumber,
-  });
+class OTPScreen extends StatefulWidget {
+  const OTPScreen({super.key});
 
   @override
-  State<OtpScreen> createState() => _OtpScreenState();
+  State<OTPScreen> createState() => _OTPScreenState();
 }
 
-class _OtpScreenState extends State<OtpScreen> {
-  final List<TextEditingController> _controllers = List.generate(6, (_) => TextEditingController());
-  final List<FocusNode> _focusNodes = List.generate(6, (_) => FocusNode());
+class _OTPScreenState extends State<OTPScreen> {
+  final List<TextEditingController> _controllers = List.generate(
+    6,
+    (index) => TextEditingController(),
+  );
+  final List<FocusNode> _focusNodes = List.generate(
+    6,
+    (index) => FocusNode(),
+  );
   bool _isLoading = false;
-  int _resendTimer = 60;
+  String? _phoneNumber;
 
   @override
-  void initState() {
-    super.initState();
-    _startResendTimer();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+    _phoneNumber = args?['phone'];
   }
 
-  void _startResendTimer() {
-    Future.delayed(const Duration(seconds: 1), () {
-      if (mounted && _resendTimer > 0) {
-        setState(() => _resendTimer--);
-        _startResendTimer();
-      }
-    });
+  @override
+  void dispose() {
+    for (final controller in _controllers) {
+      controller.dispose();
+    }
+    for (final node in _focusNodes) {
+      node.dispose();
+    }
+    super.dispose();
+  }
+
+  String get _otpCode {
+    return _controllers.map((c) => c.text).join();
   }
 
   void _onOtpDigitChanged(int index, String value) {
     if (value.length == 1 && index < 5) {
       _focusNodes[index + 1].requestFocus();
-    }
-    if (value.isEmpty && index > 0) {
+    } else if (value.isEmpty && index > 0) {
       _focusNodes[index - 1].requestFocus();
     }
-    _checkComplete();
-  }
 
-  void _checkComplete() {
-    final otp = _controllers.map((c) => c.text).join();
-    if (otp.length == 6) {
+    // Auto-verify when all digits entered
+    if (_otpCode.length == 6) {
       _verifyOTP();
     }
   }
 
-  void _verifyOTP() async {
-    final enteredOtp = _controllers.map((c) => c.text).join();
-    
+  Future<void> _verifyOTP() async {
+    if (_otpCode.length != 6) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter the complete OTP')),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
-    await Future.delayed(const Duration(seconds: 1));
+
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final success = await authProvider.verifyOTP(_otpCode);
+
     setState(() => _isLoading = false);
 
-    if (enteredOtp == widget.expectedOtp) {
-      if (mounted) Navigator.pushReplacementNamed(context, '/setup_profile');
-    } else {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Invalid OTP. Please try again.'),
-            backgroundColor: AppTheme.error,
-          ),
+    if (success && mounted) {
+      // Check if profile needs setup
+      if (authProvider.userName == null || authProvider.userName!.isEmpty) {
+        Navigator.pushNamedAndRemoveUntil(
+          context,
+          '/setup_profile',
+          (route) => false,
+        );
+      } else {
+        Navigator.pushNamedAndRemoveUntil(
+          context,
+          '/main',
+          (route) => false,
         );
       }
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(authProvider.error ?? 'Invalid OTP'),
+        ),
+      );
+      authProvider.clearError();
+
+      // Clear OTP fields
+      for (final controller in _controllers) {
+        controller.clear();
+      }
+      _focusNodes[0].requestFocus();
+    }
+  }
+
+  Future<void> _resendOTP() async {
+    if (_phoneNumber == null) return;
+
+    setState(() => _isLoading = true);
+
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final success = await authProvider.sendOTP(_phoneNumber!);
+
+    setState(() => _isLoading = false);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            success ? 'OTP resent successfully' : 'Failed to resend OTP',
+          ),
+        ),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.bgPrimary,
-      appBar: AppBar(backgroundColor: Colors.transparent, elevation: 0, iconTheme: const IconThemeData(color: AppTheme.textPrimary)),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SizedBox(height: 20),
-              const Text('Verify your number', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: AppTheme.textPrimary)),
-              const SizedBox(height: 8),
-              RichText(
-                text: TextSpan(
-                  style: TextStyle(fontSize: 15, color: AppTheme.textSecondary, height: 1.5),
-                  children: [
-                    const TextSpan(text: 'Enter the 6-digit code sent to '),
-                    TextSpan(
-                      text: widget.phoneNumber,
-                      style: const TextStyle(fontWeight: FontWeight.w600, color: AppTheme.textPrimary),
-                    ),
-                  ],
+              const Spacer(),
+
+              Text(
+                'Verify OTP',
+                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
                 ),
               ),
-              const SizedBox(height: 40),
+
+              const SizedBox(height: 8),
+
+              Text(
+                'Enter the 6-digit code sent to ${_phoneNumber ?? 'your phone'}',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Colors.grey,
+                ),
+              ),
+
+              const SizedBox(height: 48),
+
+              // OTP Input Fields
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: List.generate(6, (index) => Container(
-                  width: 50,
-                  height: 60,
-                  decoration: BoxDecoration(
-                    color: AppTheme.bgInput,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: _focusNodes[index].hasFocus ? AppTheme.primaryGreen : AppTheme.divider,
-                      width: _focusNodes[index].hasFocus ? 2 : 1,
+                children: List.generate(
+                  6,
+                  (index) => SizedBox(
+                    width: 50,
+                    child: TextField(
+                      controller: _controllers[index],
+                      focusNode: _focusNodes[index],
+                      keyboardType: TextInputType.number,
+                      textAlign: TextAlign.center,
+                      maxLength: 1,
+                      decoration: InputDecoration(
+                        counterText: '',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        filled: true,
+                        fillColor: Theme.of(context).cardColor,
+                      ),
+                      onChanged: (value) => _onOtpDigitChanged(index, value),
                     ),
                   ),
-                  child: TextField(
-                    controller: _controllers[index],
-                    focusNode: _focusNodes[index],
-                    textAlign: TextAlign.center,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [
-                      FilteringTextInputFormatter.digitsOnly,  // ONLY NUMBERS ALLOWED
-                      LengthLimitingTextInputFormatter(1),
-                    ],
-                    maxLength: 1,
-                    style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: AppTheme.textPrimary),
-                    decoration: const InputDecoration(counterText: '', border: InputBorder.none),
-                    onChanged: (v) => _onOtpDigitChanged(index, v),
-                  ),
-                )),
+                ),
               ),
+
               const SizedBox(height: 32),
-              Center(
-                child: _resendTimer > 0
-                    ? Text('Resend code in $_resendTimer seconds', style: TextStyle(fontSize: 14, color: AppTheme.textTertiary))
-                    : TextButton(
-                        onPressed: () => setState(() => _resendTimer = 60),
-                        child: const Text('Resend Code', style: TextStyle(color: AppTheme.primaryGreen, fontWeight: FontWeight.w600)),
-                      ),
-              ),
-              const Spacer(),
+
+              // Verify Button
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: _isLoading ? null : _verifyOTP,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primaryGreen,
-                    foregroundColor: Colors.white,
-                    disabledBackgroundColor: AppTheme.bgElevated,
-                    padding: const EdgeInsets.symmetric(vertical: 18),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  ),
                   child: _isLoading
-                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                      : const Text('Verify', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Text('Verify'),
                 ),
               ),
+
+              const SizedBox(height: 24),
+
+              // Resend
+              Center(
+                child: TextButton(
+                  onPressed: _isLoading ? null : _resendOTP,
+                  child: const Text('Resend OTP'),
+                ),
+              ),
+
+              const Spacer(),
             ],
           ),
         ),
