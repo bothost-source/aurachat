@@ -1,191 +1,182 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../themes/app_theme.dart';
-import '../../providers/auth_provider.dart';
-import '../../models/user_model.dart';
+import '../../providers/settings_provider.dart';
 
 class PrivacySettingsScreen extends StatelessWidget {
   const PrivacySettingsScreen({super.key});
 
-  String _privacyLabel(PrivacySetting setting) {
-    switch (setting) {
-      case PrivacySetting.everyone: return 'Everyone';
-      case PrivacySetting.contacts: return 'My Contacts';
-      case PrivacySetting.nobody: return 'Nobody';
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    final auth = context.watch<AuthProvider>();
-    final user = auth.currentUser;
+    final settingsProvider = Provider.of<SettingsProvider>(context);
 
     return Scaffold(
-      backgroundColor: AppTheme.bgPrimary,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: AppTheme.bgSecondary,
-        elevation: 0,
         title: const Text('Privacy'),
+        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
+        elevation: 0,
       ),
       body: ListView(
+        padding: const EdgeInsets.all(16),
         children: [
-          // Phone Number Visibility
-          _buildPrivacyTile(
-            context: context,
+          _buildSectionHeader(context, 'Who Can See My Info'),
+
+          _buildToggleTile(
+            context,
+            icon: Icons.phone_outlined,
             title: 'Phone Number',
-            subtitle: 'Who can see my phone number',
-            currentValue: user?.phoneVisibility ?? PrivacySetting.contacts,
-            options: PrivacySetting.values,
-            onChanged: (v) => auth.updatePrivacySetting('phone', v),
+            subtitle: 'Show my phone number to others',
+            value: settingsProvider.phoneNumberVisible,
+            onChanged: (value) => settingsProvider.setPhoneNumberVisible(value),
           ),
-          _buildPrivacyTile(
-            context: context,
-            title: 'Last Seen & Online',
-            subtitle: 'Who can see when you were last active',
-            currentValue: user?.lastSeenVisibility ?? PrivacySetting.everyone,
-            options: PrivacySetting.values,
-            onChanged: (v) => auth.updatePrivacySetting('lastSeen', v),
+
+          _buildToggleTile(
+            context,
+            icon: Icons.access_time_outlined,
+            title: 'Last Seen',
+            subtitle: 'Show when I was last online',
+            value: settingsProvider.lastSeenVisible,
+            onChanged: (value) => settingsProvider.setLastSeenVisible(value),
           ),
-          _buildPrivacyTile(
-            context: context,
+
+          _buildToggleTile(
+            context,
+            icon: Icons.photo_outlined,
             title: 'Profile Photo',
-            subtitle: 'Who can see your profile picture',
-            currentValue: user?.profilePhotoVisibility ?? PrivacySetting.everyone,
-            options: PrivacySetting.values,
-            onChanged: (v) => auth.updatePrivacySetting('profilePhoto', v),
+            subtitle: 'Show my profile photo to others',
+            value: settingsProvider.profilePhotoVisible,
+            onChanged: (value) => settingsProvider.setProfilePhotoVisible(value),
           ),
-          _buildPrivacyTile(
-            context: context,
+
+          const SizedBox(height: 24),
+
+          _buildSectionHeader(context, 'Messaging'),
+
+          _buildToggleTile(
+            context,
+            icon: Icons.forward_to_inbox_outlined,
             title: 'Forwarded Messages',
-            subtitle: 'Who can forward your messages with your name',
-            currentValue: user?.forwardMessageVisibility ?? PrivacySetting.everyone,
-            options: PrivacySetting.values,
-            onChanged: (v) => auth.updatePrivacySetting('forward', v),
+            subtitle: 'Allow others to forward my messages',
+            value: settingsProvider.forwardedMessages,
+            onChanged: (value) => settingsProvider.setForwardedMessages(value),
           ),
-          _buildPrivacyTile(
-            context: context,
+
+          _buildToggleTile(
+            context,
+            icon: Icons.group_add_outlined,
             title: 'Add to Groups',
-            subtitle: 'Who can add you to groups and channels',
-            currentValue: user?.addToGroups ?? PrivacySetting.contacts,
-            options: PrivacySetting.values,
-            onChanged: (v) => auth.updatePrivacySetting('groups', v),
-          ),
-          _buildPrivacyTile(
-            context: context,
-            title: 'Voice Calls',
-            subtitle: 'Who can call you',
-            currentValue: user?.voiceCallPermission ?? PrivacySetting.contacts,
-            options: PrivacySetting.values,
-            onChanged: (v) => auth.updatePrivacySetting('voiceCall', v),
-          ),
-          _buildPrivacyTile(
-            context: context,
-            title: 'Video Calls',
-            subtitle: 'Who can video call you',
-            currentValue: user?.videoCallPermission ?? PrivacySetting.contacts,
-            options: PrivacySetting.values,
-            onChanged: (v) => auth.updatePrivacySetting('videoCall', v),
+            subtitle: 'Allow others to add me to groups',
+            value: settingsProvider.addToGroups,
+            onChanged: (value) => settingsProvider.setAddToGroups(value),
           ),
 
-          const Divider(color: AppTheme.divider),
-
-          // Discovery
-          _buildSectionHeader('Discovery'),
-          SwitchListTile(
-            title: const Text('Find by Phone Number', style: TextStyle(color: AppTheme.textPrimary, fontSize: 15)),
-            subtitle: Text('Allow people to find you using your phone', style: TextStyle(color: AppTheme.textTertiary, fontSize: 13)),
-            value: user?.allowFindingByPhone ?? true,
-            onChanged: (v) {},
-            activeColor: AppTheme.primaryGreen,
-          ),
-          SwitchListTile(
-            title: const Text('Find by Username', style: TextStyle(color: AppTheme.textPrimary, fontSize: 15)),
-            subtitle: Text('Allow people to find you using @username', style: TextStyle(color: AppTheme.textTertiary, fontSize: 13)),
-            value: user?.allowFindingByUsername ?? true,
-            onChanged: (v) {},
-            activeColor: AppTheme.primaryGreen,
+          _buildToggleTile(
+            context,
+            icon: Icons.call_outlined,
+            title: 'Voice & Video Calls',
+            subtitle: 'Allow others to call me',
+            value: settingsProvider.voiceVideoCallsVisible,
+            onChanged: (value) => settingsProvider.setVoiceVideoCallsVisible(value),
           ),
 
-          const Divider(color: AppTheme.divider),
+          const SizedBox(height: 24),
 
-          // Blocked Users
-          ListTile(
-            leading: Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(color: AppTheme.error.withOpacity(0.15), borderRadius: BorderRadius.circular(10)),
-              child: const Icon(Icons.block, color: AppTheme.error, size: 20),
+          _buildSectionHeader(context, 'Find Me'),
+
+          _buildToggleTile(
+            context,
+            icon: Icons.phone_android_outlined,
+            title: 'Find by Phone Number',
+            subtitle: 'People can find me using my phone',
+            value: settingsProvider.findByPhone,
+            onChanged: (value) => settingsProvider.setFindByPhone(value),
+          ),
+
+          _buildToggleTile(
+            context,
+            icon: Icons.alternate_email_outlined,
+            title: 'Find by Username',
+            subtitle: 'People can find me using my username',
+            value: settingsProvider.findByUsername,
+            onChanged: (value) => settingsProvider.setFindByUsername(value),
+          ),
+
+          const SizedBox(height: 24),
+
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Theme.of(context).cardColor,
+              borderRadius: BorderRadius.circular(12),
             ),
-            title: const Text('Blocked Users', style: TextStyle(color: AppTheme.textPrimary, fontSize: 15)),
-            subtitle: Text('${user?.blockedUsers.length ?? 0} blocked', style: const TextStyle(color: AppTheme.textTertiary, fontSize: 13)),
-            trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: AppTheme.textTertiary),
-            onTap: () => Navigator.pushNamed(context, '/blocked_users'),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.info_outline,
+                      color: Theme.of(context).primaryColor,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Privacy Info',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'These settings control your visibility and how others can interact with you. Changes are saved locally and synced to your account when online.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Colors.grey,
+                  ),
+                ),
+              ],
+            ),
           ),
-
-          const SizedBox(height: 40),
         ],
       ),
     );
   }
 
-  Widget _buildSectionHeader(String title) {
+  Widget _buildSectionHeader(BuildContext context, String title) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
-      child: Text(title.toUpperCase(), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.textTertiary, letterSpacing: 1.2)),
-    );
-  }
-
-  Widget _buildPrivacyTile({
-    required BuildContext context,
-    required String title,
-    required String subtitle,
-    required PrivacySetting currentValue,
-    required List<PrivacySetting> options,
-    required Function(PrivacySetting) onChanged,
-  }) {
-    return ListTile(
-      title: Text(title, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 15, fontWeight: FontWeight.w500)),
-      subtitle: Text(subtitle, style: const TextStyle(color: AppTheme.textTertiary, fontSize: 13)),
-      trailing: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: AppTheme.bgElevated,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Text(
-          _privacyLabel(currentValue),
-          style: const TextStyle(fontSize: 13, color: AppTheme.primaryGreen, fontWeight: FontWeight.w600),
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text(
+        title,
+        style: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+          color: Theme.of(context).primaryColor,
         ),
       ),
-      onTap: () => _showPrivacyPicker(context, title, currentValue, options, onChanged),
     );
   }
 
-  void _showPrivacyPicker(BuildContext context, String title, PrivacySetting current, List<PrivacySetting> options, Function(PrivacySetting) onChanged) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppTheme.bgModal,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (context) => Container(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(width: 40, height: 4, decoration: BoxDecoration(color: AppTheme.divider, borderRadius: BorderRadius.circular(2))),
-            const SizedBox(height: 20),
-            Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
-            const SizedBox(height: 16),
-            ...options.map((option) => ListTile(
-              title: Text(_privacyLabel(option), style: const TextStyle(color: AppTheme.textPrimary)),
-              trailing: current == option
-                  ? const Icon(Icons.check_circle, color: AppTheme.primaryGreen)
-                  : null,
-              onTap: () {
-                onChanged(option);
-                Navigator.pop(context);
-              },
-            )),
-          ],
+  Widget _buildToggleTile(
+    BuildContext context, {
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required bool value,
+    required Function(bool) onChanged,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: ListTile(
+        leading: Icon(icon, color: Theme.of(context).primaryColor),
+        title: Text(title),
+        subtitle: Text(subtitle),
+        trailing: Switch(
+          value: value,
+          onChanged: onChanged,
+          activeColor: Theme.of(context).primaryColor,
         ),
       ),
     );
