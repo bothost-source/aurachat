@@ -53,7 +53,7 @@ import 'services/connectivity.dart';
 const String _supabaseUrl = String.fromEnvironment('SUPABASE_URL', 
     defaultValue: 'https://eocvhkbjjqeinycdgshj.supabase.co');
 const String _supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY',
-    defaultValue: 'YOUR_ANON_KEY_HERE');
+    defaultValue: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVvY3Zoa2JqanFlaW55Y2Rnc2hqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAzNDMxODEsImV4cCI6MjA5NTkxOTE4MX0.Eqd4jqB7BpROM7LyXX4GoW0UBWkltKXuf1XrT0CwQQQ');
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
