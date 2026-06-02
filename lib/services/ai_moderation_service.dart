@@ -1,19 +1,17 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/message_model.dart';
 
 // ============================================================================
-// AI MODERATION SERVICE — Content safety scanning
+// AI MODERATION SERVICE — Content safety scanning (Supabase version)
 // ============================================================================
 class AIModerationService {
   static final AIModerationService _instance = AIModerationService._internal();
   factory AIModerationService() => _instance;
   AIModerationService._internal();
 
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final SupabaseClient _supabase = Supabase.instance.client;
 
   // OpenAI API key (replace with your actual key or use your own AI backend)
   String? _apiKey;
@@ -67,7 +65,7 @@ class AIModerationService {
         return ModerationResult(
           isFlagged: true,
           flag: ContentFlag.harassment,
-          reason: 'Contains inappropriate language: "$pattern"',
+          reason: 'Contains inappropriate language: "\$pattern"',
           confidence: 0.95,
           action: ModerationAction.restrict,
         );
@@ -127,7 +125,7 @@ class AIModerationService {
         Uri.parse('https://api.openai.com/v1/moderations'),
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer $_apiKey',
+          'Authorization': 'Bearer \$_apiKey',
         },
         body: jsonEncode({'input': content}),
       ).timeout(const Duration(seconds: 5));
@@ -162,7 +160,7 @@ class AIModerationService {
             return ModerationResult(
               isFlagged: true,
               flag: flag,
-              reason: 'AI detected: ${_formatCategory(highestCategory)}',
+              reason: 'AI detected: \${_formatCategory(highestCategory)}',
               confidence: highestScore,
               action: action,
             );
@@ -181,26 +179,29 @@ class AIModerationService {
   // ==========================================================================
 
   Future<UserStrikeStatus> checkUserStrikes(String userId) async {
-    final doc = await _firestore.collection('user_strikes').doc(userId).get();
+    final response = await _supabase
+        .from('user_strikes')
+        .select()
+        .eq('user_id', userId)
+        .maybeSingle();
 
-    if (!doc.exists) {
+    if (response == null) {
       return UserStrikeStatus(strikes: 0, isBanned: false);
     }
 
-    final data = doc.data()!;
-    final strikes = data['strikes'] ?? 0;
-    final isBanned = data['isBanned'] ?? false;
-    final banExpiresAt = data['banExpiresAt'] != null
-        ? (data['banExpiresAt'] as Timestamp).toDate()
+    final strikes = response['strikes'] ?? 0;
+    final isBanned = response['is_banned'] ?? false;
+    final banExpiresAt = response['ban_expires_at'] != null
+        ? DateTime.parse(response['ban_expires_at'])
         : null;
 
     // Check if temporary ban expired
     if (isBanned && banExpiresAt != null && DateTime.now().isAfter(banExpiresAt)) {
       // Unban user
-      await _firestore.collection('user_strikes').doc(userId).update({
-        'isBanned': false,
-        'banExpiresAt': null,
-      });
+      await _supabase.from('user_strikes').update({
+        'is_banned': false,
+        'ban_expires_at': null,
+      }).eq('user_id', userId);
       return UserStrikeStatus(strikes: strikes, isBanned: false);
     }
 
@@ -212,46 +213,48 @@ class AIModerationService {
   }
 
   Future<void> addStrike(String userId, ContentFlag violation) async {
-    final docRef = _firestore.collection('user_strikes').doc(userId);
-    final doc = await docRef.get();
+    final response = await _supabase
+        .from('user_strikes')
+        .select()
+        .eq('user_id', userId)
+        .maybeSingle();
 
-    if (!doc.exists) {
-      await docRef.set({
-        'userId': userId,
+    if (response == null) {
+      await _supabase.from('user_strikes').insert({
+        'user_id': userId,
         'strikes': 1,
-        'isBanned': false,
+        'is_banned': false,
         'violations': [violation.name],
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
+        'created_at': DateTime.now().toIso8601String(),
+        'updated_at': DateTime.now().toIso8601String(),
       });
       return;
     }
 
-    final data = doc.data()!;
-    final currentStrikes = (data['strikes'] ?? 0) + 1;
-    final violations = List<String>.from(data['violations'] ?? []);
+    final currentStrikes = (response['strikes'] ?? 0) + 1;
+    final violations = List<String>.from(response['violations'] ?? []);
     violations.add(violation.name);
 
     // 2 strikes = permanent ban
     if (currentStrikes >= 2) {
-      await docRef.update({
+      await _supabase.from('user_strikes').update({
         'strikes': currentStrikes,
-        'isBanned': true,
-        'banType': 'permanent',
+        'is_banned': true,
+        'ban_type': 'permanent',
         'violations': violations,
-        'bannedAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+        'banned_at': DateTime.now().toIso8601String(),
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq('user_id', userId);
     } else {
       // 1 strike = 24h temporary ban
-      await docRef.update({
+      await _supabase.from('user_strikes').update({
         'strikes': currentStrikes,
-        'isBanned': true,
-        'banType': 'temporary',
-        'banExpiresAt': Timestamp.fromDate(DateTime.now().add(const Duration(hours: 24))),
+        'is_banned': true,
+        'ban_type': 'temporary',
+        'ban_expires_at': DateTime.now().add(const Duration(hours: 24)).toIso8601String(),
         'violations': violations,
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq('user_id', userId);
     }
   }
 
@@ -266,14 +269,14 @@ class AIModerationService {
     required String reason,
     String? details,
   }) async {
-    await _firestore.collection('reports').add({
-      'messageId': messageId,
-      'chatId': chatId,
-      'reporterId': reporterId,
+    await _supabase.from('reports').insert({
+      'message_id': messageId,
+      'chat_id': chatId,
+      'reporter_id': reporterId,
       'reason': reason,
       'details': details,
       'status': 'pending',
-      'createdAt': FieldValue.serverTimestamp(),
+      'created_at': DateTime.now().toIso8601String(),
     });
   }
 
@@ -346,7 +349,7 @@ class UserStrikeStatus {
     if (isBanned) {
       if (banExpiresAt != null) {
         final hours = banExpiresAt!.difference(DateTime.now()).inHours;
-        return 'Banned for $hours more hours';
+        return 'Banned for \$hours more hours';
       }
       return 'Permanently banned';
     }
