@@ -1,30 +1,34 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../../themes/app_theme.dart';
-import '../../providers/auth_provider.dart';
 
 class BlockedUsersScreen extends StatelessWidget {
   const BlockedUsersScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final blocked = context.watch<AuthProvider>().currentUser?.blockedUsers ?? [];
-
     return Scaffold(
-      backgroundColor: AppTheme.bgPrimary,
-      appBar: AppBar(backgroundColor: AppTheme.bgSecondary, elevation: 0, title: const Text('Blocked Users')),
-      body: blocked.isEmpty
-          ? Center(child: Text('No blocked users', style: TextStyle(color: AppTheme.textTertiary)))
-          : ListView.builder(
-              itemCount: blocked.length,
-              itemBuilder: (context, index) => ListTile(
-                title: Text('User ${blocked[index]}', style: const TextStyle(color: AppTheme.textPrimary)),
-                trailing: TextButton(
-                  onPressed: () => context.read<AuthProvider>().unblockUser(blocked[index]),
-                  child: const Text('Unblock', style: TextStyle(color: AppTheme.primaryGreen)),
-                ),
-              ),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      appBar: AppBar(
+        title: const Text('Blocked Users'),
+        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
+        elevation: 0,
+      ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.block,
+              size: 80,
+              color: Colors.grey.withOpacity(0.5),
             ),
+            const SizedBox(height: 16),
+            Text(
+              'No blocked users',
+              style: TextStyle(color: Colors.grey.withOpacity(0.7)),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
