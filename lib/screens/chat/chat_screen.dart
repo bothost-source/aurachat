@@ -18,6 +18,7 @@ import 'dart:io';
 import '../../providers/auth_provider.dart';
 import '../../providers/chat_provider.dart';
 import '../../providers/settings_provider.dart';
+ import 'package:dio/dio.dart'; 
 
 class ChatScreen extends StatefulWidget {
   final String? chatId;
@@ -574,44 +575,46 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
 
           // Emoji Picker
-          if (_showEmojiPicker)
-            SizedBox(
-              height: 250,
-              child: EmojiPicker(
-                onEmojiSelected: (category, emoji) {
-                  _messageController.text += emoji.emoji;
-                },
-                config: Config(
-                  columns: 7,
-                  emojiSizeMax: 32,
-                  verticalSpacing: 0,
-                  horizontalSpacing: 0,
-                  gridPadding: EdgeInsets.zero,
-                  initCategory: Category.RECENT,
-                  bgColor: Theme.of(context).scaffoldBackgroundColor,
-                  indicatorColor: Theme.of(context).primaryColor,
-                  iconColor: Colors.grey,
-                  iconColorSelected: Theme.of(context).primaryColor,
-                  backspaceColor: Theme.of(context).primaryColor,
-                  skinToneDialogBgColor: Theme.of(context).cardColor,
-                  skinToneIndicatorColor: Colors.grey,
-                  enableSkinTones: true,
-                  showRecentsTab: true,
-                  recentsLimit: 28,
-                  replaceEmojiOnLimitExceed: false,
-                  noRecents: const Text(
-                    'No Recents',
-                    style: TextStyle(fontSize: 20, color: Colors.black26),
-                    textAlign: TextAlign.center,
-                  ),
-                  loadingIndicator: const SizedBox.shrink(),
-                  tabIndicatorAnimDuration: kTabScrollDuration,
-                  categoryIcons: const CategoryIcons(),
-                  buttonMode: ButtonMode.MATERIAL,
-                  checkPlatformCompatibility: true,
-                ),
-              ),
-            ),
+         if (_showEmojiPicker)
+  SizedBox(
+    height: 250,
+    child: EmojiPicker(
+      onEmojiSelected: (category, emoji) {
+        _messageController.text += emoji.emoji;
+      },
+      config: Config(                          // ✅ Add config: Config(
+        emojiViewConfig: EmojiViewConfig(       // ✅ EmojiViewConfig inside Config
+          columns: 7,                           // ✅ Fix: 7, (not 7))
+          emojiSizeMax: 32,
+          verticalSpacing: 0,
+          horizontalSpacing: 0,
+          gridPadding: EdgeInsets.zero,
+          initCategory: Category.RECENT,
+          bgColor: Theme.of(context).scaffoldBackgroundColor,
+          indicatorColor: Theme.of(context).primaryColor,
+          iconColor: Colors.grey,
+          iconColorSelected: Theme.of(context).primaryColor,
+          backspaceColor: Theme.of(context).primaryColor,
+          skinToneDialogBgColor: Theme.of(context).cardColor,
+          skinToneIndicatorColor: Colors.grey,
+          enableSkinTones: true,
+          showRecentsTab: true,
+          recentsLimit: 28,
+          replaceEmojiOnLimitExceed: false,
+          noRecents: const Text(
+            'No Recents',
+            style: TextStyle(fontSize: 20, color: Colors.black26),
+            textAlign: TextAlign.center,
+          ),
+          loadingIndicator: const SizedBox.shrink(),
+          tabIndicatorAnimDuration: kTabScrollDuration,
+          categoryIcons: const CategoryIcons(),
+          buttonMode: ButtonMode.MATERIAL,
+          checkPlatformCompatibility: true,
+        ),                                     // ✅ Close EmojiViewConfig
+      ),                                       // ✅ Close Config
+    ),
+  ),
 
           // Input Area
           Container(
