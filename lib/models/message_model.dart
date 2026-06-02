@@ -98,7 +98,7 @@ class MessageModel {
   String get formattedTime {
     final hour = createdAt.hour.toString().padLeft(2, '0');
     final minute = createdAt.minute.toString().padLeft(2, '0');
-    return '$hour:$minute';
+    return '\$hour:\$minute';
   }
 
   String get statusIcon {
@@ -199,90 +199,114 @@ class MessageModel {
     );
   }
 
-  // Convert to JSON for Firebase
+  // Convert to JSON for Supabase (snake_case)
   Map<String, dynamic> toJson() => {
     'id': id,
-    'chatId': chatId,
-    'senderId': senderId,
-    'senderName': senderName,
-    'senderAvatar': senderAvatar,
+    'chat_id': chatId,
+    'sender_id': senderId,
+    'sender_name': senderName,
+    'sender_avatar': senderAvatar,
     'type': type.name,
     'content': content,
-    'mediaUrl': mediaUrl,
-    'mediaThumbnail': mediaThumbnail,
-    'fileName': fileName,
-    'fileSize': fileSize,
+    'media_url': mediaUrl,
+    'media_thumbnail': mediaThumbnail,
+    'file_name': fileName,
+    'file_size': fileSize,
     'duration': duration,
     'latitude': latitude,
     'longitude': longitude,
-    'replyToMessageId': replyToMessageId,
-    'replyToMessage': replyToMessage?.toJson(),
-    'forwardFromChatId': forwardFromChatId,
-    'forwardFromMessageId': forwardFromMessageId,
-    'forwardFromName': forwardFromName,
+    'reply_to_message_id': replyToMessageId,
+    'reply_to_message': replyToMessage?.toJson(),
+    'forward_from_chat_id': forwardFromChatId,
+    'forward_from_message_id': forwardFromMessageId,
+    'forward_from_name': forwardFromName,
     'reactions': reactions,
-    'pollOptions': pollOptions,
-    'pollVotes': pollVotes?.map((k, v) => MapEntry(k, v)),
-    'isEdited': isEdited,
-    'editedAt': editedAt?.toIso8601String(),
+    'poll_options': pollOptions,
+    'poll_votes': pollVotes?.map((k, v) => MapEntry(k, v)),
+    'is_edited': isEdited,
+    'edited_at': editedAt?.toIso8601String(),
     'status': status.name,
-    'createdAt': createdAt.toIso8601String(),
-    'isDeleted': isDeleted,
-    'deletedAt': deletedAt?.toIso8601String(),
-    'isPinned': isPinned,
-    'pinOrder': pinOrder,
-    'contentFlag': contentFlag.name,
-    'aiSafetyScore': aiSafetyScore,
-    'aiFlagReason': aiFlagReason,
-    'isRestricted': isRestricted,
-    'restrictionNote': restrictionNote,
-    'readBy': readBy,
-    'deliveredTo': deliveredTo,
+    'created_at': createdAt.toIso8601String(),
+    'is_deleted': isDeleted,
+    'deleted_at': deletedAt?.toIso8601String(),
+    'is_pinned': isPinned,
+    'pin_order': pinOrder,
+    'content_flag': contentFlag.name,
+    'ai_safety_score': aiSafetyScore,
+    'ai_flag_reason': aiFlagReason,
+    'is_restricted': isRestricted,
+    'restriction_note': restrictionNote,
+    'read_by': readBy,
+    'delivered_to': deliveredTo,
     'metadata': metadata,
   };
 
-  // Create from JSON (for local storage/offline queue)
+  // Create from JSON from Supabase (snake_case)
   factory MessageModel.fromJson(Map<String, dynamic> json) {
     return MessageModel(
       id: json['id'] ?? '',
-      chatId: json['chatId'] ?? '',
-      senderId: json['senderId'] ?? '',
-      senderName: json['senderName'],
-      senderAvatar: json['senderAvatar'],
+      chatId: json['chat_id'] ?? json['chatId'] ?? '',
+      senderId: json['sender_id'] ?? json['senderId'] ?? '',
+      senderName: json['sender_name'] ?? json['senderName'],
+      senderAvatar: json['sender_avatar'] ?? json['senderAvatar'],
       type: _parseType(json['type']),
       content: json['content'] ?? '',
-      mediaUrl: json['mediaUrl'],
-      mediaThumbnail: json['mediaThumbnail'],
-      fileName: json['fileName'],
-      fileSize: json['fileSize'],
+      mediaUrl: json['media_url'] ?? json['mediaUrl'],
+      mediaThumbnail: json['media_thumbnail'] ?? json['mediaThumbnail'],
+      fileName: json['file_name'] ?? json['fileName'],
+      fileSize: json['file_size'] ?? json['fileSize'],
       duration: json['duration'],
       latitude: json['latitude']?.toDouble(),
       longitude: json['longitude']?.toDouble(),
-      replyToMessageId: json['replyToMessageId'],
-      replyToMessage: json['replyToMessage'] != null ? MessageModel.fromJson(json['replyToMessage']) : null,
-      forwardFromChatId: json['forwardFromChatId'],
-      forwardFromMessageId: json['forwardFromMessageId'],
-      forwardFromName: json['forwardFromName'],
+      replyToMessageId: json['reply_to_message_id'] ?? json['replyToMessageId'],
+      replyToMessage: json['reply_to_message'] != null 
+          ? MessageModel.fromJson(json['reply_to_message'] as Map<String, dynamic>)
+          : json['replyToMessage'] != null 
+              ? MessageModel.fromJson(json['replyToMessage'] as Map<String, dynamic>)
+              : null,
+      forwardFromChatId: json['forward_from_chat_id'] ?? json['forwardFromChatId'],
+      forwardFromMessageId: json['forward_from_message_id'] ?? json['forwardFromMessageId'],
+      forwardFromName: json['forward_from_name'] ?? json['forwardFromName'],
       reactions: (json['reactions'] as List<dynamic>?)?.cast<String>() ?? [],
-      pollOptions: json['pollOptions'] != null ? Map<String, int>.from(json['pollOptions']) : null,
-      pollVotes: json['pollVotes'] != null 
-          ? (json['pollVotes'] as Map<String, dynamic>).map((k, v) => MapEntry(k, (v as List<dynamic>).cast<String>()))
-          : null,
-      isEdited: json['isEdited'] ?? false,
-      editedAt: json['editedAt'] != null ? DateTime.parse(json['editedAt']) : null,
+      pollOptions: json['poll_options'] != null 
+          ? Map<String, int>.from(json['poll_options'])
+          : json['pollOptions'] != null 
+              ? Map<String, int>.from(json['pollOptions'])
+              : null,
+      pollVotes: json['poll_votes'] != null 
+          ? (json['poll_votes'] as Map<String, dynamic>).map((k, v) => MapEntry(k, (v as List<dynamic>).cast<String>()))
+          : json['pollVotes'] != null 
+              ? (json['pollVotes'] as Map<String, dynamic>).map((k, v) => MapEntry(k, (v as List<dynamic>).cast<String>()))
+              : null,
+      isEdited: json['is_edited'] ?? json['isEdited'] ?? false,
+      editedAt: json['edited_at'] != null 
+          ? DateTime.parse(json['edited_at'])
+          : json['editedAt'] != null 
+              ? DateTime.parse(json['editedAt'])
+              : null,
       status: _parseStatus(json['status']),
-      createdAt: json['createdAt'] != null ? DateTime.parse(json['createdAt']) : DateTime.now(),
-      isDeleted: json['isDeleted'] ?? false,
-      deletedAt: json['deletedAt'] != null ? DateTime.parse(json['deletedAt']) : null,
-      isPinned: json['isPinned'] ?? false,
-      pinOrder: json['pinOrder'],
-      contentFlag: _parseFlag(json['contentFlag']),
-      aiSafetyScore: json['aiSafetyScore']?.toDouble(),
-      aiFlagReason: json['aiFlagReason'],
-      isRestricted: json['isRestricted'] ?? false,
-      restrictionNote: json['restrictionNote'],
-      readBy: (json['readBy'] as List<dynamic>?)?.cast<String>() ?? [],
-      deliveredTo: (json['deliveredTo'] as List<dynamic>?)?.cast<String>() ?? [],
+      createdAt: json['created_at'] != null 
+          ? DateTime.parse(json['created_at'])
+          : json['createdAt'] != null 
+              ? DateTime.parse(json['createdAt'])
+              : DateTime.now(),
+      isDeleted: json['is_deleted'] ?? json['isDeleted'] ?? false,
+      deletedAt: json['deleted_at'] != null 
+          ? DateTime.parse(json['deleted_at'])
+          : json['deletedAt'] != null 
+              ? DateTime.parse(json['deletedAt'])
+              : null,
+      isPinned: json['is_pinned'] ?? json['isPinned'] ?? false,
+      pinOrder: json['pin_order'] ?? json['pinOrder'],
+      contentFlag: _parseFlag(json['content_flag'] ?? json['contentFlag']),
+      aiSafetyScore: json['ai_safety_score']?.toDouble() ?? json['aiSafetyScore']?.toDouble(),
+      aiFlagReason: json['ai_flag_reason'] ?? json['aiFlagReason'],
+      isRestricted: json['is_restricted'] ?? json['isRestricted'] ?? false,
+      restrictionNote: json['restriction_note'] ?? json['restrictionNote'],
+      readBy: (json['read_by'] as List<dynamic>?)?.cast<String>() ?? 
+              (json['readBy'] as List<dynamic>?)?.cast<String>() ?? [],
+      deliveredTo: (json['delivered_to'] as List<dynamic>?)?.cast<String>() ?? 
+                   (json['deliveredTo'] as List<dynamic>?)?.cast<String>() ?? [],
       metadata: json['metadata'],
     );
   }
