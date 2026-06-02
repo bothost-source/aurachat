@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../themes/app_theme.dart';
-import '../providers/chat_provider.dart';
 import '../providers/auth_provider.dart';
-import 'chat_list/chats_list_screen.dart';
+import '../providers/chat_provider.dart';
+import '../providers/settings_provider.dart';
+import 'chat/chat_list_screen.dart';
 import 'status/status_screen.dart';
 import 'calls/calls_screen.dart';
-import 'settings/settings_screen.dart';
 
 class MainAppScreen extends StatefulWidget {
   const MainAppScreen({super.key});
@@ -15,23 +14,23 @@ class MainAppScreen extends StatefulWidget {
   State<MainAppScreen> createState() => _MainAppScreenState();
 }
 
-class _MainAppScreenState extends State<MainAppScreen> with SingleTickerProviderStateMixin {
-  int _currentIndex = 0;
+class _MainAppScreenState extends State<MainAppScreen> 
+    with SingleTickerProviderStateMixin {
   late TabController _tabController;
-
-  final List<Widget> _screens = [
-    const ChatsListScreen(),
-    const StatusScreen(),
-    const CallsScreen(),
-    const SettingsScreen(),
-  ];
-
-  final List<String> _titles = ['Chats', 'Status', 'Calls', 'Settings'];
+  int _currentIndex = 0;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
+    _tabController.addListener(() {
+      setState(() => _currentIndex = _tabController.index);
+    });
+
+    // Load chats on init
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Provider.of<ChatProvider>(context, listen: false).loadChats();
+    });
   }
 
   @override
@@ -40,90 +39,163 @@ class _MainAppScreenState extends State<MainAppScreen> with SingleTickerProvider
     super.dispose();
   }
 
-  void _onTabTapped(int index) {
-    setState(() => _currentIndex = index);
-    _tabController.animateTo(index);
-  }
-
   @override
   Widget build(BuildContext context) {
-    final chatProvider = context.watch<ChatProvider>();
-    final totalUnread = chatProvider.totalUnread;
+    final authProvider = Provider.of<AuthProvider>(context);
 
     return Scaffold(
-      backgroundColor: AppTheme.bgPrimary,
-      body: IndexedStack(
-        index: _currentIndex,
-        children: _screens,
-      ),
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          color: AppTheme.bgSecondary,
-          border: Border(top: BorderSide(color: AppTheme.divider)),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 10, offset: const Offset(0, -4))],
-        ),
-        child: SafeArea(
-          child: BottomNavigationBar(
-            currentIndex: _currentIndex,
-            onTap: _onTabTapped,
-            backgroundColor: Colors.transparent,
-            elevation: 0,
-            type: BottomNavigationBarType.fixed,
-            selectedItemColor: AppTheme.primaryGreen,
-            unselectedItemColor: AppTheme.textTertiary,
-            selectedLabelStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
-            unselectedLabelStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500),
-            items: [
-              BottomNavigationBarItem(
-                icon: _buildNavIcon(Icons.chat_bubble_outline, 0, badge: totalUnread > 0 ? totalUnread.toString() : null),
-                activeIcon: _buildNavIcon(Icons.chat_bubble, 0, isActive: true, badge: totalUnread > 0 ? totalUnread.toString() : null),
-                label: 'Chats',
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      appBar: AppBar(
+        title: const Text('TARRIFIC CHAT'),
+        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
+        elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.search),
+            onPressed: () => Navigator.pushNamed(context, '/global_search'),
+          ),
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              switch (value) {
+                case 'settings':
+                  Navigator.pushNamed(context, '/settings');
+                  break;
+                case 'profile':
+                  Navigator.pushNamed(context, '/profile');
+                  break;
+                case 'saved':
+                  Navigator.pushNamed(context, '/saved_messages');
+                  break;
+                case 'invite':
+                  Navigator.pushNamed(context, '/invite_friends');
+                  break;
+              }
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'profile',
+                child: Row(
+                  children: [
+                    Icon(Icons.person),
+                    SizedBox(width: 8),
+                    Text('Profile'),
+                  ],
+                ),
               ),
-              BottomNavigationBarItem(
-                icon: _buildNavIcon(Icons.auto_awesome_mosaic_outlined, 1),
-                activeIcon: _buildNavIcon(Icons.auto_awesome_mosaic, 1, isActive: true),
-                label: 'Status',
+              const PopupMenuItem(
+                value: 'settings',
+                child: Row(
+                  children: [
+                    Icon(Icons.settings),
+                    SizedBox(width: 8),
+                    Text('Settings'),
+                  ],
+                ),
               ),
-              BottomNavigationBarItem(
-                icon: _buildNavIcon(Icons.call_outlined, 2),
-                activeIcon: _buildNavIcon(Icons.call, 2, isActive: true),
-                label: 'Calls',
+              const PopupMenuItem(
+                value: 'saved',
+                child: Row(
+                  children: [
+                    Icon(Icons.bookmark),
+                    SizedBox(width: 8),
+                    Text('Saved Messages'),
+                  ],
+                ),
               ),
-              BottomNavigationBarItem(
-                icon: _buildNavIcon(Icons.settings_outlined, 3),
-                activeIcon: _buildNavIcon(Icons.settings, 3, isActive: true),
-                label: 'Settings',
+              const PopupMenuItem(
+                value: 'invite',
+                child: Row(
+                  children: [
+                    Icon(Icons.person_add),
+                    SizedBox(width: 8),
+                    Text('Invite Friends'),
+                  ],
+                ),
               ),
             ],
           ),
+        ],
+        bottom: TabBar(
+          controller: _tabController,
+          indicatorColor: Colors.white,
+          labelColor: Colors.white,
+          unselectedLabelColor: Colors.white70,
+          tabs: const [
+            Tab(text: 'CHATS'),
+            Tab(text: 'STATUS'),
+            Tab(text: 'CALLS'),
+          ],
         ),
       ),
+      body: TabBarView(
+        controller: _tabController,
+        children: const [
+          ChatListScreen(),
+          StatusScreen(),
+          CallsScreen(),
+        ],
+      ),
+      floatingActionButton: _buildFAB(),
     );
   }
 
-  Widget _buildNavIcon(IconData icon, int index, {bool isActive = false, String? badge}) {
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        Icon(icon, size: 24),
-        if (badge != null)
-          Positioned(
-            top: -6,
-            right: -10,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-              decoration: BoxDecoration(
-                color: AppTheme.accentPink,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppTheme.bgSecondary, width: 1.5),
-              ),
-              child: Text(
-                badge,
-                style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.white),
-              ),
+  Widget? _buildFAB() {
+    switch (_currentIndex) {
+      case 0: // Chats
+        return FloatingActionButton(
+          onPressed: () => _showNewChatOptions(context),
+          child: const Icon(Icons.chat),
+        );
+      case 1: // Status
+        return FloatingActionButton(
+          onPressed: () => Navigator.pushNamed(context, '/create_status'),
+          child: const Icon(Icons.camera_alt),
+        );
+      case 2: // Calls
+        return FloatingActionButton(
+          onPressed: () {},
+          child: const Icon(Icons.add_call),
+        );
+      default:
+        return null;
+    }
+  }
+
+  void _showNewChatOptions(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.group_add),
+              title: const Text('New Group'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.pushNamed(context, '/create_group');
+              },
             ),
-          ),
-      ],
+            ListTile(
+              leading: const Icon(Icons.campaign),
+              title: const Text('New Channel'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.pushNamed(context, '/create_group');
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.person_add),
+              title: const Text('New Contact'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.pushNamed(context, '/contacts');
+              },
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
