@@ -38,7 +38,7 @@ class ChatProvider extends ChangeNotifier {
   bool get isTyping => _typingUsers.isNotEmpty;
   String get typingText => _typingUsers.length == 1 
       ? 'typing...' 
-      : '${_typingUsers.length} people typing...';
+      : '\${_typingUsers.length} people typing...';
   int get totalUnread => _chats.fold(0, (sum, chat) => sum + chat.unreadCount);
 
   // AI Moderation status
@@ -130,7 +130,7 @@ class ChatProvider extends ChangeNotifier {
   // MESSAGING WITH AI MODERATION
   // ==========================================================================
 
-  Future<<ModerationResult?> sendMessage(String content, {MessageType type = MessageType.text}) async {
+  Future<ModerationResult?> sendMessage(String content, {MessageType type = MessageType.text}) async {
     if (_selectedChat == null) return null;
     if (content.trim().isEmpty) return null;
 
@@ -142,7 +142,7 @@ class ChatProvider extends ChangeNotifier {
         return ModerationResult(
           isFlagged: true,
           flag: ContentFlag.none,
-          reason: 'You are banned: ${strikeStatus.statusText}',
+          reason: 'You are banned: \${strikeStatus.statusText}',
           confidence: 1.0,
           action: ModerationAction.block,
         );
@@ -180,7 +180,7 @@ class ChatProvider extends ChangeNotifier {
     final chatId = _selectedChat!.id;
 
     final tempMessage = MessageModel(
-      id: 'temp_${DateTime.now().millisecondsSinceEpoch}',
+      id: 'temp_\${DateTime.now().millisecondsSinceEpoch}',
       chatId: chatId,
       senderId: 'me',
       content: content,
@@ -214,7 +214,7 @@ class ChatProvider extends ChangeNotifier {
     final chatId = _selectedChat!.id;
 
     final tempMessage = MessageModel(
-      id: 'temp_${DateTime.now().millisecondsSinceEpoch}',
+      id: 'temp_\${DateTime.now().millisecondsSinceEpoch}',
       chatId: chatId,
       senderId: 'me',
       content: content,
@@ -267,6 +267,7 @@ class ChatProvider extends ChangeNotifier {
       _messages[index] = message.copyWith(status: MessageStatus.failed);
       notifyListeners();
     }
+    return;  // <-- FIXED: added explicit return
   }
 
   // ==========================================================================
@@ -333,6 +334,7 @@ class ChatProvider extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
     }
+    return;  // <-- FIXED: added explicit return
   }
 
   Future<void> createChannel({
@@ -356,6 +358,7 @@ class ChatProvider extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
     }
+    return;  // <-- FIXED: added explicit return
   }
 
   void addChat(ChatModel chat) {
@@ -415,7 +418,7 @@ class ChatProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  List<<ChatModel> _filterChats(List<<ChatModel> chats) {
+  List<ChatModel> _filterChats(List<ChatModel> chats) {
     if (_searchQuery == null || _searchQuery!.isEmpty) return chats;
 
     final query = _searchQuery!.toLowerCase();
@@ -472,7 +475,7 @@ class ChatProvider extends ChangeNotifier {
   }
 
   // ========== MUTE ==========
-  
+
   void muteChat(String chatId, ChatMuteDuration duration) {
     final index = _chats.indexWhere((c) => c.id == chatId);
     if (index != -1) {
