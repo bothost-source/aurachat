@@ -51,9 +51,9 @@ class _AIChatbotScreenState extends State<AIChatbotScreen> {
     _messageController.clear();
     _scrollToBottom();
 
-    try {
+   try {
   final response = await http.post(
-    Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=AQ.Ab8RN6JBqWi1X3W9UsCpBBdL-0aTW7v3ZPfylD-wHqgaNzKz0Q'),
+    Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent'),
     headers: {'Content-Type': 'application/json'},
     body: jsonEncode({
       'contents': [{
@@ -62,31 +62,30 @@ class _AIChatbotScreenState extends State<AIChatbotScreen> {
     }),
   );
 
-  final data = jsonDecode(response.body);
-  final aiResponse = data['candidates']?[0]?['content']?['parts']?[0]?['text'] 
-      ?? 'Sorry, I could not process that.';
+  final data = jsonDecode(response.body);                          // ✅ Keep
+  final aiResponse = data['candidates']?[0]?['content']?['parts']?[0]?['text']
+      ?? 'Sorry, I could not process that.';                       // ✅ Keep
 
+  // ❌ DELETE: final data = response.data as Map<String, dynamic>;
 
-      final data = response.data as Map<String, dynamic>;
-
-      setState(() {
-        _messages.add({
-          'role': 'assistant',
-          'content': data['response'] ?? 'Sorry, I could not process that.',
-          'timestamp': DateTime.now(),
-        });
-        _isLoading = false;
-      });
-    } catch (e) {
-      setState(() {
-        _messages.add({
-          'role': 'assistant',
-          'content': 'Error: Unable to reach AI service. Please try again later.',
-          'timestamp': DateTime.now(),
-        });
-        _isLoading = false;
-      });
-    }
+  setState(() {
+    _messages.add({
+      'role': 'assistant',
+      'content': aiResponse,                                       // ✅ Use aiResponse
+      'timestamp': DateTime.now(),
+    });
+    _isLoading = false;
+  });
+} catch (e) {
+  setState(() {
+    _messages.add({
+      'role': 'assistant',
+      'content': 'Error: Unable to reach AI service. Please try again later.',
+      'timestamp': DateTime.now(),
+    });
+    _isLoading = false;
+  });
+}
 
     _scrollToBottom();
   }
