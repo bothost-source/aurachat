@@ -37,7 +37,7 @@ dependencies:
 
   # Audio - Recording & Playback
   just_audio: ^0.9.38
-  record: ^5.0.4
+  record: ^5.2.1
   audio_waveforms: ^1.0.5
 
   # File Handling
