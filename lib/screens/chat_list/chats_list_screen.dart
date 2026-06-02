@@ -5,7 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../themes/app_theme.dart';
 import '../../providers/chat_provider.dart';
 import '../../providers/theme_provider.dart';
-import '../../services/firebase_chat_service.dart';
+import '../../services/supabase_chat_service.dart';
 import '../../services/connectivity.dart';
 import '../../models/chat_model.dart' show ChatModel;
 import '../../models/message_model.dart';
