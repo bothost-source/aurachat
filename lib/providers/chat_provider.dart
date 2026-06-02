@@ -12,7 +12,7 @@ class ChatProvider extends ChangeNotifier {
   final SupabaseChatService _chatService = SupabaseChatService();
   final AIModerationService _moderationService = AIModerationService();
 
-  List<<ChatModel> _chats = [];
+  List<ChatModel> _chats = [];
   List<MessageModel> _messages = [];
   ChatModel? _selectedChat;
   String? _searchQuery;
@@ -21,15 +21,15 @@ class ChatProvider extends ChangeNotifier {
   List<String> _typingUsers = [];
 
   // Streams
-  StreamSubscription<List<<ChatModel>>? _chatsSubscription;
+  StreamSubscription<List<ChatModel>>? _chatsSubscription;
   StreamSubscription<List<MessageModel>>? _messagesSubscription;
   StreamSubscription<List<String>>? _typingSubscription;
 
   // Getters
-  List<<ChatModel> get chats => _filterChats(_chats);
-  List<<ChatModel> get pinnedChats => _chats.where((c) => c.isPinned).toList();
-  List<<ChatModel> get unpinnedChats => _chats.where((c) => !c.isPinned).toList();
-  List<<ChatModel> get archivedChats => _chats.where((c) => c.isArchived).toList();
+  List<ChatModel> get chats => _filterChats(_chats);
+  List<ChatModel> get pinnedChats => _chats.where((c) => c.isPinned).toList();
+  List<ChatModel> get unpinnedChats => _chats.where((c) => !c.isPinned).toList();
+  List<ChatModel> get archivedChats => _chats.where((c) => c.isArchived).toList();
   List<MessageModel> get messages => _messages;
   ChatModel? get selectedChat => _selectedChat;
   bool get isLoading => _isLoading;
