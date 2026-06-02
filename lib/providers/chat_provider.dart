@@ -1,16 +1,18 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/chat_model.dart';
 import '../models/message_model.dart';
 import '../services/supabase_chat_service.dart';
 import '../services/ai_moderation_service.dart';
 
+// ============================================================================
+// CHAT PROVIDER — With AI Moderation (Supabase)
+// ============================================================================
 class ChatProvider extends ChangeNotifier {
   final SupabaseChatService _chatService = SupabaseChatService();
   final AIModerationService _moderationService = AIModerationService();
 
-  List<ChatModel> _chats = [];
+  List<<ChatModel> _chats = [];
   List<MessageModel> _messages = [];
   ChatModel? _selectedChat;
   String? _searchQuery;
@@ -19,14 +21,15 @@ class ChatProvider extends ChangeNotifier {
   List<String> _typingUsers = [];
 
   // Streams
-  StreamSubscription<List<ChatModel>>? _chatsSubscription;
+  StreamSubscription<List<<ChatModel>>? _chatsSubscription;
   StreamSubscription<List<MessageModel>>? _messagesSubscription;
   StreamSubscription<List<String>>? _typingSubscription;
 
   // Getters
-  List<ChatModel> get chats => _filterChats(_chats);
-  List<ChatModel> get pinnedChats => _filterChats(_chats.where((c) => c.isPinned).toList());
-  List<ChatModel> get unpinnedChats => _filterChats(_chats.where((c) => !c.isPinned).toList());
+  List<<ChatModel> get chats => _filterChats(_chats);
+  List<<ChatModel> get pinnedChats => _chats.where((c) => c.isPinned).toList();
+  List<<ChatModel> get unpinnedChats => _chats.where((c) => !c.isPinned).toList();
+  List<<ChatModel> get archivedChats => _chats.where((c) => c.isArchived).toList();
   List<MessageModel> get messages => _messages;
   ChatModel? get selectedChat => _selectedChat;
   bool get isLoading => _isLoading;
@@ -36,8 +39,6 @@ class ChatProvider extends ChangeNotifier {
   String get typingText => _typingUsers.length == 1 
       ? 'typing...' 
       : '${_typingUsers.length} people typing...';
-
-  // ✅ FIX 3: Added totalUnread getter
   int get totalUnread => _chats.fold(0, (sum, chat) => sum + chat.unreadCount);
 
   // AI Moderation status
@@ -49,7 +50,7 @@ class ChatProvider extends ChangeNotifier {
   }
 
   ChatProvider() {
-    _firebaseService.initialize();
+    _chatService.initialize();
     _loadChats();
   }
 
@@ -63,7 +64,7 @@ class ChatProvider extends ChangeNotifier {
     notifyListeners();
 
     _chatsSubscription?.cancel();
-    _chatsSubscription = _supabaseService.getUserChats().listen(
+    _chatsSubscription = _chatService.getUserChats().listen(
       (chats) {
         _chats = chats;
         _isLoading = false;
@@ -93,7 +94,7 @@ class ChatProvider extends ChangeNotifier {
     notifyListeners();
 
     _messagesSubscription?.cancel();
-    _messagesSubscription = _supabaseService.getMessages(chat.id).listen(
+    _messagesSubscription = _chatService.getMessages(chat.id).listen(
       (messages) {
         _messages = messages.reversed.toList();
         notifyListeners();
@@ -101,14 +102,14 @@ class ChatProvider extends ChangeNotifier {
     );
 
     _typingSubscription?.cancel();
-    _typingSubscription = _supabaseService.getTypingUsers(chat.id).listen(
+    _typingSubscription = _chatService.getTypingUsers(chat.id).listen(
       (users) {
         _typingUsers = users;
         notifyListeners();
       },
     );
 
-    _firebaseService.markAsRead(chat.id);
+    _chatService.markAsRead(chat.id);
   }
 
   void selectChatById(String chatId) {
@@ -129,12 +130,12 @@ class ChatProvider extends ChangeNotifier {
   // MESSAGING WITH AI MODERATION
   // ==========================================================================
 
-  Future<ModerationResult?> sendMessage(String content, {MessageType type = MessageType.text}) async {
+  Future<<ModerationResult?> sendMessage(String content, {MessageType type = MessageType.text}) async {
     if (_selectedChat == null) return null;
     if (content.trim().isEmpty) return null;
 
     // 1. Check user ban status first
-    final currentUserId = _firebaseService.currentUserId;
+    final currentUserId = _chatService.currentUserId;
     if (currentUserId != null) {
       final strikeStatus = await _moderationService.checkUserStrikes(currentUserId);
       if (strikeStatus.isBanned) {
@@ -153,7 +154,6 @@ class ChatProvider extends ChangeNotifier {
       final moderationResult = await _moderationService.scanMessage(content, type: type);
 
       if (moderationResult.action == ModerationAction.block) {
-        // Block message entirely
         if (currentUserId != null) {
           await _moderationService.addStrike(currentUserId, moderationResult.flag);
         }
@@ -161,13 +161,11 @@ class ChatProvider extends ChangeNotifier {
       }
 
       if (moderationResult.action == ModerationAction.restrict) {
-        // Send but flag it
         await _sendWithFlag(content, type, moderationResult);
         return moderationResult;
       }
 
       if (moderationResult.action == ModerationAction.warn) {
-        // Allow but warn user
         await _sendNormal(content, type);
         return moderationResult;
       }
@@ -195,7 +193,7 @@ class ChatProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      await _supabaseService.sendMessage(
+      await _chatService.sendMessage(
         chatId: chatId,
         content: content,
         type: type,
@@ -232,7 +230,7 @@ class ChatProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      await _supabaseService.sendMessage(
+      await _chatService.sendMessage(
         chatId: chatId,
         content: content,
         type: type,
@@ -258,7 +256,7 @@ class ChatProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      await _supabaseService.sendMessage(
+      await _chatService.sendMessage(
         chatId: message.chatId,
         content: message.content,
         type: message.type,
@@ -280,12 +278,12 @@ class ChatProvider extends ChangeNotifier {
   void setTyping(bool isTyping) {
     if (_selectedChat == null) return;
 
-    _supabaseService.setTypingStatus(_selectedChat!.id, isTyping);
+    _chatService.setTypingStatus(_selectedChat!.id, isTyping);
 
     _typingTimer?.cancel();
     if (isTyping) {
       _typingTimer = Timer(const Duration(seconds: 3), () {
-        _supabaseService.setTypingStatus(_selectedChat!.id, false);
+        _chatService.setTypingStatus(_selectedChat!.id, false);
       });
     }
   }
@@ -299,7 +297,7 @@ class ChatProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final chatId = await _supabaseService.createDirectChat(otherUserId);
+      final chatId = await _chatService.createDirectChat(otherUserId);
       await refreshChats();
 
       final newChat = _chats.firstWhere((c) => c.id == chatId);
@@ -322,7 +320,7 @@ class ChatProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      await _supabaseService.createGroupChat(
+      await _chatService.createGroupChat(
         name: name,
         description: description,
         memberIds: memberIds,
@@ -333,7 +331,11 @@ class ChatProvider extends ChangeNotifier {
       _error = e.toString();
     } finally {
       _isLoading = false;
-      notifyListeChannel({
+      notifyListeners();
+    }
+  }
+
+  Future<void> createChannel({
     required String name,
     String? description,
     bool isPublic = true,
@@ -342,7 +344,7 @@ class ChatProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      await _supabaseService.createChannel(
+      await _chatService.createChannel(
         name: name,
         description: description,
         isPublic: isPublic,
@@ -379,8 +381,16 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
+  void unarchiveChat(String chatId) {
+    final index = _chats.indexWhere((c) => c.id == chatId);
+    if (index != -1) {
+      _chats[index] = _chats[index].copyWith(isArchived: false);
+      notifyListeners();
+    }
+  }
+
   void markAsRead(String chatId) {
-    _supabaseService.markAsRead(chatId);
+    _chatService.markAsRead(chatId);
 
     final index = _chats.indexWhere((c) => c.id == chatId);
     if (index != -1) {
@@ -405,20 +415,20 @@ class ChatProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  List<ChatModel> _filterChats(List<ChatModel> chats) {
+  List<<ChatModel> _filterChats(List<<ChatModel> chats) {
     if (_searchQuery == null || _searchQuery!.isEmpty) return chats;
 
     final query = _searchQuery!.toLowerCase();
     return chats.where((chat) {
       return chat.displayName.toLowerCase().contains(query) ||
           chat.participants.any((p) => 
-             (p.username ?? '').toLowerCase().contains(query) ||  // ✅ FIX 2: Added || and null-safe
+             (p.username ?? '').toLowerCase().contains(query) ||
               p.displayName.toLowerCase().contains(query));
     }).toList();
   }
 
   Future<List<Map<String, dynamic>>> searchUsers(String query) async {
-    return await _supabaseService.searchUsers(query);
+    return await _chatService.searchUsers(query);
   }
 
   // ==========================================================================
@@ -435,14 +445,14 @@ class ChatProvider extends ChangeNotifier {
     await _moderationService.reportMessage(
       messageId: messageId,
       chatId: _selectedChat!.id,
-      reporterId: _supabaseService.currentUserId ?? 'unknown',
+      reporterId: _chatService.currentUserId ?? 'unknown',
       reason: reason,
       details: details,
     );
   }
 
   Future<UserStrikeStatus> checkMyStrikes() async {
-    final userId = _supabaseService.currentUserId;
+    final userId = _chatService.currentUserId;
     if (userId == null) return UserStrikeStatus(strikes: 0, isBanned: false);
     return await _moderationService.checkUserStrikes(userId);
   }
@@ -451,29 +461,17 @@ class ChatProvider extends ChangeNotifier {
   // CLEANUP
   // ==========================================================================
 
-    @override
+  @override
   void dispose() {
     _chatsSubscription?.cancel();
     _messagesSubscription?.cancel();
     _typingSubscription?.cancel();
     _typingTimer?.cancel();
-    _firebaseService.dispose();
+    _chatService.dispose();
     super.dispose();
   }
 
-  // ========== ARCHIVED CHATS ==========
-  
-  List<ChatModel> get archivedChats => _chats.where((c) => c.isArchived).toList();
-
-  void unarchiveChat(String chatId) {
-    final index = _chats.indexWhere((c) => c.id == chatId);
-    if (index != -1) {
-      _chats[index] = _chats[index].copyWith(isArchived: false);
-      notifyListeners();
-    }
-  }
-
-  // ========== MUTE DURATION ENUM ==========
+  // ========== MUTE ==========
   
   void muteChat(String chatId, ChatMuteDuration duration) {
     final index = _chats.indexWhere((c) => c.id == chatId);
