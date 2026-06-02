@@ -50,12 +50,20 @@ class _AIChatbotScreenState extends State<AIChatbotScreen> {
     _scrollToBottom();
 
     try {
-      // Call Supabase Edge Function (backend AI) - NO API key exposed
-      final supabase = Supabase.instance.client;
-      final response = await supabase.functions.invoke(
-        'ai-chat',
-        body: {'message': text},
-      );
+  final response = await http.post(
+    Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=AQ.Ab8RN6JBqWi1X3W9UsCpBBdL-0aTW7v3ZPfylD-wHqgaNzKz0Q'),
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode({
+      'contents': [{
+        'parts': [{'text': text}]
+      }]
+    }),
+  );
+
+  final data = jsonDecode(response.body);
+  final aiResponse = data['candidates']?[0]?['content']?['parts']?[0]?['text'] 
+      ?? 'Sorry, I could not process that.';
+
 
       final data = response.data as Map<String, dynamic>;
 
