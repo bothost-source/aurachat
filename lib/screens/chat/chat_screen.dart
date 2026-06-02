@@ -574,63 +574,55 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ),
 
-          // Emoji Picker
-         if (_showEmojiPicker)
-  SizedBox(
-    height: 250,
-    child: EmojiPicker(
-  onEmojiSelected: (category, emoji) {
-    _messageController.text += emoji.emoji;
-  },
-  config: Config(
-    // Emoji grid config
-    emojiViewConfig: EmojiViewConfig(
-      columns: 7,
-      emojiSizeMax: 32,
-      verticalSpacing: 0,
-      horizontalSpacing: 0,
-      gridPadding: EdgeInsets.zero,
-      recentsLimit: 28,
-      replaceEmojiOnLimitExceed: false,
-      noRecents: const Text(
-        'No Recents',
-        style: TextStyle(fontSize: 20, color: Colors.black26),
-        textAlign: TextAlign.center,
-      ),
-      loadingIndicator: const SizedBox.shrink(),
-      buttonMode: ButtonMode.MATERIAL,
-    ),
-    
-    // Category tabs config (initCategory moved here)
-    categoryViewConfig: const CategoryViewConfig(
-      initCategory: Category.RECENT,
-      tabIndicatorAnimDuration: kTabScrollDuration,
-      categoryIcons: CategoryIcons(),
-    ),
-    
-    // Skin tone popup config
-    skinToneConfig: const SkinToneConfig(
-      enabled: true,
-      dialogBackgroundColor: Colors.white,
-      indicatorColor: Colors.grey,
-    ),
-    
-    // Search bar config
-    searchViewConfig: const SearchViewConfig(
-      backgroundColor: Colors.white,
-      buttonIconColor: Colors.grey,
-    ),
-    
-    // Bottom action bar config
-    bottomActionBarConfig: BottomActionBarConfig(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      buttonIconColor: Theme.of(context).primaryColor,
-      buttonColor: Theme.of(context).primaryColor,
-      showBackspaceButton: true,
-      showSearchViewButton: true,
-    ),
-  ),
-)
+        // Emoji Picker
+          if (_showEmojiPicker)
+            SizedBox(
+              height: 250,
+              child: EmojiPicker(
+                onEmojiSelected: (category, emoji) {
+                  _messageController.text += emoji.emoji;
+                },
+                config: Config(
+                  emojiViewConfig: EmojiViewConfig(
+                    columns: 7,
+                    emojiSizeMax: 32,
+                    verticalSpacing: 0,
+                    horizontalSpacing: 0,
+                    gridPadding: EdgeInsets.zero,
+                    recentsLimit: 28,
+                    replaceEmojiOnLimitExceed: false,
+                    noRecents: const Text(
+                      'No Recents',
+                      style: TextStyle(fontSize: 20, color: Colors.black26),
+                      textAlign: TextAlign.center,
+                    ),
+                    loadingIndicator: const SizedBox.shrink(),
+                    buttonMode: ButtonMode.MATERIAL,
+                  ),
+                  categoryViewConfig: const CategoryViewConfig(
+                    initCategory: Category.RECENT,
+                    tabIndicatorAnimDuration: kTabScrollDuration,
+                    categoryIcons: CategoryIcons(),
+                  ),
+                  skinToneConfig: const SkinToneConfig(
+                    enabled: true,
+                    dialogBackgroundColor: Colors.white,
+                    indicatorColor: Colors.grey,
+                  ),
+                  searchViewConfig: const SearchViewConfig(
+                    backgroundColor: Colors.white,
+                    buttonIconColor: Colors.grey,
+                  ),
+                  bottomActionBarConfig: BottomActionBarConfig(
+                    backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+                    buttonIconColor: Theme.of(context).primaryColor,
+                    buttonColor: Theme.of(context).primaryColor,
+                    showBackspaceButton: true,
+                    showSearchViewButton: true,
+                  ),
+                ),
+              ),
+            ),
 
           // Input Area
           Container(
