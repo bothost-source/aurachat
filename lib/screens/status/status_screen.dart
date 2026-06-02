@@ -1,57 +1,8 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:path_provider/path_provider.dart';
-import '../../themes/app_theme.dart';
-
-class StatusModel {
-  final String id;
-  final String userId;
-  final String userName;
-  final String? userPhotoUrl;
-  final StatusType type;
-  final String content; // Text or file path
-  final DateTime createdAt;
-  final StatusDuration duration;
-  final List<String> viewedBy;
-
-  StatusModel({
-    required this.id,
-    required this.userId,
-    required this.userName,
-    this.userPhotoUrl,
-    required this.type,
-    required this.content,
-    required this.createdAt,
-    this.duration = StatusDuration.hours24,
-    this.viewedBy = const [],
-  });
-
-  bool get isExpired {
-    final now = DateTime.now();
-    final diff = now.difference(createdAt);
-    switch (duration) {
-      case StatusDuration.hours24:
-        return diff.inHours >= 24;
-      case StatusDuration.hours48:
-        return diff.inHours >= 48;
-      case StatusDuration.days3:
-        return diff.inDays >= 3;
-    }
-  }
-
-  String get timeAgo {
-    final diff = DateTime.now().difference(createdAt);
-    if (diff.inMinutes < 1) return 'Just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
-    return '${diff.inDays}d ago';
-  }
-}
-
-enum StatusType { text, photo, video, voice }
-enum StatusDuration { hours24, hours48, days3 }
+import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:timeago/timeago.dart' as timeago;
+import '../../providers/auth_provider.dart';
 
 class StatusScreen extends StatefulWidget {
   const StatusScreen({super.key});
@@ -61,815 +12,396 @@ class StatusScreen extends StatefulWidget {
 }
 
 class _StatusScreenState extends State<StatusScreen> {
-  List<StatusModel> _statuses = [];
+  List<Map<String, dynamic>> _myStatuses = [];
+  List<Map<String, dynamic>> _contactsStatuses = [];
   bool _isLoading = true;
-  final ImagePicker _picker = ImagePicker();
-  bool _isPremium = false; // TODO: Check from user subscription
 
   @override
   void initState() {
     super.initState();
     _loadStatuses();
-    _checkPremium();
   }
 
-  Future<void> _checkPremium() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() => _isPremium = prefs.getBool('is_premium') ?? false);
-  }
-
-  // Load statuses from storage
   Future<void> _loadStatuses() async {
-    final prefs = await SharedPreferences.getInstance();
-    final statusData = prefs.getStringList('my_statuses') ?? [];
-    
-    final loaded = statusData.map((s) {
-      final parts = s.split('|');
-      return StatusModel(
-        id: parts[0],
-        userId: parts[1],
-        userName: parts[2],
-        type: StatusType.values[int.parse(parts[3])],
-        content: parts[4],
-        createdAt: DateTime.parse(parts[5]),
-        duration: StatusDuration.values[int.parse(parts[6])],
-        viewedBy: parts[7].isEmpty ? [] : parts[7].split(','),
-      );
-    }).where((s) => !s.isExpired).toList();
+    setState(() => _isLoading = true);
 
-    setState(() {
-      _statuses = loaded;
-      _isLoading = false;
-    });
+    try {
+      final supabase = Supabase.instance.client;
+      final userId = supabase.auth.currentUser?.id;
+
+      if (userId == null) {
+        setState(() => _isLoading = false);
+        return;
+      }
+
+      // Load my statuses (not expired)
+      final myResponse = await supabase
+          .from('statuses')
+          .select('*, status_views(count)')
+          .eq('user_id', userId)
+          .gte('expires_at', DateTime.now().toIso8601String())
+          .order('created_at', ascending: false);
+
+      // Load contacts' statuses
+      final contactsResponse = await supabase
+          .from('statuses')
+          .select('*, users(username, avatar_url)')
+          .neq('user_id', userId)
+          .gte('expires_at', DateTime.now().toIso8601String())
+          .order('created_at', ascending: false);
+
+      setState(() {
+        _myStatuses = List<Map<String, dynamic>>.from(myResponse);
+        _contactsStatuses = List<Map<String, dynamic>>.from(contactsResponse);
+        _isLoading = false;
+      });
+    } catch (e) {
+      debugPrint('Load statuses error: $e');
+      setState(() => _isLoading = false);
+    }
   }
 
-  // Save status to storage
-  Future<void> _saveStatus(StatusModel status) async {
-    final prefs = await SharedPreferences.getInstance();
-    final statusData = prefs.getStringList('my_statuses') ?? [];
-    
-    // Format: id|userId|userName|typeIndex|content|createdAt|durationIndex|viewedBy
-    final data = '${status.id}|${status.userId}|${status.userName}|${status.type.index}|${status.content}|${status.createdAt}|${status.duration.index}|${status.viewedBy.join(',')}';
-    statusData.add(data);
-    
-    await prefs.setStringList('my_statuses', statusData);
-    await _loadStatuses();
+  Future<void> _deleteStatus(String statusId) async {
+    try {
+      final supabase = Supabase.instance.client;
+      await supabase.from('statuses').delete().eq('id', statusId);
+      await _loadStatuses();
+    } catch (e) {
+      debugPrint('Delete status error: $e');
+    }
   }
 
-  // Show status options
-  void _showStatusOptions() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppTheme.bgModal,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (context) => Container(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppTheme.divider,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(height: 20),
-            const Text(
-              'Add Status',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: AppTheme.textPrimary,
-              ),
-            ),
-            const SizedBox(height: 20),
-            _buildOptionTile(
-              Icons.text_fields,
-              'Text',
-              AppTheme.accentBlue,
-              () {
-                Navigator.pop(context);
-                _showTextStatusDialog();
-              },
-            ),
-            _buildOptionTile(
-              Icons.camera_alt,
-              'Camera',
-              AppTheme.error,
-              () {
-                Navigator.pop(context);
-                _takePhoto();
-              },
-            ),
-            _buildOptionTile(
-              Icons.photo_library,
-              'Gallery',
-              AppTheme.accentPurple,
-              () {
-                Navigator.pop(context);
-                _pickFromGallery();
-              },
-            ),
-            _buildOptionTile(
-              Icons.videocam,
-              'Video',
-              AppTheme.warning,
-              () {
-                Navigator.pop(context);
-                _recordVideo();
-              },
-            ),
-            _buildOptionTile(
-              Icons.mic,
-              'Voice',
-              AppTheme.primaryGreen,
-              () {
-                Navigator.pop(context);
-                _recordVoice();
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  void _showStatusViewers(Map<String, dynamic> status) async {
+    try {
+      final supabase = Supabase.instance.client;
+      final viewers = await supabase
+          .from('status_views')
+          .select('*, users(username, avatar_url)')
+          .eq('status_id', status['id']);
 
-  Widget _buildOptionTile(IconData icon, String label, Color color, VoidCallback onTap) {
-    return ListTile(
-      leading: Container(
-        width: 48,
-        height: 48,
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.15),
-          shape: BoxShape.circle,
-        ),
-        child: Icon(icon, color: color),
-      ),
-      title: Text(
-        label,
-        style: const TextStyle(
-          color: AppTheme.textPrimary,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-      onTap: onTap,
-    );
-  }
+      if (!mounted) return;
 
-  // Text Status
-  void _showTextStatusDialog() {
-    final controller = TextEditingController();
-    Color selectedColor = AppTheme.primaryGreen;
-    final colors = [
-      AppTheme.primaryGreen,
-      AppTheme.accentBlue,
-      AppTheme.accentPurple,
-      AppTheme.accentPink,
-      AppTheme.warning,
-      AppTheme.error,
-    ];
-
-    showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          backgroundColor: AppTheme.bgModal,
-          title: const Text('Text Status', style: TextStyle(color: AppTheme.textPrimary)),
-          content: Column(
+      showModalBottomSheet(
+        context: context,
+        builder: (context) => Container(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: selectedColor,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: TextField(
-                  controller: controller,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  maxLines: 5,
-                  decoration: const InputDecoration(
-                    hintText: 'Type a status...',
-                    hintStyle: TextStyle(color: Colors.white70),
-                    border: InputBorder.none,
-                  ),
-                ),
+              Text(
+                'Viewed by ${viewers.length} people',
+                style: Theme.of(context).textTheme.titleLarge,
               ),
               const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: colors.map((color) => GestureDetector(
-                  onTap: () => setDialogState(() => selectedColor = color),
-                  child: Container(
-                    width: 32,
-                    height: 32,
-                    decoration: BoxDecoration(
-                      color: color,
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: selectedColor == color ? Colors.white : Colors.transparent,
-                        width: 3,
+              Expanded(
+                child: ListView.builder(
+                  itemCount: viewers.length,
+                  itemBuilder: (context, index) {
+                    final viewer = viewers[index];
+                    return ListTile(
+                      leading: CircleAvatar(
+                        backgroundImage: viewer['users']?['avatar_url'] != null
+                            ? NetworkImage(viewer['users']['avatar_url'])
+                            : null,
+                        child: viewer['users']?['avatar_url'] == null
+                            ? Text((viewer['users']?['username'] ?? 'U')[0].toUpperCase())
+                            : null,
                       ),
-                    ),
-                  ),
-                )).toList(),
+                      title: Text(viewer['users']?['username'] ?? 'Unknown'),
+                      subtitle: Text(
+                        timeago.format(DateTime.parse(viewer['viewed_at'])),
+                      ),
+                    );
+                  },
+                ),
               ),
             ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel', style: TextStyle(color: AppTheme.textSecondary)),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                if (controller.text.isEmpty) return;
-                Navigator.pop(context);
-                _postStatus(
-                  StatusType.text,
-                  controller.text,
-                  backgroundColor: selectedColor,
-                );
-              },
-              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryGreen),
-              child: const Text('Post'),
-            ),
-          ],
         ),
-      ),
-    );
-  }
-
-  // Take photo with camera
-  Future<void> _takePhoto() async {
-    try {
-      final XFile? photo = await _picker.pickImage(source: ImageSource.camera);
-      if (photo != null) {
-        _showDurationPicker(StatusType.photo, photo.path);
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
       );
-    }
-  }
-
-  // Pick from gallery
-  Future<void> _pickFromGallery() async {
-    try {
-      final XFile? media = await _picker.pickImage(source: ImageSource.gallery);
-      if (media != null) {
-        _showDurationPicker(StatusType.photo, media.path);
-      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
-      );
+      debugPrint('Show viewers error: $e');
     }
-  }
-
-  // Record video
-  Future<void> _recordVideo() async {
-    try {
-      final XFile? video = await _picker.pickVideo(source: ImageSource.camera);
-      if (video != null) {
-        _showDurationPicker(StatusType.video, video.path);
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
-      );
-    }
-  }
-
-  // Record voice
-  void _recordVoice() {
-    bool isRecording = false;
-    
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppTheme.bgModal,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (context) => StatefulBuilder(
-        builder: (context, setModalState) => Container(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AppTheme.divider,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const SizedBox(height: 40),
-              Text(
-                isRecording ? 'Recording...' : 'Hold to record',
-                style: TextStyle(
-                  fontSize: 18,
-                  color: AppTheme.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 30),
-              GestureDetector(
-                onLongPressStart: (_) => setModalState(() => isRecording = true),
-                onLongPressEnd: (_) {
-                  setModalState(() => isRecording = false);
-                  Navigator.pop(context);
-                  // TODO: Save voice recording and post
-                  _postStatus(StatusType.voice, 'voice_path_${DateTime.now().millisecondsSinceEpoch}');
-                },
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  width: isRecording ? 100 : 80,
-                  height: isRecording ? 100 : 80,
-                  decoration: BoxDecoration(
-                    color: isRecording ? AppTheme.error : AppTheme.primaryGreen,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    isRecording ? Icons.mic : Icons.mic_none,
-                    color: Colors.white,
-                    size: 40,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 40),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  // Show duration picker (24h free, 48h/3days premium)
-  void _showDurationPicker(StatusType type, String content) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppTheme.bgModal,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (context) => Container(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppTheme.divider,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(height: 20),
-            const Text(
-              'Status Duration',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: AppTheme.textPrimary,
-              ),
-            ),
-            const SizedBox(height: 16),
-            _buildDurationOption(
-              '24 Hours',
-              'Free',
-              StatusDuration.hours24,
-              true,
-              type,
-              content,
-            ),
-            _buildDurationOption(
-              '48 Hours',
-              'Premium',
-              StatusDuration.hours48,
-              _isPremium,
-              type,
-              content,
-            ),
-            _buildDurationOption(
-              '3 Days',
-              'Premium',
-              StatusDuration.days3,
-              _isPremium,
-              type,
-              content,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildDurationOption(
-    String title,
-    String badge,
-    StatusDuration duration,
-    bool enabled,
-    StatusType type,
-    String content,
-  ) {
-    return ListTile(
-      leading: Icon(
-        Icons.timer,
-        color: enabled ? AppTheme.primaryGreen : AppTheme.textMuted,
-      ),
-      title: Text(
-        title,
-        style: TextStyle(
-          color: enabled ? AppTheme.textPrimary : AppTheme.textMuted,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-      trailing: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: enabled ? AppTheme.primaryGreen.withOpacity(0.2) : AppTheme.textMuted.withOpacity(0.2),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Text(
-          badge,
-          style: TextStyle(
-            fontSize: 12,
-            color: enabled ? AppTheme.primaryGreen : AppTheme.textMuted,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ),
-      onTap: enabled
-          ? () {
-              Navigator.pop(context);
-              _postStatus(type, content, duration: duration);
-            }
-          : () {
-              // Show premium upgrade dialog
-              _showPremiumDialog();
-            },
-    );
-  }
-
-  void _showPremiumDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppTheme.bgModal,
-        title: const Text('Premium Feature', style: TextStyle(color: AppTheme.textPrimary)),
-        content: const Text(
-          'Upgrade to Premium to unlock 48-hour and 3-day status durations, plus exclusive wallpapers and stickers!',
-          style: TextStyle(color: AppTheme.textSecondary),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Later', style: TextStyle(color: AppTheme.textSecondary)),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              // TODO: Navigate to premium purchase
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryGreen),
-            child: const Text('Upgrade \$4.99'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Post the status
-  Future<void> _postStatus(
-    StatusType type,
-    String content, {
-    StatusDuration duration = StatusDuration.hours24,
-    Color? backgroundColor,
-  }) async {
-    final status = StatusModel(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      userId: 'me',
-      userName: 'You',
-      type: type,
-      content: content,
-      createdAt: DateTime.now(),
-      duration: duration,
-    );
-
-    await _saveStatus(status);
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Status posted! Expires in ${_getDurationText(duration)}'),
-        backgroundColor: AppTheme.success,
-      ),
-    );
-  }
-
-  String _getDurationText(StatusDuration duration) {
-    switch (duration) {
-      case StatusDuration.hours24:
-        return '24 hours';
-      case StatusDuration.hours48:
-        return '48 hours';
-      case StatusDuration.days3:
-        return '3 days';
-    }
-  }
-
-  // View status
-  void _viewStatus(StatusModel status) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => _StatusViewerScreen(status: status),
-      ),
-    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final authProvider = Provider.of<AuthProvider>(context);
+
     return Scaffold(
-      backgroundColor: AppTheme.bgPrimary,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: AppTheme.bgSecondary,
-        elevation: 0,
         title: const Text('Status'),
+        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
+        elevation: 0,
         actions: [
           IconButton(
-            icon: const Icon(Icons.search, color: AppTheme.textPrimary),
-            onPressed: () {},
-          ),
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert, color: AppTheme.textPrimary),
-            color: AppTheme.bgModal,
-            itemBuilder: (context) => [
-              const PopupMenuItem(
-                value: 'privacy',
-                child: Text('Status Privacy', style: TextStyle(color: AppTheme.textPrimary)),
-              ),
-              const PopupMenuItem(
-                value: 'settings',
-                child: Text('Settings', style: TextStyle(color: AppTheme.textPrimary)),
-              ),
-            ],
+            icon: const Icon(Icons.more_vert),
+            onPressed: () {
+              // Status settings
+            },
           ),
         ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              children: [
-                // My Status
-                ListTile(
-                  leading: Stack(
-                    children: [
-                      Container(
-                        width: 56,
-                        height: 56,
-                        decoration: BoxDecoration(
-                          color: AppTheme.bgElevated,
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: _statuses.isNotEmpty ? AppTheme.primaryGreen : AppTheme.divider,
-                            width: _statuses.isNotEmpty ? 2.5 : 1,
-                          ),
-                        ),
-                        child: const Icon(Icons.person, color: AppTheme.primaryGreen),
-                      ),
-                      Positioned(
-                        bottom: 0,
-                        right: 0,
-                        child: Container(
-                          padding: const EdgeInsets.all(4),
-                          decoration: const BoxDecoration(
-                            color: AppTheme.primaryGreen,
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(Icons.add, size: 12, color: Colors.white),
-                        ),
-                      ),
-                    ],
-                  ),
-                  title: const Text(
-                    'My Status',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.textPrimary,
-                    ),
-                  ),
-                  subtitle: Text(
-                    _statuses.isNotEmpty
-                        ? '${_statuses.length} status${_statuses.length > 1 ? 'es' : ''} • Tap to view'
-                        : 'Tap to add status update',
-                    style: TextStyle(color: AppTheme.textTertiary),
-                  ),
-                  onTap: _statuses.isNotEmpty ? () => _viewStatus(_statuses.last) : _showStatusOptions,
-                ),
-                const Divider(color: AppTheme.divider),
+          : RefreshIndicator(
+              onRefresh: _loadStatuses,
+              child: ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  // My Status Section
+                  _buildSectionHeader(context, 'My Status'),
+                  const SizedBox(height: 8),
 
-                // Recent Updates (Real statuses only - no demo)
-                if (_statuses.isNotEmpty) ...[
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                    child: Text(
-                      'MY STATUSES',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.textTertiary,
-                        letterSpacing: 1,
+                  GestureDetector(
+                    onTap: () => Navigator.pushNamed(context, '/create_status'),
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).cardColor,
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                    ),
-                  ),
-                  ..._statuses.map((status) => _buildMyStatusTile(status)),
-                ],
-
-                // Empty state
-                if (_statuses.isEmpty)
-                  Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(40),
-                      child: Column(
+                      child: Row(
                         children: [
-                          Icon(
-                            Icons.auto_awesome,
-                            size: 64,
-                            color: AppTheme.textTertiary.withOpacity(0.3),
+                          Stack(
+                            children: [
+                              CircleAvatar(
+                                radius: 28,
+                                backgroundImage: authProvider.userPhotoUrl != null
+                                    ? NetworkImage(authProvider.userPhotoUrl!)
+                                    : null,
+                                child: authProvider.userPhotoUrl == null
+                                    ? Icon(
+                                        Icons.person,
+                                        size: 28,
+                                        color: Theme.of(context).primaryColor,
+                                      )
+                                    : null,
+                              ),
+                              Positioned(
+                                bottom: 0,
+                                right: 0,
+                                child: Container(
+                                  padding: const EdgeInsets.all(4),
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context).primaryColor,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: Theme.of(context).scaffoldBackgroundColor,
+                                      width: 2,
+                                    ),
+                                  ),
+                                  child: const Icon(
+                                    Icons.add,
+                                    size: 14,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(height: 16),
-                          Text(
-                            'No statuses yet',
-                            style: TextStyle(
-                              fontSize: 18,
-                              color: AppTheme.textSecondary,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Share photos, videos, text, or voice updates',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: AppTheme.textTertiary,
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'My Status',
+                                  style: Theme.of(context).textTheme.titleMedium,
+                                ),
+                                Text(
+                                  _myStatuses.isEmpty
+                                      ? 'Tap to add status'
+                                      : '${_myStatuses.length} active status${_myStatuses.length > 1 ? 'es' : ''}',
+                                  style: Theme.of(context).textTheme.bodySmall,
+                                ),
+                              ],
                             ),
                           ),
                         ],
                       ),
                     ),
                   ),
-              ],
-            ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _showStatusOptions,
-        backgroundColor: AppTheme.primaryGreen,
-        child: const Icon(Icons.camera_alt, color: Colors.white),
-      ),
-    );
-  }
 
-  Widget _buildMyStatusTile(StatusModel status) {
-    IconData icon;
-    Color color;
-    
-    switch (status.type) {
-      case StatusType.text:
-        icon = Icons.text_fields;
-        color = AppTheme.accentBlue;
-        break;
-      case StatusType.photo:
-        icon = Icons.image;
-        color = AppTheme.accentPurple;
-        break;
-      case StatusType.video:
-        icon = Icons.videocam;
-        color = AppTheme.warning;
-        break;
-      case StatusType.voice:
-        icon = Icons.mic;
-        color = AppTheme.primaryGreen;
-        break;
-    }
+                  // My Active Statuses
+                  if (_myStatuses.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    ..._myStatuses.map((status) => _buildStatusItem(
+                      context,
+                      status: status,
+                      isMine: true,
+                      onTap: () => _showStatusViewers(status),
+                      onDelete: () => _deleteStatus(status['id']),
+                    )),
+                  ],
 
-    return ListTile(
-      leading: Container(
-        width: 52,
-        height: 52,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: Border.all(color: AppTheme.primaryGreen, width: 2.5),
-        ),
-        child: Container(
-          margin: const EdgeInsets.all(2),
-          decoration: BoxDecoration(
-            color: AppTheme.bgElevated,
-            shape: BoxShape.circle,
-          ),
-          child: Icon(icon, color: color),
-        ),
-      ),
-      title: Text(
-        _getStatusTypeName(status.type),
-        style: const TextStyle(
-          fontWeight: FontWeight.w500,
-          color: AppTheme.textPrimary,
-        ),
-      ),
-      subtitle: Row(
-        children: [
-          Text(
-            status.timeAgo,
-            style: const TextStyle(color: AppTheme.textTertiary),
-          ),
-          const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: status.duration == StatusDuration.hours24
-                  ? AppTheme.primaryGreen.withOpacity(0.2)
-                  : AppTheme.accentPink.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(
-              _getDurationLabel(status.duration),
-              style: TextStyle(
-                fontSize: 10,
-                color: status.duration == StatusDuration.hours24
-                    ? AppTheme.primaryGreen
-                    : AppTheme.accentPink,
-                fontWeight: FontWeight.bold,
+                  const SizedBox(height: 24),
+
+                  // Contacts' Statuses
+                  _buildSectionHeader(context, 'Recent Updates'),
+                  const SizedBox(height: 8),
+
+                  if (_contactsStatuses.isEmpty)
+                    Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(32),
+                        child: Column(
+                          children: [
+                            Icon(
+                              Icons.circle_outlined,
+                              size: 64,
+                              color: Colors.grey.withOpacity(0.5),
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              'No recent updates',
+                              style: TextStyle(color: Colors.grey.withOpacity(0.7)),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  else
+                    ..._contactsStatuses.map((status) => _buildStatusItem(
+                      context,
+                      status: status,
+                      isMine: false,
+                      onTap: () => _viewStatus(status),
+                    )),
+                ],
               ),
             ),
-          ),
-        ],
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => Navigator.pushNamed(context, '/create_status'),
+        child: const Icon(Icons.camera_alt),
       ),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            '${status.viewedBy.length} views',
-            style: TextStyle(
-              fontSize: 12,
-              color: AppTheme.textTertiary,
-            ),
-          ),
-          const SizedBox(width: 8),
-          const Icon(Icons.arrow_forward_ios, size: 14, color: AppTheme.textTertiary),
-        ],
-      ),
-      onTap: () => _viewStatus(status),
     );
   }
 
-  String _getStatusTypeName(StatusType type) {
-    switch (type) {
-      case StatusType.text:
-        return 'Text Status';
-      case StatusType.photo:
-        return 'Photo';
-      case StatusType.video:
-        return 'Video';
-      case StatusType.voice:
-        return 'Voice Note';
-    }
+  Widget _buildSectionHeader(BuildContext context, String title) {
+    return Text(
+      title,
+      style: TextStyle(
+        fontSize: 14,
+        fontWeight: FontWeight.w600,
+        color: Theme.of(context).primaryColor,
+      ),
+    );
   }
 
-  String _getDurationLabel(StatusDuration duration) {
-    switch (duration) {
-      case StatusDuration.hours24:
-        return '24H';
-      case StatusDuration.hours48:
-        return '48H';
-      case StatusDuration.days3:
-        return '3D';
+  Widget _buildStatusItem(
+    BuildContext context, {
+    required Map<String, dynamic> status,
+    required bool isMine,
+    required VoidCallback onTap,
+    VoidCallback? onDelete,
+  }) {
+    final user = isMine ? null : status['users'];
+    final createdAt = DateTime.parse(status['created_at']);
+    final expiresAt = DateTime.parse(status['expires_at']);
+    final timeLeft = expiresAt.difference(DateTime.now());
+    final hoursLeft = timeLeft.inHours;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: ListTile(
+        leading: Container(
+          padding: const EdgeInsets.all(2),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: Theme.of(context).primaryColor,
+              width: 2,
+            ),
+          ),
+          child: CircleAvatar(
+            radius: 26,
+            backgroundImage: isMine
+                ? (Provider.of<AuthProvider>(context).userPhotoUrl != null
+                    ? NetworkImage(Provider.of<AuthProvider>(context).userPhotoUrl!)
+                    : null)
+                : (user?['avatar_url'] != null
+                    ? NetworkImage(user['avatar_url'])
+                    : null),
+            child: isMine
+                ? (Provider.of<AuthProvider>(context).userPhotoUrl == null
+                    ? const Icon(Icons.person)
+                    : null)
+                : (user?['avatar_url'] == null
+                    ? Text((user?['username'] ?? 'U')[0].toUpperCase())
+                    : null),
+          ),
+        ),
+        title: Text(
+          isMine ? 'My Status' : (user?['username'] ?? 'Unknown'),
+        ),
+        subtitle: Text(
+          '${timeago.format(createdAt)} · ${hoursLeft}h left',
+        ),
+        trailing: isMine
+            ? Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (status['status_views'] != null)
+                    Text(
+                      '${status['status_views']?['count'] ?? 0} 👁',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
+                    onPressed: onDelete,
+                  ),
+                ],
+              )
+            : const Icon(Icons.play_arrow),
+        onTap: onTap,
+      ),
+    );
+  }
+
+  void _viewStatus(Map<String, dynamic> status) async {
+    // Mark as viewed
+    try {
+      final supabase = Supabase.instance.client;
+      final userId = supabase.auth.currentUser?.id;
+
+      if (userId != null) {
+        await supabase.from('status_views').upsert({
+          'status_id': status['id'],
+          'user_id': userId,
+          'viewed_at': DateTime.now().toIso8601String(),
+        });
+      }
+    } catch (e) {
+      debugPrint('Mark viewed error: $e');
     }
+
+    // Show status viewer
+    showDialog(
+      context: context,
+      builder: (context) => StatusViewerDialog(status: status),
+    );
   }
 }
 
-// Status Viewer Screen
-class _StatusViewerScreen extends StatefulWidget {
-  final StatusModel status;
+class StatusViewerDialog extends StatefulWidget {
+  final Map<String, dynamic> status;
 
-  const _StatusViewerScreen({required this.status});
+  const StatusViewerDialog({super.key, required this.status});
 
   @override
-  State<_StatusViewerScreen> createState() => _StatusViewerScreenState();
+  State<StatusViewerDialog> createState() => _StatusViewerDialogState();
 }
 
-class _StatusViewerScreenState extends State<_StatusViewerScreen> {
-  double _progress = 0;
-  bool _isPaused = false;
+class _StatusViewerDialogState extends State<StatusViewerDialog> {
+  double _progress = 0.0;
 
   @override
   void initState() {
@@ -879,11 +411,12 @@ class _StatusViewerScreenState extends State<_StatusViewerScreen> {
 
   void _startProgress() {
     Future.delayed(const Duration(milliseconds: 50), () {
-      if (!mounted || _isPaused) return;
-      setState(() => _progress += 0.01);
-      if (_progress < 1) {
+      if (mounted && _progress < 1.0) {
+        setState(() {
+          _progress += 0.01;
+        });
         _startProgress();
-      } else {
+      } else if (mounted) {
         Navigator.pop(context);
       }
     });
@@ -891,46 +424,38 @@ class _StatusViewerScreenState extends State<_StatusViewerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final status = widget.status;
+    final user = status['users'];
+
     return Scaffold(
-      backgroundColor: AppTheme.bgPrimary,
+      backgroundColor: Colors.black,
       body: GestureDetector(
-        onTapDown: (_) => setState(() => _isPaused = true),
-        onTapUp: (_) => setState(() => _isPaused = false),
+        onTap: () => Navigator.pop(context),
         child: Stack(
+          fit: StackFit.expand,
           children: [
             // Status Content
-            Center(
-              child: widget.status.type == StatusType.text
-                  ? Container(
-                      padding: const EdgeInsets.all(40),
-                      color: widget.status.content.startsWith('#')
-                          ? Color(int.parse(widget.status.content.split('|')[1]))
-                          : AppTheme.primaryGreen,
-                      child: Center(
-                        child: Text(
-                          widget.status.content.split('|')[0],
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 28,
-                            fontWeight: FontWeight.bold,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    )
-                  : widget.status.type == StatusType.photo
-                      ? Image.file(
-                          File(widget.status.content),
-                          fit: BoxFit.contain,
-                        )
-                      : const Icon(Icons.image, size: 100, color: AppTheme.textTertiary),
-            ),
+            if (status['media_url'] != null)
+              Image.network(
+                status['media_url'],
+                fit: BoxFit.contain,
+              )
+            else
+              Center(
+                child: Text(
+                  status['text'] ?? '',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 24,
+                  ),
+                ),
+              ),
 
             // Progress Bar
             Positioned(
-              top: MediaQuery.of(context).padding.top + 10,
-              left: 10,
-              right: 10,
+              top: MediaQuery.of(context).padding.top + 8,
+              left: 8,
+              right: 8,
               child: LinearProgressIndicator(
                 value: _progress,
                 backgroundColor: Colors.white.withOpacity(0.3),
@@ -946,29 +471,20 @@ class _StatusViewerScreenState extends State<_StatusViewerScreen> {
                 children: [
                   CircleAvatar(
                     radius: 20,
-                    backgroundColor: AppTheme.bgElevated,
-                    child: const Icon(Icons.person, color: AppTheme.primaryGreen),
+                    backgroundImage: user?['avatar_url'] != null
+                        ? NetworkImage(user['avatar_url'])
+                        : null,
+                    child: user?['avatar_url'] == null
+                        ? Text((user?['username'] ?? 'U')[0].toUpperCase())
+                        : null,
                   ),
                   const SizedBox(width: 12),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        widget.status.userName,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 16,
-                        ),
-                      ),
-                      Text(
-                        widget.status.timeAgo,
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.7),
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
+                  Text(
+                    user?['username'] ?? 'Unknown',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ],
               ),
@@ -976,7 +492,7 @@ class _StatusViewerScreenState extends State<_StatusViewerScreen> {
 
             // Close Button
             Positioned(
-              top: MediaQuery.of(context).padding.top + 20,
+              top: MediaQuery.of(context).padding.top + 16,
               right: 16,
               child: IconButton(
                 icon: const Icon(Icons.close, color: Colors.white),
