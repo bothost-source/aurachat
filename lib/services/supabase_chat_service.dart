@@ -20,7 +20,7 @@ class SupabaseChatService {
     return _supabase
         .from('chats')
         .stream(primaryKey: ['id'])
-        .map((data) => data.map((json) => ChatModel.fromJson(json)).toList());
+        .map((json) => ChatModel.fromJson(json)).toList();
   }
 
   Stream<List<MessageModel>> getMessages(String chatId) {
@@ -67,7 +67,9 @@ class SupabaseChatService {
         'timestamp': DateTime.now().toIso8601String(),
       });
     } else {
-      await _supabase.from('typing').delete().eq('user_id', _currentUserId);
+      final userId = _currentUserId;
+if (userId == null) return;
+await _supabase.from('typing').delete().eq('user_id', userId);
     }
   }
 
