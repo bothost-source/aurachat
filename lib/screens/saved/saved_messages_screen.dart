@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../../themes/app_theme.dart';
 
 class SavedMessagesScreen extends StatelessWidget {
   const SavedMessagesScreen({super.key});
@@ -7,30 +6,33 @@ class SavedMessagesScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.bgPrimary,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: AppTheme.bgSecondary,
-        elevation: 0,
         title: const Text('Saved Messages'),
-        actions: [
-          IconButton(icon: const Icon(Icons.search, color: AppTheme.textPrimary), onPressed: () {}),
-        ],
+        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
+        elevation: 0,
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(color: AppTheme.bgSecondary, borderRadius: BorderRadius.circular(12)),
-            child: Row(
-              children: [
-                Icon(Icons.info_outline, color: AppTheme.info),
-                const SizedBox(width: 12),
-                Expanded(child: Text('Forward messages here to save them. Only you can see this chat.', style: TextStyle(color: AppTheme.textSecondary))),
-              ],
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.bookmark,
+              size: 80,
+              color: Theme.of(context).primaryColor.withOpacity(0.3),
             ),
-          ),
-        ],
+            const SizedBox(height: 16),
+            Text(
+              'Saved Messages',
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Your saved messages will appear here',
+              style: TextStyle(color: Colors.grey.withOpacity(0.7)),
+            ),
+          ],
+        ),
       ),
     );
   }
