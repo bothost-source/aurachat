@@ -16,11 +16,17 @@ class SupabaseChatService {
 
   String? get currentUserId => _currentUserId;
 
+  // ==========================================================================
+  // STREAMS (Real-time)
+  // ==========================================================================
+
   Stream<List<ChatModel>> getUserChats() {
     return _supabase
         .from('chats')
         .stream(primaryKey: ['id'])
-        .map((json) => ChatModel.fromJson(json)).toList();
+        .map((data) => data
+            .map((json) => ChatModel.fromJson(json as Map<String, dynamic>))
+            .toList());
   }
 
   Stream<List<MessageModel>> getMessages(String chatId) {
@@ -28,7 +34,9 @@ class SupabaseChatService {
         .from('messages')
         .stream(primaryKey: ['id'])
         .eq('chat_id', chatId)
-        .map((data) => data.map((json) => MessageModel.fromJson(json)).toList());
+        .map((data) => data
+            .map((json) => MessageModel.fromJson(json as Map<String, dynamic>))
+            .toList());
   }
 
   Stream<List<String>> getTypingUsers(String chatId) {
@@ -36,8 +44,14 @@ class SupabaseChatService {
         .from('typing')
         .stream(primaryKey: ['id'])
         .eq('chat_id', chatId)
-        .map((data) => data.map((d) => d['user_id'] as String).toList());
+        .map((data) => data
+            .map((d) => d['user_id'] as String)
+            .toList());
   }
+
+  // ==========================================================================
+  // MESSAGES
+  // ==========================================================================
 
   Future<void> sendMessage({
     required String chatId,
@@ -59,27 +73,39 @@ class SupabaseChatService {
     }).eq('id', chatId);
   }
 
+  // ==========================================================================
+  // TYPING STATUS
+  // ==========================================================================
+
   Future<void> setTypingStatus(String chatId, bool isTyping) async {
+    final userId = _currentUserId;
+    if (userId == null) return;
+
     if (isTyping) {
       await _supabase.from('typing').upsert({
         'chat_id': chatId,
-        'user_id': _currentUserId,
+        'user_id': userId,
         'timestamp': DateTime.now().toIso8601String(),
       });
     } else {
-      final userId = _currentUserId;
-if (userId == null) return;
-await _supabase.from('typing').delete().eq('user_id', userId);
+      await _supabase.from('typing').delete().eq('user_id', userId);
     }
   }
 
+  // ==========================================================================
+  // CHAT CREATION
+  // ==========================================================================
+
   Future<String> createDirectChat(String otherUserId) async {
-    final chatId = '${_currentUserId}_$otherUserId';
+    final currentUser = _currentUserId;
+    if (currentUser == null) throw Exception('User not authenticated');
+
+    final chatId = '\${currentUser}_\$otherUserId';
     await _supabase.from('chats').insert({
       'id': chatId,
       'name': 'Chat',
       'type': 'private',
-      'participants': [_currentUserId, otherUserId],
+      'participants': [currentUser, otherUserId],
       'created_at': DateTime.now().toIso8601String(),
     });
     return chatId;
@@ -115,13 +141,21 @@ await _supabase.from('typing').delete().eq('user_id', userId);
     });
   }
 
+  // ==========================================================================
+  // SEARCH
+  // ==========================================================================
+
   Future<List<Map<String, dynamic>>> searchUsers(String query) async {
     final response = await _supabase
         .from('users')
         .select()
-        .ilike('username', '%$query%');
+        .ilike('username', '%\$query%');
     return response;
   }
+
+  // ==========================================================================
+  // CLEANUP
+  // ==========================================================================
 
   void dispose() {}
 }
