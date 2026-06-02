@@ -88,4 +88,7 @@ flutter:
     - assets/images/
     - assets/animations/
     - assets/emojis/
-    - assets/audio/
+    - assets/audio/ 
+dependency_overrides:
+  record_platform_interface: ^1.2.0
+
