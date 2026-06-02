@@ -8,7 +8,6 @@ import 'package:uuid/uuid.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:just_audio/just_audio.dart';
-import 'package:record/record.dart';
 import 'package:audio_waveforms/audio_waveforms.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:photo_view/photo_view.dart';
@@ -18,7 +17,9 @@ import 'dart:io';
 import '../../providers/auth_provider.dart';
 import '../../providers/chat_provider.dart';
 import '../../providers/settings_provider.dart';
- import 'package:dio/dio.dart'; 
+import 'package:dio/dio.dart'; 
+import 'package:flutter_sound/flutter_sound.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class ChatScreen extends StatefulWidget {
   final String? chatId;
@@ -42,7 +43,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final _messageController = TextEditingController();
   final _scrollController = ScrollController();
   final AudioPlayer _audioPlayer = AudioPlayer();
-  final AudioRecorder _audioRecorder = AudioRecorder();
+  final FlutterSoundRecorder _audioRecorder = FlutterSoundRecorder();
 
   bool _showEmojiPicker = false;
   bool _isRecording = false;
@@ -60,15 +61,16 @@ class _ChatScreenState extends State<ChatScreen> {
     _subscribeToMessages();
   }
 
-  @override
-  void dispose() {
-    _messageController.dispose();
-    _scrollController.dispose();
-    _audioPlayer.dispose();
-    _audioRecorder.dispose();
-    _messageSubscription?.unsubscribe();
-    super.dispose();
-  }
+ @override
+ void dispose() {
+   _messageController.dispose();
+   _scrollController.dispose();
+   _audioPlayer.dispose();
+   _audioRecorder.closeRecorder();  // Add this
+   _messageSubscription?.unsubscribe();
+   super.dispose();
+ }
+
 
   Future<void> _loadMessages() async {
     if (widget.chatId == null) {
@@ -310,50 +312,53 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _startRecording() async {
-    try {
-      final hasPermission = await _audioRecorder.hasPermission();
-      if (!hasPermission) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Microphone permission required')),
-        );
-        return;
-      }
-
-      final dir = await getTemporaryDirectory();
-      final path = '${dir.path}/${const Uuid().v4()}.m4a';
-
-      await _audioRecorder.start(
-        RecordConfig(
-          encoder: AudioEncoder.aacLc,
-          bitRate: 128000,
-          sampleRate: 44100,
-        ),
-        path: path,
+  try {
+    // Request permission
+    var status = await Permission.microphone.request();
+    if (status != PermissionStatus.granted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Microphone permission required')),
       );
-
-      setState(() => _isRecording = true);
-    } catch (e) {
-      debugPrint('Recording error: $e');
+      return;
     }
+
+    // Open recorder if not already open
+    if (!_audioRecorder.isRecording) {
+      await _audioRecorder.openRecorder();
+    }
+
+    final dir = await getTemporaryDirectory();
+    final path = '${dir.path}/${const Uuid().v4()}.aac';
+
+    await _audioRecorder.startRecorder(
+      toFile: path,
+      codec: Codec.aacADTS,
+    );
+
+    setState(() => _isRecording = true);
+  } catch (e) {
+    debugPrint('Recording error: $e');
   }
+}
 
   Future<void> _stopRecording() async {
-    try {
-      final path = await _audioRecorder.stop();
-      setState(() => _isRecording = false);
+  try {
+    final path = await _audioRecorder.stopRecorder();
+    setState(() => _isRecording = false);
 
-      if (path != null) {
-        await _uploadAndSendMedia(
-          file: File(path),
-          type: 'audio',
-          fileName: 'Voice Message',
-          fileSize: 'Audio',
-        );
-      }
-    } catch (e) {
-      debugPrint('Stop recording error: $e');
+    if (path != null) {
+      await _uploadAndSendMedia(
+        file: File(path),
+        type: 'audio',
+        fileName: 'Voice Message',
+        fileSize: 'Audio',
+      );
     }
+  } catch (e) {
+    debugPrint('Stop recording error: $e');
   }
+}
+
 
   Future<void> _playAudio(String messageId, String audioUrl) async {
     try {
