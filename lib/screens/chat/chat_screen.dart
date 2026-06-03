@@ -655,41 +655,13 @@ class _ChatScreenState extends State<ChatScreen> {
                           ),
                   ),
 
-                  // Send or Record button
-                  GestureDetector(
-                    onTap: _messageController.text.trim().isEmpty
-                        ? null
-                        : _sendTextMessage,
-                    onLongPressStart: _messageController.text.trim().isEmpty
-                        ? (_) => _startRecording()
-                        : null,
-                    onLongPressEnd: _messageController.text.trim().isEmpty
-                        ? (_) => _stopRecording()
-                        : null,
-                    child: Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: _messageController.text.trim().isEmpty
-                            ? (_isRecording ? Colors.red : Theme.of(context).primaryColor.withOpacity(0.5))
-                            : Theme.of(context).primaryColor,
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        _messageController.text.trim().isEmpty
-                            ? (_isRecording ? Icons.stop : Icons.mic)
-                            : Icons.send,
-                        color: Colors.white,
-                        size: 20,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+          IconButton(
+            icon: const Icon(Icons.send, color: Colors.white),
+            onPressed: _messageController.text.trim().isEmpty
+                ? null
+                : _sendTextMessage,
           ),
-        ],
-      ),
-    );
+
   }
 
   Widget _buildMessageBubble(
