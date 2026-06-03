@@ -37,7 +37,7 @@ dependencies:
 
   # Audio - Recording & Playback
   just_audio: ^0.9.38
-  flutter_sound: ^9.4.6
+  # flutter_sound: ^9.4.6
   audio_waveforms: ^1.0.5
 
   # File Handling
@@ -60,7 +60,7 @@ dependencies:
   lottie: ^3.1.2
 
   # Permissions
-  permission_handler: ^11.3.1
+  # permission_handler: ^11.3.1
 
   # Biometric
   local_auth: ^2.2.0
