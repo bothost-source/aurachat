@@ -18,7 +18,7 @@ import '../../providers/auth_provider.dart';
 import '../../providers/chat_provider.dart';
 import '../../providers/settings_provider.dart';
 import 'package:dio/dio.dart'; 
-import '../../services/audio_recorder_factory.dart';
+// import '../../services/audio_recorder_factory.dart';
 
 class ChatScreen extends StatefulWidget {
   final String? chatId;
@@ -42,7 +42,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final _messageController = TextEditingController();
   final _scrollController = ScrollController();
   final AudioPlayer _audioPlayer = AudioPlayer();
-  final _audioRecorder = createAudioRecorder();
+  // final _audioRecorder = createAudioRecorder();
 
   bool _showEmojiPicker = false;
   bool _isRecording = false;
@@ -65,7 +65,6 @@ class _ChatScreenState extends State<ChatScreen> {
    _messageController.dispose();
    _scrollController.dispose();
    _audioPlayer.dispose();
-   _audioRecorder.dispose();
    _messageSubscription?.unsubscribe();
    super.dispose();
  }
@@ -309,46 +308,6 @@ class _ChatScreenState extends State<ChatScreen> {
       );
     }
   }
-
-    Future<void> _startRecording() async {
-    try {
-      final hasPermission = await _audioRecorder.hasPermission();
-      if (!hasPermission) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Microphone permission required')),
-        );
-        return;
-      }
-
-      final dir = await getTemporaryDirectory();
-      final path = '${dir.path}/${const Uuid().v4()}.aac';
-
-      await _audioRecorder.start(path);
-
-      setState(() => _isRecording = true);
-    } catch (e) {
-      debugPrint('Recording error: $e');
-    }
-  }
-
-  Future<void> _stopRecording() async {
-    try {
-      final path = await _audioRecorder.stop();
-      setState(() => _isRecording = false);
-
-      if (path != null) {
-        await _uploadAndSendMedia(
-          file: File(path),
-          type: 'audio',
-          fileName: 'Voice Message',
-          fileSize: 'Audio',
-        );
-      }
-    } catch (e) {
-      debugPrint('Stop recording error: $e');
-    }
-  }
-
 
   Future<void> _playAudio(String messageId, String audioUrl) async {
     try {
