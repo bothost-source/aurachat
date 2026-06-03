@@ -106,7 +106,7 @@ class _ChatScreenState extends State<ChatScreen> {
           event: PostgresChangeEvent.insert,
           schema: 'public',
           table: 'messages',
-          filtegeFilter(
+          filter: PostgresChangeFilter(
             type: PostgresChangeFilterType.eq,
             column: 'chat_id',
             value: widget.chatId!,
@@ -661,8 +661,16 @@ class _ChatScreenState extends State<ChatScreen> {
                 ? null
                 : _sendTextMessage,
           ),
-
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
+
+  Widget _buildMessageBubble(
 
   Widget _buildMessageBubble(
     BuildContext context, {
