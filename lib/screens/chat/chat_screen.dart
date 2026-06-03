@@ -42,7 +42,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final _messageController = TextEditingController();
   final _scrollController = ScrollController();
   final AudioPlayer _audioPlayer = AudioPlayer();
-  final AudioRecorderInterface _audioRecorder = createAudioRecorder();
+  final _audioRecorder = createAudioRecorder();
 
   bool _showEmojiPicker = false;
   bool _isRecording = false;
@@ -65,7 +65,6 @@ class _ChatScreenState extends State<ChatScreen> {
    _messageController.dispose();
    _scrollController.dispose();
    _audioPlayer.dispose();
-   _audioRecorder.closeRecorder();  // Add this
    _messageSubscription?.unsubscribe();
    super.dispose();
  }
@@ -107,7 +106,7 @@ class _ChatScreenState extends State<ChatScreen> {
           event: PostgresChangeEvent.insert,
           schema: 'public',
           table: 'messages',
-          filter: PostgresChangeFilter(
+          filtegeFilter(
             type: PostgresChangeFilterType.eq,
             column: 'chat_id',
             value: widget.chatId!,
