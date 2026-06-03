@@ -18,8 +18,7 @@ import '../../providers/auth_provider.dart';
 import '../../providers/chat_provider.dart';
 import '../../providers/settings_provider.dart';
 import 'package:dio/dio.dart'; 
-import 'package:flutter_sound/flutter_sound.dart';
-import 'package:permission_handler/permission_handler.dart';
+import '../../services/audio_recorder_factory.dart';
 
 class ChatScreen extends StatefulWidget {
   final String? chatId;
@@ -43,7 +42,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final _messageController = TextEditingController();
   final _scrollController = ScrollController();
   final AudioPlayer _audioPlayer = AudioPlayer();
-  final FlutterSoundRecorder _audioRecorder = FlutterSoundRecorder();
+  final AudioRecorderInterface _audioRecorder = createAudioRecorder();
 
   bool _showEmojiPicker = false;
   bool _isRecording = false;
