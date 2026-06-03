@@ -65,6 +65,7 @@ class _ChatScreenState extends State<ChatScreen> {
    _messageController.dispose();
    _scrollController.dispose();
    _audioPlayer.dispose();
+   _audioRecorder.dispose();
    _messageSubscription?.unsubscribe();
    super.dispose();
  }
@@ -309,53 +310,44 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  Future<void> _startRecording() async {
-  try {
-    // Request permission
-    var status = await Permission.microphone.request();
-    if (status != PermissionStatus.granted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Microphone permission required')),
-      );
-      return;
+    Future<void> _startRecording() async {
+    try {
+      final hasPermission = await _audioRecorder.hasPermission();
+      if (!hasPermission) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Microphone permission required')),
+        );
+        return;
+      }
+
+      final dir = await getTemporaryDirectory();
+      final path = '${dir.path}/${const Uuid().v4()}.aac';
+
+      await _audioRecorder.start(path);
+
+      setState(() => _isRecording = true);
+    } catch (e) {
+      debugPrint('Recording error: $e');
     }
-
-    // Open recorder if not already open
-    if (!_audioRecorder.isRecording) {
-      await _audioRecorder.openRecorder();
-    }
-
-    final dir = await getTemporaryDirectory();
-    final path = '${dir.path}/${const Uuid().v4()}.aac';
-
-    await _audioRecorder.startRecorder(
-      toFile: path,
-      codec: Codec.aacADTS,
-    );
-
-    setState(() => _isRecording = true);
-  } catch (e) {
-    debugPrint('Recording error: $e');
   }
-}
 
   Future<void> _stopRecording() async {
-  try {
-    final path = await _audioRecorder.stopRecorder();
-    setState(() => _isRecording = false);
+    try {
+      final path = await _audioRecorder.stop();
+      setState(() => _isRecording = false);
 
-    if (path != null) {
-      await _uploadAndSendMedia(
-        file: File(path),
-        type: 'audio',
-        fileName: 'Voice Message',
-        fileSize: 'Audio',
-      );
+      if (path != null) {
+        await _uploadAndSendMedia(
+          file: File(path),
+          type: 'audio',
+          fileName: 'Voice Message',
+          fileSize: 'Audio',
+        );
+      }
+    } catch (e) {
+      debugPrint('Stop recording error: $e');
     }
-  } catch (e) {
-    debugPrint('Stop recording error: $e');
   }
-}
 
 
   Future<void> _playAudio(String messageId, String audioUrl) async {
