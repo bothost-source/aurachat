@@ -21,7 +21,7 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  Future<void> _continueToEmail() async {
+    Future<void> _continueToEmail() async {
     if (_completePhoneNumber.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter a valid phone number')),
@@ -30,13 +30,6 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     setState(() => _isLoading = true);
-
-    // Store phone and go to email screen
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    await authProvider._secureStorage.write(
-      key: 'pending_phone', 
-      value: _completePhoneNumber,
-    );
 
     setState(() => _isLoading = false);
 
