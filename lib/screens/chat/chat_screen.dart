@@ -18,7 +18,6 @@ import '../../providers/auth_provider.dart';
 import '../../providers/chat_provider.dart';
 import '../../providers/settings_provider.dart';
 import 'package:dio/dio.dart'; 
-// import '../../services/audio_recorder_factory.dart';
 
 class ChatScreen extends StatefulWidget {
   final String? chatId;
@@ -42,7 +41,6 @@ class _ChatScreenState extends State<ChatScreen> {
   final _messageController = TextEditingController();
   final _scrollController = ScrollController();
   final AudioPlayer _audioPlayer = AudioPlayer();
-  // final _audioRecorder = createAudioRecorder();
 
   bool _showEmojiPicker = false;
   bool _isRecording = false;
@@ -60,15 +58,14 @@ class _ChatScreenState extends State<ChatScreen> {
     _subscribeToMessages();
   }
 
- @override
- void dispose() {
-   _messageController.dispose();
-   _scrollController.dispose();
-   _audioPlayer.dispose();
-   _messageSubscription?.unsubscribe();
-   super.dispose();
- }
-
+  @override
+  void dispose() {
+    _messageController.dispose();
+    _scrollController.dispose();
+    _audioPlayer.dispose();
+    _messageSubscription?.unsubscribe();
+    super.dispose();
+  }
 
   Future<void> _loadMessages() async {
     if (widget.chatId == null) {
@@ -174,7 +171,6 @@ class _ChatScreenState extends State<ChatScreen> {
         'is_read': false,
       };
 
-      // Optimistic update
       setState(() {
         _messages.add({
           ...message,
@@ -262,7 +258,6 @@ class _ChatScreenState extends State<ChatScreen> {
 
       if (userId == null) return;
 
-      // Show uploading indicator
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Row(
@@ -346,7 +341,6 @@ class _ChatScreenState extends State<ChatScreen> {
       final ext = fileName?.split('.').last ?? 'file';
       final localPath = '${dir.path}/${const Uuid().v4()}.$ext';
 
-      // Download file
       final dio = Dio();
       await dio.download(url, localPath);
 
@@ -450,7 +444,6 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       body: Column(
         children: [
-          // Messages List
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
@@ -502,7 +495,6 @@ class _ChatScreenState extends State<ChatScreen> {
                       ),
           ),
 
-          // Reply indicator
           if (_replyingTo != null)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -528,7 +520,6 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ),
 
-        // Emoji Picker
           if (_showEmojiPicker)
             SizedBox(
               height: 250,
@@ -578,7 +569,6 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ),
 
-          // Input Area
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
@@ -592,13 +582,11 @@ class _ChatScreenState extends State<ChatScreen> {
             child: SafeArea(
               child: Row(
                 children: [
-                  // Attachment menu
                   IconButton(
                     icon: const Icon(Icons.add),
                     onPressed: () => _showAttachmentMenu(context),
                   ),
 
-                  // Emoji toggle
                   IconButton(
                     icon: Icon(
                       _showEmojiPicker ? Icons.keyboard : Icons.emoji_emotions_outlined,
@@ -613,54 +601,39 @@ class _ChatScreenState extends State<ChatScreen> {
                     },
                   ),
 
-                  // Text field or recording indicator
                   Expanded(
-                    child: _isRecording
-                        ? Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                            child: Row(
-                              children: [
-                                const Icon(Icons.mic, color: Colors.red),
-                                const SizedBox(width: 8),
-                                Text(
-                                  'Recording...',
-                                  style: TextStyle(color: Colors.red.withOpacity(0.7)),
-                                ),
-                              ],
-                            ),
-                          )
-                        : TextField(
-                            controller: _messageController,
-                            decoration: InputDecoration(
-                              hintText: 'Message',
-                              filled: true,
-                              fillColor: Theme.of(context).scaffoldBackgroundColor,
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(24),
-                                borderSide: BorderSide.none,
-                              ),
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 12,
-                              ),
-                            ),
-                            maxLines: null,
-                            textInputAction: TextInputAction.send,
-                            onSubmitted: (_) => _sendTextMessage(),
-                            onTap: () {
-                              if (_showEmojiPicker) {
-                                setState(() => _showEmojiPicker = false);
-                              }
-                            },
-                          ),
+                    child: TextField(
+                      controller: _messageController,
+                      decoration: InputDecoration(
+                        hintText: 'Message',
+                        filled: true,
+                        fillColor: Theme.of(context).scaffoldBackgroundColor,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                      ),
+                      maxLines: null,
+                      textInputAction: TextInputAction.send,
+                      onSubmitted: (_) => _sendTextMessage(),
+                      onTap: () {
+                        if (_showEmojiPicker) {
+                          setState(() => _showEmojiPicker = false);
+                        }
+                      },
+                    ),
                   ),
 
-          IconButton(
-            icon: const Icon(Icons.send, color: Colors.white),
-            onPressed: _messageController.text.trim().isEmpty
-                ? null
-                : _sendTextMessage,
-          ),
+                  IconButton(
+                    icon: const Icon(Icons.send, color: Colors.white),
+                    onPressed: _messageController.text.trim().isEmpty
+                        ? null
+                        : _sendTextMessage,
+                  ),
                 ],
               ),
             ),
@@ -669,8 +642,6 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
     );
   }
-
-  Widget _buildMessageBubble(
 
   Widget _buildMessageBubble(
     BuildContext context, {
@@ -727,7 +698,6 @@ class _ChatScreenState extends State<ChatScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Reply preview
                     if (message['reply_to'] != null)
                       Container(
                         margin: const EdgeInsets.only(bottom: 4),
@@ -745,7 +715,6 @@ class _ChatScreenState extends State<ChatScreen> {
                         ),
                       ),
 
-                    // Message content based on type
                     if (type == 'text')
                       Text(
                         content,
@@ -797,7 +766,6 @@ class _ChatScreenState extends State<ChatScreen> {
 
                     const SizedBox(height: 4),
 
-                    // Time and read status
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
