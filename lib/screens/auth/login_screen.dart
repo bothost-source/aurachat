@@ -21,7 +21,7 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  Future<void> _sendOTP() async {
+  Future<void> _continueToEmail() async {
     if (_completePhoneNumber.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter a valid phone number')),
@@ -31,24 +31,21 @@ class _LoginScreenState extends State<LoginScreen> {
 
     setState(() => _isLoading = true);
 
+    // Store phone and go to email screen
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    final success = await authProvider.sendOTP(_completePhoneNumber);
+    await authProvider._secureStorage.write(
+      key: 'pending_phone', 
+      value: _completePhoneNumber,
+    );
 
     setState(() => _isLoading = false);
 
-    if (success && mounted) {
+    if (mounted) {
       Navigator.pushNamed(
         context,
-        '/otp',
+        '/email',
         arguments: {'phone': _completePhoneNumber},
       );
-    } else if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(authProvider.error ?? 'Failed to send OTP'),
-        ),
-      );
-      authProvider.clearError();
     }
   }
 
@@ -64,7 +61,6 @@ class _LoginScreenState extends State<LoginScreen> {
             children: [
               const Spacer(),
 
-              // Logo
               Center(
                 child: Container(
                   width: 100,
@@ -83,7 +79,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
               const SizedBox(height: 32),
 
-              // Title
               Text(
                 'Welcome to TARRIFIC CHAT',
                 style: Theme.of(context).textTheme.headlineMedium?.copyWith(
@@ -104,7 +99,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
               const SizedBox(height: 48),
 
-              // Phone Input
               IntlPhoneField(
                 controller: _phoneController,
                 decoration: InputDecoration(
@@ -115,22 +109,18 @@ class _LoginScreenState extends State<LoginScreen> {
                   filled: true,
                   fillColor: Theme.of(context).cardColor,
                 ),
-                initialCountryCode: 'US',
+                initialCountryCode: 'NG',
                 onChanged: (phone) {
                   _completePhoneNumber = phone.completeNumber;
-                },
-                onCountryChanged: (country) {
-                  debugPrint('Country changed to: ${country.name}');
                 },
               ),
 
               const SizedBox(height: 24),
 
-              // Send OTP Button
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: _isLoading ? null : _sendOTP,
+                  onPressed: _isLoading ? null : _continueToEmail,
                   child: _isLoading
                       ? const SizedBox(
                           width: 20,
@@ -140,13 +130,12 @@ class _LoginScreenState extends State<LoginScreen> {
                             color: Colors.white,
                           ),
                         )
-                      : const Text('Send OTP'),
+                      : const Text('Continue'),
                 ),
               ),
 
               const SizedBox(height: 16),
 
-              // Terms
               Text(
                 'By continuing, you agree to our Terms of Service and Privacy Policy',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
