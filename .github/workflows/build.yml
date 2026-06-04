@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-android:
+    build-android:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -30,12 +30,14 @@ jobs:
           channel: 'stable'
 
       - name: Create Android project
-        run: |
-          flutter create . --platforms=android
+        run: flutter create . --platforms=android
 
       - name: Fix minSdkVersion
         run: |
+          grep -n "minSdkVersion" android/app/build.gradle
+          sed -i 's/flutter.minSdkVersion/21/g' android/app/build.gradle
           sed -i 's/minSdkVersion 19/minSdkVersion 21/g' android/app/build.gradle
+          grep -n "minSdkVersion" android/app/build.gradle
 
       - name: Create asset directories
         run: |
@@ -63,6 +65,7 @@ jobs:
           body: "TARRIFIC CHAT Release"
           token: ${{ secrets.GITHUB_TOKEN }}
           allowUpdates: true
+
 
   build-web:
     runs-on: ubuntu-latest
