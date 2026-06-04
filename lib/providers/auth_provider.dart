@@ -12,6 +12,7 @@ class AuthProvider extends ChangeNotifier {
   bool _isAuthenticated = false;
   String? _error;
   String? _phoneNumber;
+  String? _email;
   String? _userName;
   String? _userBio;
   String? _userPhotoUrl;
@@ -21,6 +22,7 @@ class AuthProvider extends ChangeNotifier {
   bool get isAuthenticated => _isAuthenticated;
   String? get error => _error;
   String? get phoneNumber => _phoneNumber;
+  String? get email => _email;
   String? get userName => _userName;
   String? get userBio => _userBio;
   String? get userPhotoUrl => _userPhotoUrl;
@@ -29,19 +31,15 @@ class AuthProvider extends ChangeNotifier {
     _checkSession();
   }
 
-  /// Check if user has a valid session on app start
   Future<void> _checkSession() async {
     _setLoading(true);
-
     try {
       final session = _supabase.auth.currentSession;
-
       if (session != null && !session.isExpired) {
         _user = session.user;
         _isAuthenticated = true;
         await _loadUserProfile();
       } else {
-        // Try to refresh session
         await refreshSession();
       }
     } catch (e) {
@@ -51,11 +49,9 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  /// Refresh session when app resumes
   Future<void> refreshSession() async {
     try {
       final session = _supabase.auth.currentSession;
-
       if (session != null) {
         if (session.isExpired) {
           final response = await _supabase.auth.refreshSession();
@@ -80,24 +76,23 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Send OTP to phone number
-  Future<bool> sendOTP(String phoneNumber) async {
+  /// Send OTP to EMAIL (Telegram style: phone collected, email gets OTP)
+  Future<bool> sendOTP(String email, String phoneNumber) async {
     _setLoading(true);
     _error = null;
 
     try {
-      // Format phone with country code if needed
-      String formattedPhone = phoneNumber;
-      if (!phoneNumber.startsWith('+')) {
-        formattedPhone = '+$phoneNumber';
-      }
+      // Store phone for profile
+      _phoneNumber = phoneNumber;
+      await _secureStorage.write(key: 'pending_phone', value: phoneNumber);
 
+      // Send OTP to EMAIL only
       await _supabase.auth.signInWithOtp(
-        phone: formattedPhone,
+        email: email,
       );
 
-      _phoneNumber = formattedPhone;
-      await _secureStorage.write(key: 'pending_phone', value: formattedPhone);
+      _email = email;
+      await _secureStorage.write(key: 'pending_email', value: email);
       _setLoading(false);
       return true;
     } on AuthException catch (e) {
@@ -111,37 +106,39 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  /// Verify OTP and sign in
+  /// Verify OTP from EMAIL
   Future<bool> verifyOTP(String otp) async {
     _setLoading(true);
     _error = null;
 
     try {
-      final phone = _phoneNumber ?? await _secureStorage.read(key: 'pending_phone');
+      final email = _email ?? await _secureStorage.read(key: 'pending_email');
 
-      if (phone == null) {
-        _error = 'Phone number not found. Please start over.';
+      if (email == null) {
+        _error = 'Email not found. Please start over.';
         _setLoading(false);
         return false;
       }
 
       final response = await _supabase.auth.verifyOTP(
-        phone: phone,
+        email: email,
         token: otp,
-        type: OtpType.sms,
+        type: OtpType.email,
       );
 
       if (response.session != null) {
         _user = response.user;
         _isAuthenticated = true;
-        _phoneNumber = phone;
+        _email = email;
+
+        // Get phone from storage
+        _phoneNumber = await _secureStorage.read(key: 'pending_phone');
 
         // Save session data
-        await _secureStorage.write(key: 'user_phone', value: phone);
+        await _secureStorage.write(key: 'user_email', value: email);
+        await _secureStorage.write(key: 'user_phone', value: _phoneNumber);
 
-        // Check if user profile exists
         await _loadUserProfile();
-
         _setLoading(false);
         return true;
       } else {
@@ -160,10 +157,8 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  /// Check if user profile exists in database
   Future<bool> _loadUserProfile() async {
     if (_user == null) return false;
-
     try {
       final response = await _supabase
           .from('users')
@@ -185,14 +180,12 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  /// Create or update user profile
   Future<bool> setupProfile({
     required String username,
     String? bio,
     String? photoUrl,
   }) async {
     _setLoading(true);
-
     try {
       if (_user == null) {
         _error = 'Not authenticated';
@@ -203,6 +196,7 @@ class AuthProvider extends ChangeNotifier {
       await _supabase.from('users').upsert({
         'id': _user!.id,
         'phone': _phoneNumber,
+        'email': _email,
         'username': username,
         'bio': bio ?? '',
         'avatar_url': photoUrl,
@@ -212,7 +206,6 @@ class AuthProvider extends ChangeNotifier {
       _userName = username;
       _userBio = bio;
       _userPhotoUrl = photoUrl;
-
       _setLoading(false);
       return true;
     } catch (e) {
@@ -222,14 +215,12 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  /// Update profile
   Future<bool> updateProfile({
     String? username,
     String? bio,
     String? photoUrl,
   }) async {
     _setLoading(true);
-
     try {
       if (_user == null) {
         _error = 'Not authenticated';
@@ -240,7 +231,6 @@ class AuthProvider extends ChangeNotifier {
       final updates = <String, dynamic>{
         'updated_at': DateTime.now().toIso8601String(),
       };
-
       if (username != null) updates['username'] = username;
       if (bio != null) updates['bio'] = bio;
       if (photoUrl != null) updates['avatar_url'] = photoUrl;
@@ -250,7 +240,6 @@ class AuthProvider extends ChangeNotifier {
       if (username != null) _userName = username;
       if (bio != null) _userBio = bio;
       if (photoUrl != null) _userPhotoUrl = photoUrl;
-
       notifyListeners();
       _setLoading(false);
       return true;
@@ -261,24 +250,21 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  /// Sign out
   Future<void> signOut() async {
     _setLoading(true);
-
     try {
       await _supabase.auth.signOut();
       await _secureStorage.deleteAll();
-
       final prefs = await SharedPreferences.getInstance();
       await prefs.clear();
 
       _user = null;
       _isAuthenticated = false;
       _phoneNumber = null;
+      _email = null;
       _userName = null;
       _userBio = null;
       _userPhotoUrl = null;
-
       notifyListeners();
     } catch (e) {
       _error = 'Sign out failed: $e';
@@ -287,10 +273,8 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  /// Delete account permanently
   Future<bool> deleteAccount() async {
     _setLoading(true);
-
     try {
       if (_user == null) {
         _error = 'Not authenticated';
@@ -298,7 +282,6 @@ class AuthProvider extends ChangeNotifier {
         return false;
       }
 
-      // Delete user data from all tables
       await _supabase.from('messages').delete().eq('sender_id', _user!.id);
       await _supabase.from('chat_participants').delete().eq('user_id', _user!.id);
       await _supabase.from('user_settings').delete().eq('user_id', _user!.id);
@@ -307,24 +290,20 @@ class AuthProvider extends ChangeNotifier {
       await _supabase.from('contacts').delete().eq('user_id', _user!.id);
       await _supabase.from('blocked_users').delete().eq('user_id', _user!.id);
       await _supabase.from('bots').delete().eq('creator_id', _user!.id);
-
-      // Delete user profile
       await _supabase.from('users').delete().eq('id', _user!.id);
 
-      // Sign out from auth
       await _supabase.auth.signOut();
       await _secureStorage.deleteAll();
-
       final prefs = await SharedPreferences.getInstance();
       await prefs.clear();
 
       _user = null;
       _isAuthenticated = false;
       _phoneNumber = null;
+      _email = null;
       _userName = null;
       _userBio = null;
       _userPhotoUrl = null;
-
       notifyListeners();
       _setLoading(false);
       return true;
