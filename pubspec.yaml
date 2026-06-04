@@ -38,7 +38,7 @@ dependencies:
   # Audio - Recording & Playback
   just_audio: ^0.9.38
   # flutter_sound: ^9.4.6
-  audio_waveforms: ^1.0.5
+#  audio_waveforms: ^1.0.5
 
   # File Handling
   file_picker: ^8.0.5
