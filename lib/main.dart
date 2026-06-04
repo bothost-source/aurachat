@@ -13,6 +13,7 @@ import 'providers/moderation_provider.dart';
 import 'screens/splash_screen.dart';
 import 'screens/onboarding/terms_screen.dart';
 import 'screens/auth/login_screen.dart';
+import 'screens/auth/email_screen.dart';
 import 'screens/auth/otp_screen.dart';
 import 'screens/auth/setup_profile_screen.dart';
 import 'screens/main_app_screen.dart';
@@ -48,8 +49,6 @@ import 'screens/archive/archived_chats_screen.dart';
 import 'services/notification_service.dart';
 import 'services/connectivity.dart';
 
-/// Use environment variables or secure config for production
-/// NEVER commit real credentials to git
 const String _supabaseUrl = String.fromEnvironment('SUPABASE_URL', 
     defaultValue: 'https://eocvhkbjjqeinycdgshj.supabase.co');
 const String _supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY',
@@ -58,11 +57,9 @@ const String _supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY',
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize notifications
   await NotificationService.init();
   ConnectivityService().initialize();
 
-  // Initialize Supabase with error handling
   try {
     await Supabase.initialize(
       url: _supabaseUrl,
@@ -73,7 +70,6 @@ void main() async {
     debugPrint('Supabase init error: $e');
   }
 
-  // Lock orientation
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
@@ -115,7 +111,6 @@ class _TarrificChatAppState extends State<TarrificChatApp>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Refresh auth session when app comes to foreground
     if (state == AppLifecycleState.resumed) {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       authProvider.refreshSession();
@@ -146,6 +141,7 @@ class _TarrificChatAppState extends State<TarrificChatApp>
               '/': (context) => const SplashScreen(),
               '/terms': (context) => const TermsScreen(),
               '/login': (context) => const LoginScreen(),
+              '/email': (context) => const EmailScreen(),
               '/otp': (context) => const OTPScreen(),
               '/setup_profile': (context) => const SetupProfileScreen(),
               '/main': (context) => const MainAppScreen(),
