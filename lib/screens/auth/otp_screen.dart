@@ -19,12 +19,14 @@ class _OTPScreenState extends State<OTPScreen> {
     (index) => FocusNode(),
   );
   bool _isLoading = false;
+  String? _email;
   String? _phoneNumber;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+    _email = args?['email'];
     _phoneNumber = args?['phone'];
   }
 
@@ -50,7 +52,6 @@ class _OTPScreenState extends State<OTPScreen> {
       _focusNodes[index - 1].requestFocus();
     }
 
-    // Auto-verify when all digits entered
     if (_otpCode.length == 6) {
       _verifyOTP();
     }
@@ -72,7 +73,6 @@ class _OTPScreenState extends State<OTPScreen> {
     setState(() => _isLoading = false);
 
     if (success && mounted) {
-      // Check if profile needs setup
       if (authProvider.userName == null || authProvider.userName!.isEmpty) {
         Navigator.pushNamedAndRemoveUntil(
           context,
@@ -94,7 +94,6 @@ class _OTPScreenState extends State<OTPScreen> {
       );
       authProvider.clearError();
 
-      // Clear OTP fields
       for (final controller in _controllers) {
         controller.clear();
       }
@@ -103,12 +102,15 @@ class _OTPScreenState extends State<OTPScreen> {
   }
 
   Future<void> _resendOTP() async {
-    if (_phoneNumber == null) return;
+    if (_email == null) return;
 
     setState(() => _isLoading = true);
 
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    final success = await authProvider.sendOTP(_phoneNumber!);
+    final success = await authProvider.sendOTP(
+      _email!,
+      _phoneNumber ?? '',
+    );
 
     setState(() => _isLoading = false);
 
@@ -116,7 +118,7 @@ class _OTPScreenState extends State<OTPScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            success ? 'OTP resent successfully' : 'Failed to resend OTP',
+            success ? 'OTP resent to email' : 'Failed to resend OTP',
           ),
         ),
       );
@@ -153,7 +155,7 @@ class _OTPScreenState extends State<OTPScreen> {
               const SizedBox(height: 8),
 
               Text(
-                'Enter the 6-digit code sent to ${_phoneNumber ?? 'your phone'}',
+                'Enter the 6-digit code sent to ${_email ?? 'your email'}',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: Colors.grey,
                 ),
@@ -161,7 +163,6 @@ class _OTPScreenState extends State<OTPScreen> {
 
               const SizedBox(height: 48),
 
-              // OTP Input Fields
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: List.generate(
@@ -190,7 +191,6 @@ class _OTPScreenState extends State<OTPScreen> {
 
               const SizedBox(height: 32),
 
-              // Verify Button
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
@@ -210,11 +210,10 @@ class _OTPScreenState extends State<OTPScreen> {
 
               const SizedBox(height: 24),
 
-              // Resend
               Center(
                 child: TextButton(
                   onPressed: _isLoading ? null : _resendOTP,
-                  child: const Text('Resend OTP'),
+                  child: const Text('Resend OTP to Email'),
                 ),
               ),
 
