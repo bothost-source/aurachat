@@ -39,8 +39,6 @@ class AuthProvider extends ChangeNotifier {
         _user = session.user;
         _isAuthenticated = true;
         await _loadUserProfile();
-      } else {
-        await refreshSession();
       }
     } catch (e) {
       _error = 'Session check failed: $e';
@@ -65,9 +63,6 @@ class AuthProvider extends ChangeNotifier {
           _isAuthenticated = true;
           await _loadUserProfile();
         }
-      } else {
-        _isAuthenticated = false;
-        _user = null;
       }
     } catch (e) {
       _isAuthenticated = false;
@@ -76,82 +71,43 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Send OTP to EMAIL (Telegram style: phone collected, email gets OTP)
-  Future<bool> sendOTP(String email, String phoneNumber) async {
+  /// Sign up with email (for profile creation after OTP verification)
+  Future<bool> signUpWithEmail(String email, String password, String phone) async {
     _setLoading(true);
-    _error = null;
-
     try {
-      // Store phone for profile
-      _phoneNumber = phoneNumber;
-      await _secureStorage.write(key: 'pending_phone', value: phoneNumber);
-
-      // Send OTP to EMAIL only
-      await _supabase.auth.signInWithOtp(
+      final response = await _supabase.auth.signUp(
         email: email,
+        password: password,
       );
-
+      _phoneNumber = phone;
       _email = email;
-      await _secureStorage.write(key: 'pending_email', value: email);
+      _user = response.user;
+      _isAuthenticated = true;
       _setLoading(false);
-      return true;
-    } on AuthException catch (e) {
-      _error = e.message;
-      _setLoading(false);
-      return false;
+      return response.user != null;
     } catch (e) {
-      _error = 'Failed to send OTP: $e';
+      _error = e.toString();
       _setLoading(false);
       return false;
     }
   }
 
-  /// Verify OTP from EMAIL
-  Future<bool> verifyOTP(String otp) async {
+  /// Sign in with email and password
+  Future<bool> signInWithEmail(String email, String password) async {
     _setLoading(true);
-    _error = null;
-
     try {
-      final email = _email ?? await _secureStorage.read(key: 'pending_email');
-
-      if (email == null) {
-        _error = 'Email not found. Please start over.';
-        _setLoading(false);
-        return false;
-      }
-
-      final response = await _supabase.auth.verifyOTP(
+      final response = await _supabase.auth.signInWithPassword(
         email: email,
-        token: otp,
-        type: OtpType.email,
+        password: password,
       );
-
-      if (response.session != null) {
-        _user = response.user;
-        _isAuthenticated = true;
-        _email = email;
-
-        // Get phone from storage
-        _phoneNumber = await _secureStorage.read(key: 'pending_phone');
-
-        // Save session data
-        await _secureStorage.write(key: 'user_email', value: email);
-        await _secureStorage.write(key: 'user_phone', value: _phoneNumber);
-
-        await _loadUserProfile();
-        _setLoading(false);
-        return true;
-      } else {
-        _error = 'Invalid OTP. Please try again.';
-        _setLoading(false);
-        return false;
-      }
-    } on AuthException catch (e) {
-      _error = e.message;
+      _user = response.user;
+      _isAuthenticated = true;
+      _email = email;
+      await _loadUserProfile();
       _setLoading(false);
-      return false;
+      return true;
     } catch (e) {
-      _error = 'Verification failed: $e';
+      _error = e.toString();
       _setLoading(false);
       return false;
     }
