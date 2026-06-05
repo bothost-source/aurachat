@@ -13,7 +13,6 @@ import 'providers/moderation_provider.dart';
 import 'screens/splash_screen.dart';
 import 'screens/onboarding/terms_screen.dart';
 import 'screens/auth/login_screen.dart';
-import 'screens/auth/email_screen.dart';
 import 'screens/auth/otp_screen.dart';
 import 'screens/auth/setup_profile_screen.dart';
 import 'screens/main_app_screen.dart';
@@ -141,8 +140,6 @@ class _TarrificChatAppState extends State<TarrificChatApp>
               '/': (context) => const SplashScreen(),
               '/terms': (context) => const TermsScreen(),
               '/login': (context) => const LoginScreen(),
-              '/email': (context) => const EmailScreen(),
-              '/otp': (context) => const OTPScreen(),
               '/setup_profile': (context) => const SetupProfileScreen(),
               '/main': (context) => const MainAppScreen(),
               '/chat': (context) => const ChatScreen(),
