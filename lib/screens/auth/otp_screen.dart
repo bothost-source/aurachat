@@ -1,127 +1,78 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../../providers/auth_provider.dart';
+import 'package:flutter/services.dart';
 
-class OTPScreen extends StatefulWidget {
-  const OTPScreen({super.key});
+class OtpScreen extends StatefulWidget {
+  final String phoneNumber;
+  final String expectedOtp;
+  final String cleanPhoneNumber;
+
+  const OtpScreen({
+    super.key,
+    required this.phoneNumber,
+    required this.expectedOtp,
+    required this.cleanPhoneNumber,
+  });
 
   @override
-  State<OTPScreen> createState() => _OTPScreenState();
+  State<OtpScreen> createState() => _OtpScreenState();
 }
 
-class _OTPScreenState extends State<OTPScreen> {
-  final List<TextEditingController> _controllers = List.generate(
-    6,
-    (index) => TextEditingController(),
-  );
-  final List<FocusNode> _focusNodes = List.generate(
-    6,
-    (index) => FocusNode(),
-  );
+class _OtpScreenState extends State<OtpScreen> {
+  final List<TextEditingController> _controllers = List.generate(6, (_) => TextEditingController());
+  final List<FocusNode> _focusNodes = List.generate(6, (_) => FocusNode());
   bool _isLoading = false;
-  String? _email;
-  String? _phoneNumber;
+  int _resendTimer = 60;
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
-    _email = args?['email'];
-    _phoneNumber = args?['phone'];
+  void initState() {
+    super.initState();
+    _startResendTimer();
   }
 
-  @override
-  void dispose() {
-    for (final controller in _controllers) {
-      controller.dispose();
-    }
-    for (final node in _focusNodes) {
-      node.dispose();
-    }
-    super.dispose();
-  }
-
-  String get _otpCode {
-    return _controllers.map((c) => c.text).join();
+  void _startResendTimer() {
+    Future.delayed(const Duration(seconds: 1), () {
+      if (mounted && _resendTimer > 0) {
+        setState(() => _resendTimer--);
+        _startResendTimer();
+      }
+    });
   }
 
   void _onOtpDigitChanged(int index, String value) {
     if (value.length == 1 && index < 5) {
       _focusNodes[index + 1].requestFocus();
-    } else if (value.isEmpty && index > 0) {
+    }
+    if (value.isEmpty && index > 0) {
       _focusNodes[index - 1].requestFocus();
     }
+    _checkComplete();
+  }
 
-    if (_otpCode.length == 6) {
+  void _checkComplete() {
+    final otp = _controllers.map((c) => c.text).join();
+    if (otp.length == 6) {
       _verifyOTP();
     }
   }
 
-  Future<void> _verifyOTP() async {
-    if (_otpCode.length != 6) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter the complete OTP')),
-      );
-      return;
-    }
+  void _verifyOTP() async {
+    final enteredOtp = _controllers.map((c) => c.text).join();
 
     setState(() => _isLoading = true);
-
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    final success = await authProvider.verifyOTP(_otpCode);
-
+    await Future.delayed(const Duration(seconds: 1));
     setState(() => _isLoading = false);
 
-    if (success && mounted) {
-      if (authProvider.userName == null || authProvider.userName!.isEmpty) {
-        Navigator.pushNamedAndRemoveUntil(
-          context,
-          '/setup_profile',
-          (route) => false,
-        );
-      } else {
-        Navigator.pushNamedAndRemoveUntil(
-          context,
-          '/main',
-          (route) => false,
-        );
-      }
-    } else if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(authProvider.error ?? 'Invalid OTP'),
-        ),
-      );
-      authProvider.clearError();
-
-      for (final controller in _controllers) {
-        controller.clear();
-      }
-      _focusNodes[0].requestFocus();
-    }
-  }
-
-  Future<void> _resendOTP() async {
-    if (_email == null) return;
-
-    setState(() => _isLoading = true);
-
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    final success = await authProvider.sendOTP(
-      _email!,
-      _phoneNumber ?? '',
-    );
-
-    setState(() => _isLoading = false);
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            success ? 'OTP resent to email' : 'Failed to resend OTP',
+    if (enteredOtp == widget.expectedOtp) {
+      if (mounted) Navigator.pushReplacementNamed(context, '/setup_profile');
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Invalid OTP. Please try again.'),
+            backgroundColor: Colors.red,
           ),
-        ),
-      );
+        );
+      }
     }
   }
 
@@ -129,95 +80,84 @@ class _OTPScreenState extends State<OTPScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.pop(context),
-        ),
-      ),
+      appBar: AppBar(backgroundColor: Colors.transparent, elevation: 0, iconTheme: IconThemeData(color: Colors.white)),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Spacer(),
-
-              Text(
-                'Verify OTP',
-                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-
+              const SizedBox(height: 20),
+              const Text('Verify your number', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white)),
               const SizedBox(height: 8),
-
-              Text(
-                'Enter the 6-digit code sent to ${_email ?? 'your email'}',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Colors.grey,
+              RichText(
+                text: TextSpan(
+                  style: TextStyle(fontSize: 15, color: Colors.grey, height: 1.5),
+                  children: [
+                    const TextSpan(text: 'Enter the 6-digit code sent to '),
+                    TextSpan(
+                      text: widget.phoneNumber,
+                      style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.white),
+                    ),
+                  ],
                 ),
               ),
-
-              const SizedBox(height: 48),
-
+              const SizedBox(height: 40),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: List.generate(
-                  6,
-                  (index) => SizedBox(
-                    width: 50,
-                    child: TextField(
-                      controller: _controllers[index],
-                      focusNode: _focusNodes[index],
-                      keyboardType: TextInputType.number,
-                      textAlign: TextAlign.center,
-                      maxLength: 1,
-                      decoration: InputDecoration(
-                        counterText: '',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        filled: true,
-                        fillColor: Theme.of(context).cardColor,
-                      ),
-                      onChanged: (value) => _onOtpDigitChanged(index, value),
+                children: List.generate(6, (index) => Container(
+                  width: 50,
+                  height: 60,
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).cardColor,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: _focusNodes[index].hasFocus ? Theme.of(context).primaryColor : Colors.grey,
+                      width: _focusNodes[index].hasFocus ? 2 : 1,
                     ),
                   ),
-                ),
+                  child: TextField(
+                    controller: _controllers[index],
+                    focusNode: _focusNodes[index],
+                    textAlign: TextAlign.center,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                      LengthLimitingTextInputFormatter(1),
+                    ],
+                    maxLength: 1,
+                    style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
+                    decoration: const InputDecoration(counterText: '', border: InputBorder.none),
+                    onChanged: (v) => _onOtpDigitChanged(index, v),
+                  ),
+                )),
               ),
-
               const SizedBox(height: 32),
-
+              Center(
+                child: _resendTimer > 0
+                    ? Text('Resend code in $_resendTimer seconds', style: TextStyle(fontSize: 14, color: Colors.grey))
+                    : TextButton(
+                        onPressed: () => setState(() => _resendTimer = 60),
+                        child: Text('Resend Code', style: TextStyle(color: Theme.of(context).primaryColor, fontWeight: FontWeight.w600)),
+                      ),
+              ),
+              const Spacer(),
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: _isLoading ? null : _verifyOTP,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Theme.of(context).primaryColor,
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor: Colors.grey,
+                    padding: const EdgeInsets.symmetric(vertical: 18),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
                   child: _isLoading
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Text('Verify'),
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Text('Verify', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
                 ),
               ),
-
-              const SizedBox(height: 24),
-
-              Center(
-                child: TextButton(
-                  onPressed: _isLoading ? null : _resendOTP,
-                  child: const Text('Resend OTP to Email'),
-                ),
-              ),
-
-              const Spacer(),
             ],
           ),
         ),
