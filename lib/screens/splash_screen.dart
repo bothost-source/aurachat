@@ -9,11 +9,12 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> 
+class _SplashScreenState extends State<SplashScreen>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _fadeAnimation;
   late Animation<double> _scaleAnimation;
+  late Animation<double> _glowAnimation;
   bool _hasNavigated = false;
 
   @override
@@ -22,15 +23,28 @@ class _SplashScreenState extends State<SplashScreen>
 
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1500),
+      duration: const Duration(milliseconds: 2000),
     );
 
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeIn),
+      CurvedAnimation(
+        parent: _controller,
+        curve: const Interval(0.0, 0.6, curve: Curves.easeOut),
+      ),
     );
 
-    _scaleAnimation = Tween<double>(begin: 0.5, end: 1.0).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeOutBack),
+    _scaleAnimation = Tween<double>(begin: 0.3, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _controller,
+        curve: const Interval(0.0, 0.7, curve: Curves.easeOutBack),
+      ),
+    );
+
+    _glowAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _controller,
+        curve: const Interval(0.3, 1.0, curve: Curves.easeInOut),
+      ),
     );
 
     _controller.forward();
@@ -38,14 +52,12 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   Future<void> _checkAuthAndNavigate() async {
-    // Wait minimum splash duration
-    await Future.delayed(const Duration(seconds: 2));
+    await Future.delayed(const Duration(seconds: 3));
 
     if (!mounted) return;
 
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
 
-    // Wait for auth provider to finish initializing
     while (authProvider.isLoading) {
       await Future.delayed(const Duration(milliseconds: 100));
       if (!mounted) return;
@@ -57,7 +69,6 @@ class _SplashScreenState extends State<SplashScreen>
     if (!mounted) return;
 
     if (authProvider.isAuthenticated) {
-      // Check if profile is set up
       if (authProvider.userName == null || authProvider.userName!.isEmpty) {
         Navigator.pushReplacementNamed(context, '/setup_profile');
       } else {
@@ -77,48 +88,105 @@ class _SplashScreenState extends State<SplashScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: const Color(0xFF0A0A0F),
       body: Center(
-        child: FadeTransition(
-          opacity: _fadeAnimation,
-          child: ScaleTransition(
-            scale: _scaleAnimation,
-            child: Column(
+        child: AnimatedBuilder(
+          animation: _controller,
+          builder: (context, child) {
+            return Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Container(
-                  width: 120,
-                  height: 120,
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).primaryColor,
-                    borderRadius: BorderRadius.circular(24),
-                  ),
-                  child: const Icon(
-                    Icons.chat_bubble,
-                    size: 60,
-                    color: Colors.white,
+                // Logo with glow effect
+                Transform.scale(
+                  scale: _scaleAnimation.value,
+                  child: FadeTransition(
+                    opacity: _fadeAnimation,
+                    child: Container(
+                      width: 140,
+                      height: 140,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF8B5CF6).withOpacity(
+                              0.3 * _glowAnimation.value,
+                            ),
+                            blurRadius: 60 * _glowAnimation.value,
+                            spreadRadius: 20 * _glowAnimation.value,
+                          ),
+                          BoxShadow(
+                            color: const Color(0xFF06B6D4).withOpacity(
+                              0.2 * _glowAnimation.value,
+                            ),
+                            blurRadius: 40 * _glowAnimation.value,
+                            spreadRadius: 10 * _glowAnimation.value,
+                          ),
+                        ],
+                      ),
+                      child: ClipOval(
+                        child: Image.asset(
+                          'assets/images/logo.png',
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
-                const SizedBox(height: 24),
-                Text(
-                  'TARRIFIC CHAT',
-                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 2,
+                const SizedBox(height: 40),
+                // App name with gradient
+                FadeTransition(
+                  opacity: _fadeAnimation,
+                  child: ShaderMask(
+                    shaderCallback: (bounds) => const LinearGradient(
+                      colors: [
+                        Color(0xFF8B5CF6), // Purple
+                        Color(0xFF06B6D4), // Cyan
+                      ],
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                    ).createShader(bounds),
+                    child: const Text(
+                      'AURA',
+                      style: TextStyle(
+                        fontSize: 48,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 12,
+                        color: Colors.white,
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 8),
-                Text(
-                  'Connect with the world',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Colors.grey,
+                FadeTransition(
+                  opacity: _fadeAnimation,
+                  child: Text(
+                    'CHAT',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      letterSpacing: 8,
+                      color: Colors.white.withOpacity(0.5),
+                    ),
                   ),
                 ),
-                const SizedBox(height: 48),
-                const CircularProgressIndicator(),
+                const SizedBox(height: 60),
+                // Loading indicator
+                FadeTransition(
+                  opacity: _fadeAnimation,
+                  child: SizedBox(
+                    width: 40,
+                    height: 40,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        const Color(0xFF8B5CF6).withOpacity(0.8),
+                      ),
+                    ),
+                  ),
+                ),
               ],
-            ),
-          ),
+            );
+          },
         ),
       ),
     );
