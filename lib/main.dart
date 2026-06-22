@@ -100,6 +100,12 @@ class _TarrificChatAppState extends State<TarrificChatApp>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    
+    // Listen to auth state changes after first frame
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      authProvider.listenToAuthChanges();
+    });
   }
 
   @override
