@@ -64,6 +64,8 @@ dependencies:
 
   # Biometric
   local_auth: ^2.2.0
+  local_auth_android: ^1.0.38
+  local_auth_ios: ^1.1.7
 
   # Utilities
   intl: ^0.19.0
@@ -88,4 +90,4 @@ flutter:
     - assets/images/
     - assets/animations/
     - assets/emojis/
-    - assets/audio/ 
+    - assets/audio/
