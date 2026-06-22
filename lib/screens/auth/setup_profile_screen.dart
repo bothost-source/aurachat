@@ -1,8 +1,9 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../providers/auth_provider.dart';
 import '../../themes/app_theme.dart';
 
 class SetupProfileScreen extends StatefulWidget {
@@ -52,7 +53,7 @@ class _SetupProfileScreenState extends State<SetupProfileScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error picking image: \$e')),
+          SnackBar(content: Text('Error picking image: $e')),
         );
       }
     }
@@ -143,79 +144,53 @@ class _SetupProfileScreenState extends State<SetupProfileScreen> {
     );
   }
 
-  // Save profile image to app documents directory (permanent local storage)
-  Future<String?> _saveImageLocally() async {
+  /// Upload profile image to Supabase Storage
+  Future<String?> _uploadProfileImage(String userId) async {
     if (_profileImage == null) return null;
 
     try {
-      final appDir = await getApplicationDocumentsDirectory();
-      final profileDir = Directory('${appDir.path}/profile_images');
-      if (!await profileDir.exists()) {
-        await profileDir.create(recursive: true);
-      }
+      final supabase = Supabase.instance.client;
+      final fileBytes = await _profileImage!.readAsBytes();
+      final fileName = 'avatars/$userId/${DateTime.now().millisecondsSinceEpoch}.jpg';
 
-      final fileName = 'profile_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      final savedImage = await _profileImage!.copy('${profileDir.path}/$fileName');
-      return savedImage.path;
+      await supabase.storage.from('profiles').uploadBinary(
+        fileName,
+        fileBytes,
+        fileOptions: const FileOptions(contentType: 'image/jpeg'),
+      );
+
+      return supabase.storage.from('profiles').getPublicUrl(fileName);
     } catch (e) {
-      debugPrint('Error saving image: \$e');
+      debugPrint('Error uploading profile image: $e');
       return null;
     }
   }
 
-  Future<void> _saveUserData() async {
+  /// Check if username is already taken
+  Future<bool> _isUsernameTaken(String username) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('user_display_name', _nameController.text.trim());
-      await prefs.setString('user_username', _usernameController.text.trim());
-      await prefs.setString('user_bio', _bioController.text.trim());
-
-      // Save image to permanent local storage
-      final savedImagePath = await _saveImageLocally();
-      if (savedImagePath != null) {
-        await prefs.setString('user_profile_image', savedImagePath);
-      } else if (_profileImage == null) {
-        await prefs.remove('user_profile_image');
-      }
-
-      await prefs.setBool('profile_setup_complete', true);
+      final supabase = Supabase.instance.client;
+      final response = await supabase
+          .from('users')
+          .select('id')
+          .eq('username', username)
+          .maybeSingle();
+      return response != null;
     } catch (e) {
-      debugPrint('Error saving user data: \$e');
-      rethrow;
+      debugPrint('Username check error: $e');
+      return false;
     }
-  }
-
-  Future<void> _loadUserData() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      setState(() {
-        _nameController.text = prefs.getString('user_display_name') ?? '';
-        _usernameController.text = prefs.getString('user_username') ?? '';
-        _bioController.text = prefs.getString('user_bio') ?? '';
-        final savedImagePath = prefs.getString('user_profile_image');
-        if (savedImagePath != null && File(savedImagePath).existsSync()) {
-          _profileImage = File(savedImagePath);
-        }
-      });
-    } catch (e) {
-      debugPrint('Error loading user data: \$e');
-    }
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _loadUserData();
   }
 
   void _completeSetup() async {
-    if (_nameController.text.isEmpty) {
+    // Validation
+    if (_nameController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter your display name')),
       );
       return;
     }
-    if (_usernameError != null || _usernameController.text.isEmpty) {
+    if (_usernameError != null || _usernameController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter a valid username')),
       );
@@ -225,8 +200,37 @@ class _SetupProfileScreenState extends State<SetupProfileScreen> {
     setState(() => _isLoading = true);
 
     try {
-      await _saveUserData();
-      await Future.delayed(const Duration(milliseconds: 500));
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final userId = authProvider.user?.id;
+
+      if (userId == null) {
+        throw Exception('Not authenticated. Please log in again.');
+      }
+
+      // Check if username is taken
+      final username = _usernameController.text.trim();
+      final taken = await _isUsernameTaken(username);
+      if (taken) {
+        setState(() {
+          _isLoading = false;
+          _usernameError = 'Username is already taken';
+        });
+        return;
+      }
+
+      // Upload profile image to Supabase Storage
+      final photoUrl = await _uploadProfileImage(userId);
+
+      // Save profile to Supabase database via AuthProvider
+      final success = await authProvider.setupProfile(
+        username: username,
+        bio: _bioController.text.trim().isNotEmpty ? _bioController.text.trim() : null,
+        photoUrl: photoUrl,
+      );
+
+      if (!success) {
+        throw Exception(authProvider.error ?? 'Failed to save profile');
+      }
 
       setState(() => _isLoading = false);
 
@@ -237,7 +241,7 @@ class _SetupProfileScreenState extends State<SetupProfileScreen> {
       setState(() => _isLoading = false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error saving profile: \$e')),
+          SnackBar(content: Text('Error: $e')),
         );
       }
     }
