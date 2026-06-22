@@ -112,7 +112,10 @@ class _SecurityScreenState extends State<SecurityScreen> {
           await settingsProvider.setBiometricLock(true);
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Biometric lock enabled')),
+              const SnackBar(
+                content: Text('Biometric lock enabled'),
+                backgroundColor: Color(0xFF8B5CF6),
+              ),
             );
           }
         }
@@ -146,7 +149,10 @@ class _SecurityScreenState extends State<SecurityScreen> {
       await settingsProvider.setBiometricLock(false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Biometric lock disabled')),
+          const SnackBar(
+            content: Text('Biometric lock disabled'),
+            backgroundColor: Color(0xFF8B5CF6),
+          ),
         );
       }
     }
@@ -156,7 +162,12 @@ class _SecurityScreenState extends State<SecurityScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Set App Passcode'),
+        backgroundColor: const Color(0xFF1a103c),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Set App Passcode',
+          style: TextStyle(color: Colors.white),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -165,20 +176,36 @@ class _SecurityScreenState extends State<SecurityScreen> {
               keyboardType: TextInputType.number,
               maxLength: 6,
               obscureText: true,
-              decoration: const InputDecoration(
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
                 labelText: 'Enter 6-digit passcode',
+                labelStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
                 counterText: '',
+                filled: true,
+                fillColor: Colors.white.withOpacity(0.05),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: Border.none,
+                ),
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 12),
             TextField(
               controller: _confirmPasscodeController,
               keyboardType: TextInputType.number,
               maxLength: 6,
               obscureText: true,
-              decoration: const InputDecoration(
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
                 labelText: 'Confirm passcode',
+                labelStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
                 counterText: '',
+                filled: true,
+                fillColor: Colors.white.withOpacity(0.05),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: Border.none,
+                ),
               ),
             ),
           ],
@@ -190,7 +217,10 @@ class _SecurityScreenState extends State<SecurityScreen> {
               _confirmPasscodeController.clear();
               Navigator.pop(context);
             },
-            child: const Text('Cancel'),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: Colors.white.withOpacity(0.5)),
+            ),
           ),
           TextButton(
             onPressed: () async {
@@ -218,11 +248,17 @@ class _SecurityScreenState extends State<SecurityScreen> {
               if (mounted) {
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Passcode set successfully')),
+                  const SnackBar(
+                    content: Text('Passcode set successfully'),
+                    backgroundColor: Color(0xFF8B5CF6),
+                  ),
                 );
               }
             },
-            child: const Text('Set'),
+            child: const Text(
+              'Set',
+              style: TextStyle(color: Color(0xFF8B5CF6)),
+            ),
           ),
         ],
       ),
@@ -234,29 +270,38 @@ class _SecurityScreenState extends State<SecurityScreen> {
     final settingsProvider = Provider.of<SettingsProvider>(context);
 
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: const Color(0xFF0A0A0F),
       appBar: AppBar(
         title: const Text('Security'),
-        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
+        backgroundColor: Colors.transparent,
         elevation: 0,
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(20),
         children: [
-          _buildSectionHeader(context, 'Authentication'),
+          Text(
+            'Authentication',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: const Color(0xFF8B5CF6).withOpacity(0.8),
+              letterSpacing: 1,
+            ),
+          ),
+          const SizedBox(height: 16),
 
-          _buildToggleTile(
-            context,
+          _buildToggleCard(
             icon: Icons.verified_user_outlined,
+            iconColor: const Color(0xFF8B5CF6),
             title: 'Two-Step Verification',
             subtitle: 'Add extra security to your account',
             value: settingsProvider.twoStepVerification,
             onChanged: (value) => settingsProvider.setTwoStepVerification(value),
           ),
 
-          _buildToggleTile(
-            context,
+          _buildToggleCard(
             icon: Icons.lock_outline,
+            iconColor: const Color(0xFF06B6D4),
             title: 'App Passcode',
             subtitle: settingsProvider.appPasscode
                 ? 'Passcode is set'
@@ -273,9 +318,9 @@ class _SecurityScreenState extends State<SecurityScreen> {
           ),
 
           if (_canCheckBiometrics)
-            _buildToggleTile(
-              context,
+            _buildToggleCard(
               icon: Icons.fingerprint,
+              iconColor: const Color(0xFF8B5CF6),
               title: 'Biometric Lock',
               subtitle: _isBiometricAvailable
                   ? 'Use fingerprint or face ID'
@@ -286,15 +331,28 @@ class _SecurityScreenState extends State<SecurityScreen> {
 
           if (!_canCheckBiometrics)
             Container(
-              margin: const EdgeInsets.only(bottom: 8),
-              padding: const EdgeInsets.all(16),
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: Theme.of(context).cardColor,
-                borderRadius: BorderRadius.circular(12),
+                color: Colors.white.withOpacity(0.03),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: Colors.white.withOpacity(0.06),
+                ),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.fingerprint, color: Colors.grey.withOpacity(0.5)),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.withOpacity(0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.fingerprint,
+                      color: Colors.grey.withOpacity(0.5),
+                    ),
+                  ),
                   const SizedBox(width: 16),
                   Expanded(
                     child: Column(
@@ -302,13 +360,16 @@ class _SecurityScreenState extends State<SecurityScreen> {
                       children: [
                         const Text(
                           'Biometric Lock',
-                          style: TextStyle(color: Colors.grey),
+                          style: TextStyle(
+                            color: Colors.grey,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
                         Text(
                           'Not available on this device',
                           style: TextStyle(
                             fontSize: 12,
-                            color: Colors.grey.withOpacity(0.7),
+                            color: Colors.white.withOpacity(0.3),
                           ),
                         ),
                       ],
@@ -318,40 +379,65 @@ class _SecurityScreenState extends State<SecurityScreen> {
               ),
             ),
 
-          const SizedBox(height: 24),
+          const SizedBox(height: 32),
 
-          _buildSectionHeader(context, 'Security Info'),
+          Text(
+            'Security Info',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: const Color(0xFF8B5CF6).withOpacity(0.8),
+              letterSpacing: 1,
+            ),
+          ),
+          const SizedBox(height: 16),
 
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: Theme.of(context).cardColor,
-              borderRadius: BorderRadius.circular(12),
+              color: Colors.white.withOpacity(0.03),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: Colors.white.withOpacity(0.06),
+              ),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
-                    Icon(
-                      Icons.info_outline,
-                      color: Theme.of(context).primaryColor,
-                      size: 20,
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF06B6D4).withOpacity(0.15),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.info_outline,
+                        color: Color(0xFF06B6D4),
+                        size: 20,
+                      ),
                     ),
-                    const SizedBox(width: 8),
-                    Text(
+                    const SizedBox(width: 12),
+                    const Text(
                       'About Security Features',
-                      style: Theme.of(context).textTheme.titleSmall,
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                      ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 16),
                 Text(
                   'Two-Step Verification: Requires OTP every time you sign in on a new device.\n\n'
                   'App Passcode: Locks the app when you close it. You will need to enter the passcode to open it.\n\n'
                   'Biometric Lock: Uses your device fingerprint or face recognition to unlock the app.',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Colors.grey,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.white.withOpacity(0.4),
+                    height: 1.6,
                   ),
                 ),
               ],
@@ -362,43 +448,69 @@ class _SecurityScreenState extends State<SecurityScreen> {
     );
   }
 
-  Widget _buildSectionHeader(BuildContext context, String title) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Text(
-        title,
-        style: TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-          color: Theme.of(context).primaryColor,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildToggleTile(
-    BuildContext context, {
+  Widget _buildToggleCard({
     required IconData icon,
+    required Color iconColor,
     required String title,
     required String subtitle,
     required bool value,
     Function(bool)? onChanged,
   }) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: ListTile(
-        leading: Icon(icon, color: Theme.of(context).primaryColor),
-        title: Text(title),
-        subtitle: Text(subtitle),
-        trailing: Switch(
-          value: value,
-          onChanged: onChanged,
-          activeColor: Theme.of(context).primaryColor,
+        color: Colors.white.withOpacity(0.03),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: value
+              ? iconColor.withOpacity(0.3)
+              : Colors.white.withOpacity(0.06),
         ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: iconColor.withOpacity(0.15),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: iconColor, size: 22),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 15,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.white.withOpacity(0.4),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Switch(
+            value: value,
+            onChanged: onChanged,
+            activeColor: Colors.white,
+            activeTrackColor: iconColor,
+            inactiveThumbColor: Colors.grey,
+            inactiveTrackColor: Colors.grey.withOpacity(0.3),
+          ),
+        ],
       ),
     );
   }
