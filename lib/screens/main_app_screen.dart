@@ -46,7 +46,7 @@ class _MainAppScreenState extends State<MainAppScreen>
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        title: const Text('TARRIFIC CHAT'),
+        title: const Text('AURA CHAT'),
         backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
         elevation: 0,
         actions: [
