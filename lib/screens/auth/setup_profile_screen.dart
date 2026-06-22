@@ -4,7 +4,6 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../providers/auth_provider.dart';
-import '../../themes/app_theme.dart';
 
 class SetupProfileScreen extends StatefulWidget {
   const SetupProfileScreen({super.key});
@@ -13,7 +12,8 @@ class SetupProfileScreen extends StatefulWidget {
   State<SetupProfileScreen> createState() => _SetupProfileScreenState();
 }
 
-class _SetupProfileScreenState extends State<SetupProfileScreen> {
+class _SetupProfileScreenState extends State<SetupProfileScreen>
+    with SingleTickerProviderStateMixin {
   final _nameController = TextEditingController();
   final _usernameController = TextEditingController();
   final _bioController = TextEditingController();
@@ -21,6 +21,22 @@ class _SetupProfileScreenState extends State<SetupProfileScreen> {
   String? _usernameError;
   File? _profileImage;
   final ImagePicker _picker = ImagePicker();
+
+  late AnimationController _animController;
+  late Animation<double> _fadeAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _animController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _animController, curve: Curves.easeOut),
+    );
+    _animController.forward();
+  }
 
   void _validateUsername(String value) {
     if (value.isEmpty) {
@@ -62,7 +78,7 @@ class _SetupProfileScreenState extends State<SetupProfileScreen> {
   void _showImagePickerOptions() {
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppTheme.bgModal,
+      backgroundColor: const Color(0xFF1a103c),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -75,7 +91,7 @@ class _SetupProfileScreenState extends State<SetupProfileScreen> {
               width: 40,
               height: 4,
               decoration: BoxDecoration(
-                color: AppTheme.divider,
+                color: Colors.white.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -85,36 +101,22 @@ class _SetupProfileScreenState extends State<SetupProfileScreen> {
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.w600,
-                color: AppTheme.textPrimary,
+                color: Colors.white,
               ),
             ),
             const SizedBox(height: 20),
-            ListTile(
-              leading: Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: AppTheme.primaryGreen.withOpacity(0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.camera_alt, color: AppTheme.primaryGreen),
-              ),
-              title: const Text('Camera', style: TextStyle(color: AppTheme.textPrimary)),
+            _buildOptionTile(
+              icon: Icons.camera_alt,
+              label: 'Camera',
               onTap: () {
                 Navigator.pop(context);
                 _pickImage(ImageSource.camera);
               },
             ),
             const SizedBox(height: 8),
-            ListTile(
-              leading: Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: AppTheme.primaryGreen.withOpacity(0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.photo_library, color: AppTheme.primaryGreen),
-              ),
-              title: const Text('Gallery', style: TextStyle(color: AppTheme.textPrimary)),
+            _buildOptionTile(
+              icon: Icons.photo_library,
+              label: 'Gallery',
               onTap: () {
                 Navigator.pop(context);
                 _pickImage(ImageSource.gallery);
@@ -122,16 +124,10 @@ class _SetupProfileScreenState extends State<SetupProfileScreen> {
             ),
             if (_profileImage != null) ...[
               const SizedBox(height: 8),
-              ListTile(
-                leading: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: AppTheme.error.withOpacity(0.1),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.delete, color: AppTheme.error),
-                ),
-                title: const Text('Remove Photo', style: TextStyle(color: AppTheme.error)),
+              _buildOptionTile(
+                icon: Icons.delete,
+                label: 'Remove Photo',
+                color: Colors.red,
                 onTap: () {
                   Navigator.pop(context);
                   setState(() => _profileImage = null);
@@ -144,7 +140,29 @@ class _SetupProfileScreenState extends State<SetupProfileScreen> {
     );
   }
 
-  /// Upload profile image to Supabase Storage
+  Widget _buildOptionTile({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    Color color = const Color(0xFF8B5CF6),
+  }) {
+    return ListTile(
+      leading: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.2),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(icon, color: color),
+      ),
+      title: Text(
+        label,
+        style: const TextStyle(color: Colors.white),
+      ),
+      onTap: onTap,
+    );
+  }
+
   Future<String?> _uploadProfileImage(String userId) async {
     if (_profileImage == null) return null;
 
@@ -166,7 +184,6 @@ class _SetupProfileScreenState extends State<SetupProfileScreen> {
     }
   }
 
-  /// Check if username is already taken
   Future<bool> _isUsernameTaken(String username) async {
     try {
       final supabase = Supabase.instance.client;
@@ -183,17 +200,12 @@ class _SetupProfileScreenState extends State<SetupProfileScreen> {
   }
 
   void _completeSetup() async {
-    // Validation
     if (_nameController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter your display name')),
-      );
+      _showError('Please enter your display name');
       return;
     }
     if (_usernameError != null || _usernameController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a valid username')),
-      );
+      _showError('Please enter a valid username');
       return;
     }
 
@@ -207,7 +219,6 @@ class _SetupProfileScreenState extends State<SetupProfileScreen> {
         throw Exception('Not authenticated. Please log in again.');
       }
 
-      // Check if username is taken
       final username = _usernameController.text.trim();
       final taken = await _isUsernameTaken(username);
       if (taken) {
@@ -218,10 +229,8 @@ class _SetupProfileScreenState extends State<SetupProfileScreen> {
         return;
       }
 
-      // Upload profile image to Supabase Storage
       final photoUrl = await _uploadProfileImage(userId);
 
-      // Save profile to Supabase database via AuthProvider
       final success = await authProvider.setupProfile(
         username: username,
         bio: _bioController.text.trim().isNotEmpty ? _bioController.text.trim() : null,
@@ -239,200 +248,277 @@ class _SetupProfileScreenState extends State<SetupProfileScreen> {
       }
     } catch (e) {
       setState(() => _isLoading = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
-      }
+      _showError('Error: $e');
     }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red.withOpacity(0.9),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _usernameController.dispose();
+    _bioController.dispose();
+    _animController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.bgPrimary,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 20),
-              const Text(
-                'Set up your profile',
-                style: TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Choose how others will see you on TARRIFIC CHAT. You can always change this later.',
-                style: TextStyle(
-                  fontSize: 15,
-                  color: AppTheme.textSecondary,
-                  height: 1.5,
-                ),
-              ),
-              const SizedBox(height: 32),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color(0xFF0A0A0F),
+              Color(0xFF1a103c),
+              Color(0xFF0f172a),
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: FadeTransition(
+            opacity: _fadeAnimation,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 20),
+                  ShaderMask(
+                    shaderCallback: (bounds) => const LinearGradient(
+                      colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
+                    ).createShader(bounds),
+                    child: const Text(
+                      'Set up your profile',
+                      style: TextStyle(
+                        fontSize: 32,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Choose how others will see you on AURA. You can always change this later.',
+                    style: TextStyle(
+                      fontSize: 15,
+                      color: Colors.white.withOpacity(0.5),
+                      height: 1.5,
+                    ),
+                  ),
+                  const SizedBox(height: 40),
 
-              Center(
-                child: GestureDetector(
-                  onTap: _showImagePickerOptions,
-                  child: Stack(
-                    children: [
-                      Container(
+                  // Profile photo
+                  Center(
+                    child: GestureDetector(
+                      onTap: _showImagePickerOptions,
+                      child: Container(
                         width: 120,
                         height: 120,
                         decoration: BoxDecoration(
-                          color: _profileImage == null ? AppTheme.primaryGreen : null,
                           shape: BoxShape.circle,
-                          border: Border.all(
-                            color: AppTheme.primaryGreen.withOpacity(0.3),
-                            width: 3,
-                          ),
+                          gradient: _profileImage == null
+                              ? const LinearGradient(
+                                  colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
+                                )
+                              : null,
                           image: _profileImage != null
                               ? DecorationImage(
                                   image: FileImage(_profileImage!),
                                   fit: BoxFit.cover,
                                 )
                               : null,
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFF8B5CF6).withOpacity(0.3),
+                              blurRadius: 30,
+                              spreadRadius: 5,
+                            ),
+                          ],
                         ),
                         child: _profileImage == null
                             ? const Center(
-                                child: Icon(Icons.person, size: 50, color: Colors.white70),
+                                child: Icon(
+                                  Icons.person,
+                                  size: 50,
+                                  color: Colors.white70,
+                                ),
                               )
                             : null,
                       ),
-                      Positioned(
-                        bottom: 0,
-                        right: 0,
-                        child: Container(
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Center(
+                    child: Text(
+                      'Tap to add photo',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.white.withOpacity(0.4),
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 40),
+                  _buildGlassInput(
+                    label: 'Display Name',
+                    hint: 'How you want to be known',
+                    icon: Icons.person_outline,
+                    controller: _nameController,
+                  ),
+                  const SizedBox(height: 16),
+                  _buildGlassInput(
+                    label: 'Username',
+                    hint: 'Your unique @username',
+                    icon: Icons.alternate_email,
+                    controller: _usernameController,
+                    onChanged: _validateUsername,
+                    errorText: _usernameError,
+                    prefix: const Text(
+                      '@',
+                      style: TextStyle(
+                        color: Colors.white38,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  _buildGlassInput(
+                    label: 'Bio',
+                    hint: 'Tell people about yourself',
+                    icon: Icons.edit_note,
+                    controller: _bioController,
+                    maxLines: 3,
+                  ),
+                  const SizedBox(height: 24),
+
+                  // Verification badge info
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.05),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: Colors.white.withOpacity(0.08),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            color: AppTheme.primaryGreen,
+                            color: const Color(0xFF8B5CF6).withOpacity(0.2),
                             shape: BoxShape.circle,
-                            border: Border.all(
-                              color: AppTheme.bgPrimary,
-                              width: 3,
-                            ),
                           ),
-                          child: const Icon(Icons.camera_alt, size: 18, color: Colors.white),
+                          child: const Icon(
+                            Icons.verified,
+                            color: Color(0xFF8B5CF6),
+                            size: 18,
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 32),
-              _buildTextField(
-                'Display Name',
-                _nameController,
-                'How you want to be known',
-                Icons.person_outline,
-              ),
-              const SizedBox(height: 16),
-              _buildTextField(
-                'Username',
-                _usernameController,
-                'Your unique @username',
-                Icons.alternate_email,
-                onChanged: _validateUsername,
-                errorText: _usernameError,
-                prefix: const Text('@', style: TextStyle(color: AppTheme.textTertiary, fontSize: 16)),
-              ),
-              const SizedBox(height: 16),
-              _buildTextField(
-                'Bio',
-                _bioController,
-                'Tell people about yourself',
-                Icons.edit_note,
-                maxLines: 3,
-              ),
-              const SizedBox(height: 24),
-
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: AppTheme.bgSecondary,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.verified, color: AppTheme.verifiedBlue, size: 18),
-                        const SizedBox(width: 8),
-                        const Text(
-                          'Verification',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: AppTheme.textPrimary,
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Verification',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Verified badges are available for public figures, brands, and businesses. Apply after setup for \$4.99.',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: Colors.white.withOpacity(0.4),
+                                  height: 1.5,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Verified badges are available for public figures, brands, and businesses. Apply after setup for \$4.99.',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: AppTheme.textSecondary,
-                        height: 1.5,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 32),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _isLoading ? null : _completeSetup,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primaryGreen,
-                    foregroundColor: Colors.white,
-                    disabledBackgroundColor: AppTheme.bgElevated,
-                    padding: const EdgeInsets.symmetric(vertical: 18),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
                   ),
-                  child: _isLoading
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
+
+                  const SizedBox(height: 32),
+                  // Complete button
+                  SizedBox(
+                    width: double.infinity,
+                    height: 56,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
+                        ),
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF8B5CF6).withOpacity(0.3),
+                            blurRadius: 20,
+                            offset: const Offset(0, 8),
                           ),
-                        )
-                      : const Text(
-                          'Complete Setup',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
+                        ],
+                      ),
+                      child: ElevatedButton(
+                        onPressed: _isLoading ? null : _completeSetup,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.transparent,
+                          shadowColor: Colors.transparent,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
                           ),
                         ),
-                ),
+                        child: _isLoading
+                            ? const SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Text(
+                                'Complete Setup',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.white,
+                                ),
+                              ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildTextField(
-    String label,
-    TextEditingController controller,
-    String hint,
-    IconData icon, {
+  Widget _buildGlassInput({
+    required String label,
+    required String hint,
+    required IconData icon,
+    required TextEditingController controller,
     int maxLines = 1,
     Function(String)? onChanged,
     String? errorText,
@@ -443,62 +529,47 @@ class _SetupProfileScreenState extends State<SetupProfileScreen> {
       children: [
         Text(
           label,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w500,
-            color: AppTheme.textPrimary,
+            color: Colors.white.withOpacity(0.7),
           ),
         ),
         const SizedBox(height: 8),
-        TextField(
-          controller: controller,
-          maxLines: maxLines,
-          style: const TextStyle(color: AppTheme.textPrimary),
-          onChanged: onChanged,
-          decoration: InputDecoration(
-            hintText: hint,
-            hintStyle: TextStyle(color: AppTheme.textTertiary),
-            prefixIcon: prefix ?? Icon(icon, color: AppTheme.textTertiary),
-            errorText: errorText,
-            filled: true,
-            fillColor: AppTheme.bgInput,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide.none,
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.05),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: errorText != null
+                  ? Colors.red.withOpacity(0.5)
+                  : Colors.white.withOpacity(0.08),
             ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide.none,
+          ),
+          child: TextField(
+            controller: controller,
+            maxLines: maxLines,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 16,
             ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(
-                color: AppTheme.primaryGreen,
-                width: 1.5,
+            onChanged: onChanged,
+            decoration: InputDecoration(
+              hintText: hint,
+              hintStyle: TextStyle(
+                color: Colors.white.withOpacity(0.25),
               ),
-            ),
-            errorBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(
-                color: AppTheme.error,
-                width: 1.5,
+              prefixIcon: prefix ?? Icon(icon, color: Colors.white.withOpacity(0.3)),
+              errorText: errorText,
+              border: InputBorder.none,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 18,
               ),
-            ),
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 16,
-              vertical: 14,
             ),
           ),
         ),
       ],
     );
-  }
-
-  @override
-  void dispose() {
-    _nameController.dispose();
-    _usernameController.dispose();
-    _bioController.dispose();
-    super.dispose();
   }
 }
