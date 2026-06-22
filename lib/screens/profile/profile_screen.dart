@@ -15,7 +15,6 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   final _nameController = TextEditingController();
   final _bioController = TextEditingController();
-  final _phoneController = TextEditingController();
   bool _isEditing = false;
   bool _isLoading = false;
 
@@ -32,7 +31,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (!_isEditing && !_isLoading) {
       _nameController.text = authProvider.userName ?? '';
       _bioController.text = authProvider.userBio ?? '';
-      _phoneController.text = authProvider.phoneNumber ?? '';
     }
   }
 
@@ -40,14 +38,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     _nameController.text = authProvider.userName ?? '';
     _bioController.text = authProvider.userBio ?? '';
-    _phoneController.text = authProvider.phoneNumber ?? '';
   }
 
   @override
   void dispose() {
     _nameController.dispose();
     _bioController.dispose();
-    _phoneController.dispose();
     super.dispose();
   }
 
@@ -80,7 +76,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Profile photo updated')),
+            const SnackBar(
+              content: Text('Profile photo updated'),
+              backgroundColor: Color(0xFF8B5CF6),
+            ),
           );
         }
       } catch (e) {
@@ -112,7 +111,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(success ? 'Profile updated' : 'Update failed: ${authProvider.error}'),
+          content: Text(
+            success ? 'Profile updated' : 'Update failed: ${authProvider.error}',
+          ),
+          backgroundColor: success ? const Color(0xFF8B5CF6) : Colors.red,
         ),
       );
     }
@@ -122,238 +124,441 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget build(BuildContext context) {
     return Consumer<AuthProvider>(
       builder: (context, authProvider, child) {
-        final settingsProvider = Provider.of<SettingsProvider>(context);
-
         return Scaffold(
-          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-          appBar: AppBar(
-            title: const Text('Profile'),
-            backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
-            elevation: 0,
-            actions: [
-              if (!_isEditing)
-                IconButton(
-                  icon: const Icon(Icons.edit),
-                  onPressed: () => setState(() => _isEditing = true),
-                )
-              else
-                IconButton(
-                  icon: _isLoading 
-                    ? const SizedBox(
-                        width: 20, 
-                        height: 20, 
-                        child: CircularProgressIndicator(strokeWidth: 2)
-                      )
-                    : const Icon(Icons.check),
-                  onPressed: _isLoading ? null : _saveProfile,
-                ),
-            ],
-          ),
-          body: SingleChildScrollView(
-            child: Column(
-              children: [
-                // Profile Photo Section
-                Container(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    children: [
-                      Stack(
-                        children: [
-                          GestureDetector(
-                            onTap: _isEditing ? _pickImage : null,
-                            child: CircleAvatar(
-                              radius: 60,
-                              backgroundColor: Theme.of(context).primaryColor.withOpacity(0.2),
-                              backgroundImage: authProvider.userPhotoUrl != null && authProvider.userPhotoUrl!.isNotEmpty
-                                  ? NetworkImage(authProvider.userPhotoUrl!)
-                                  : null,
-                              child: authProvider.userPhotoUrl == null || authProvider.userPhotoUrl!.isEmpty
-                                  ? Icon(
-                                      Icons.person,
-                                      size: 60,
-                                      color: Theme.of(context).primaryColor,
-                                    )
-                                  : null,
-                            ),
-                          ),
-                          if (_isEditing)
-                            Positioned(
-                              bottom: 0,
-                              right: 0,
-                              child: Container(
-                                padding: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  color: Theme.of(context).primaryColor,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: const Icon(
-                                  Icons.camera_alt,
-                                  color: Colors.white,
-                                  size: 20,
-                                ),
-                              ),
-                            ),
+          backgroundColor: const Color(0xFF0A0A0F),
+          body: CustomScrollView(
+            slivers: [
+              // Gradient app bar with profile
+              SliverAppBar(
+                expandedHeight: 280,
+                floating: false,
+                pinned: true,
+                elevation: 0,
+                backgroundColor: const Color(0xFF0A0A0F),
+                flexibleSpace: FlexibleSpaceBar(
+                  background: Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          const Color(0xFF8B5CF6).withOpacity(0.3),
+                          const Color(0xFF06B6D4).withOpacity(0.1),
+                          const Color(0xFF0A0A0F),
                         ],
                       ),
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const SizedBox(height: 40),
+                        // Profile photo with glow
+                        Stack(
+                          children: [
+                            Container(
+                              width: 100,
+                              height: 100,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: const Color(0xFF8B5CF6).withOpacity(0.4),
+                                    blurRadius: 30,
+                                    spreadRadius: 5,
+                                  ),
+                                ],
+                              ),
+                              child: CircleAvatar(
+                                radius: 50,
+                                backgroundColor: const Color(0xFF1a103c),
+                                backgroundImage: authProvider.userPhotoUrl != null &&
+                                        authProvider.userPhotoUrl!.isNotEmpty
+                                    ? NetworkImage(authProvider.userPhotoUrl!)
+                                    : null,
+                                child: authProvider.userPhotoUrl == null ||
+                                        authProvider.userPhotoUrl!.isEmpty
+                                    ? const Icon(
+                                        Icons.person,
+                                        size: 50,
+                                        color: Colors.white54,
+                                      )
+                                    : null,
+                              ),
+                            ),
+                            if (_isEditing)
+                              Positioned(
+                                bottom: 0,
+                                right: 0,
+                                child: GestureDetector(
+                                  onTap: _pickImage,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      gradient: const LinearGradient(
+                                        colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
+                                      ),
+                                      shape: BoxShape.circle,
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: const Color(0xFF8B5CF6).withOpacity(0.4),
+                                          blurRadius: 10,
+                                        ),
+                                      ],
+                                    ),
+                                    child: const Icon(
+                                      Icons.camera_alt,
+                                      color: Colors.white,
+                                      size: 18,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          authProvider.userName?.isNotEmpty == true
+                              ? authProvider.userName!
+                              : 'Your Name',
+                          style: const TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          authProvider.phoneNumber ?? '',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.white.withOpacity(0.5),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                actions: [
+                  if (!_isEditing)
+                    IconButton(
+                      icon: const Icon(Icons.edit, color: Colors.white70),
+                      onPressed: () => setState(() => _isEditing = true),
+                    )
+                  else
+                    IconButton(
+                      icon: _isLoading
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.check, color: Colors.white),
+                      onPressed: _isLoading ? null : _saveProfile,
+                    ),
+                ],
+              ),
+
+              // Content
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Info cards
+                      _buildGlassCard(
+                        child: _isEditing
+                            ? TextField(
+                                controller: _nameController,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                ),
+                                decoration: InputDecoration(
+                                  labelText: 'Display Name',
+                                  labelStyle: TextStyle(
+                                    color: Colors.white.withOpacity(0.5),
+                                  ),
+                                  border: InputBorder.none,
+                                  prefixIcon: Icon(
+                                    Icons.person_outline,
+                                    color: Colors.white.withOpacity(0.3),
+                                  ),
+                                ),
+                              )
+                            : ListTile(
+                                leading: Icon(
+                                  Icons.person_outline,
+                                  color: const Color(0xFF8B5CF6),
+                                ),
+                                title: Text(
+                                  'Name',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.white.withOpacity(0.5),
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  authProvider.userName?.isNotEmpty == true
+                                      ? authProvider.userName!
+                                      : 'Not set',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                              ),
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      _buildGlassCard(
+                        child: _isEditing
+                            ? TextField(
+                                controller: _bioController,
+                                maxLines: 3,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                ),
+                                decoration: InputDecoration(
+                                  labelText: 'Bio',
+                                  labelStyle: TextStyle(
+                                    color: Colors.white.withOpacity(0.5),
+                                  ),
+                                  border: InputBorder.none,
+                                  prefixIcon: Icon(
+                                    Icons.info_outline,
+                                    color: Colors.white.withOpacity(0.3),
+                                  ),
+                                ),
+                              )
+                            : ListTile(
+                                leading: Icon(
+                                  Icons.info_outline,
+                                  color: const Color(0xFF06B6D4),
+                                ),
+                                title: Text(
+                                  'Bio',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.white.withOpacity(0.5),
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  authProvider.userBio?.isNotEmpty == true
+                                      ? authProvider.userBio!
+                                      : 'No bio yet',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                              ),
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      _buildGlassCard(
+                        child: ListTile(
+                          leading: Icon(
+                            Icons.phone,
+                            color: const Color(0xFF8B5CF6).withOpacity(0.8),
+                          ),
+                          title: Text(
+                            'Phone',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.white.withOpacity(0.5),
+                            ),
+                          ),
+                          subtitle: Text(
+                            authProvider.phoneNumber?.isNotEmpty == true
+                                ? authProvider.phoneNumber!
+                                : 'Not set',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 32),
+
+                      // Settings section
+                      Text(
+                        'Settings',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: const Color(0xFF8B5CF6).withOpacity(0.8),
+                          letterSpacing: 1,
+                        ),
+                      ),
                       const SizedBox(height: 16),
+
+                      _buildSettingsTile(
+                        icon: Icons.privacy_tip_outlined,
+                        title: 'Privacy',
+                        subtitle: 'Control who can see your info',
+                        onTap: () => Navigator.pushNamed(context, '/privacy_settings'),
+                      ),
+
+                      _buildSettingsTile(
+                        icon: Icons.security_outlined,
+                        title: 'Security',
+                        subtitle: 'Passcode and biometric lock',
+                        onTap: () => Navigator.pushNamed(context, '/security'),
+                      ),
+
+                      _buildSettingsTile(
+                        icon: Icons.notifications_outlined,
+                        title: 'Notifications',
+                        subtitle: 'Message tones and alerts',
+                        onTap: () => Navigator.pushNamed(context, '/notifications_settings'),
+                      ),
+
+                      const SizedBox(height: 32),
+
+                      // Danger zone
                       Text(
-                        authProvider.userName?.isNotEmpty == true ? authProvider.userName! : 'Your Name',
-                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          fontWeight: FontWeight.bold,
+                        'Danger Zone',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.red.withOpacity(0.8),
+                          letterSpacing: 1,
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        authProvider.phoneNumber ?? '',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Colors.grey,
-                        ),
+                      const SizedBox(height: 16),
+
+                      _buildDangerTile(
+                        icon: Icons.delete_outline,
+                        title: 'Delete Account',
+                        subtitle: 'Permanently delete your account and data',
+                        onTap: () => _showDeleteAccountDialog(context),
                       ),
+
+                      _buildDangerTile(
+                        icon: Icons.logout,
+                        title: 'Sign Out',
+                        onTap: () => _showSignOutDialog(context),
+                      ),
+
+                      const SizedBox(height: 32),
                     ],
                   ),
                 ),
-
-                // Info Cards
-                _buildInfoCard(
-                  context,
-                  icon: Icons.person_outline,
-                  title: 'Name',
-                  subtitle: authProvider.userName?.isNotEmpty == true ? authProvider.userName! : 'Not set',
-                  controller: _nameController,
-                  isEditing: _isEditing,
-                  hint: 'Enter your name',
-                ),
-
-                _buildInfoCard(
-                  context,
-                  icon: Icons.info_outline,
-                  title: 'Bio',
-                  subtitle: authProvider.userBio?.isNotEmpty == true ? authProvider.userBio! : 'No bio yet',
-                  controller: _bioController,
-                  isEditing: _isEditing,
-                  hint: 'Add a bio',
-                  maxLines: 3,
-                ),
-
-                _buildInfoCard(
-                  context,
-                  icon: Icons.phone,
-                  title: 'Phone',
-                  subtitle: authProvider.phoneNumber?.isNotEmpty == true ? authProvider.phoneNumber! : 'Not set',
-                  controller: _phoneController,
-                  isEditing: false,
-                  hint: '',
-                ),
-
-                const SizedBox(height: 24),
-
-                // Settings Section
-                _buildSectionHeader(context, 'Settings'),
-
-                ListTile(
-                  leading: const Icon(Icons.privacy_tip_outlined),
-                  title: const Text('Privacy'),
-                  subtitle: const Text('Control who can see your info'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => Navigator.pushNamed(context, '/privacy_settings'),
-                ),
-
-                ListTile(
-                  leading: const Icon(Icons.security_outlined),
-                  title: const Text('Security'),
-                  subtitle: const Text('Passcode and biometric lock'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => Navigator.pushNamed(context, '/security'),
-                ),
-
-                ListTile(
-                  leading: const Icon(Icons.notifications_outlined),
-                  title: const Text('Notifications'),
-                  subtitle: const Text('Message tones and alerts'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => Navigator.pushNamed(context, '/notifications_settings'),
-                ),
-
-                const SizedBox(height: 24),
-
-                // Danger Zone
-                _buildSectionHeader(context, 'Danger Zone'),
-
-                ListTile(
-                  leading: const Icon(Icons.delete_outline, color: Colors.red),
-                  title: const Text('Delete Account', style: TextStyle(color: Colors.red)),
-                  subtitle: const Text('Permanently delete your account and data'),
-                  onTap: () => _showDeleteAccountDialog(context),
-                ),
-
-                ListTile(
-                  leading: const Icon(Icons.logout, color: Colors.red),
-                  title: const Text('Sign Out', style: TextStyle(color: Colors.red)),
-                  onTap: () => _showSignOutDialog(context),
-                ),
-
-                const SizedBox(height: 32),
-              ],
-            ),
+              ),
+            ],
           ),
         );
       },
     );
   }
 
-  Widget _buildInfoCard(
-    BuildContext context, {
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required TextEditingController controller,
-    required bool isEditing,
-    required String hint,
-    int maxLines = 1,
-  }) {
+  Widget _buildGlassCard({required Widget child}) {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(12),
+        color: Colors.white.withOpacity(0.03),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Colors.white.withOpacity(0.06),
+        ),
       ),
-      child: isEditing
-          ? Padding(
-              padding: const EdgeInsets.all(16),
-              child: TextField(
-                controller: controller,
-                maxLines: maxLines,
-                decoration: InputDecoration(
-                  icon: Icon(icon),
-                  labelText: title,
-                  hintText: hint,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-              ),
-            )
-          : ListTile(
-              leading: Icon(icon, color: Theme.of(context).primaryColor),
-              title: Text(title, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-              subtitle: Text(
-                subtitle,
-                style: Theme.of(context).textTheme.bodyLarge,
-              ),
-            ),
+      child: child,
     );
   }
 
-  Widget _buildSectionHeader(BuildContext context, String title) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Text(
-        title,
-        style: TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-          color: Theme.of(context).primaryColor,
+  Widget _buildSettingsTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.03),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Colors.white.withOpacity(0.06),
         ),
+      ),
+      child: ListTile(
+        leading: Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: const Color(0xFF8B5CF6).withOpacity(0.15),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icon, color: const Color(0xFF8B5CF6), size: 20),
+        ),
+        title: Text(
+          title,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        subtitle: Text(
+          subtitle,
+          style: TextStyle(
+            color: Colors.white.withOpacity(0.4),
+            fontSize: 12,
+          ),
+        ),
+        trailing: const Icon(Icons.chevron_right, color: Colors.white38),
+        onTap: onTap,
+      ),
+    );
+  }
+
+  Widget _buildDangerTile({
+    required IconData icon,
+    required String title,
+    String? subtitle,
+    required VoidCallback onTap,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: Colors.red.withOpacity(0.03),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Colors.red.withOpacity(0.1),
+        ),
+      ),
+      child: ListTile(
+        leading: Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.red.withOpacity(0.15),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icon, color: Colors.red, size: 20),
+        ),
+        title: Text(
+          title,
+          style: const TextStyle(
+            color: Colors.red,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        subtitle: subtitle != null
+            ? Text(
+                subtitle,
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.4),
+                  fontSize: 12,
+                ),
+              )
+            : null,
+        onTap: onTap,
       ),
     );
   }
@@ -362,12 +567,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Sign Out?'),
-        content: const Text('You will need to sign in again.'),
+        backgroundColor: const Color(0xFF1a103c),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Sign Out?', style: TextStyle(color: Colors.white)),
+        content: const Text(
+          'You will need to sign in again.',
+          style: TextStyle(color: Colors.white70),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: Colors.white.withOpacity(0.5)),
+            ),
           ),
           TextButton(
             onPressed: () async {
@@ -389,14 +602,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete Account?', style: TextStyle(color: Colors.red)),
+        backgroundColor: const Color(0xFF1a103c),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Delete Account?',
+          style: TextStyle(color: Colors.red),
+        ),
         content: const Text(
           'This will permanently delete your account and all your data. This action cannot be undone.',
+          style: TextStyle(color: Colors.white70),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: Colors.white.withOpacity(0.5)),
+            ),
           ),
           TextButton(
             onPressed: () async {
