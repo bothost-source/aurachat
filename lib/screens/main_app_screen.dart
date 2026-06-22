@@ -1,11 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../providers/auth_provider.dart';
-import '../providers/chat_provider.dart';
-import '../providers/settings_provider.dart';
-import 'chat/chat_list_screen.dart';
-import 'status/status_screen.dart';
-import 'calls/calls_screen.dart';
+import '../../providers/auth_provider.dart';
+import '../../providers/chat_provider.dart';
 
 class MainAppScreen extends StatefulWidget {
   const MainAppScreen({super.key});
@@ -14,7 +10,7 @@ class MainAppScreen extends StatefulWidget {
   State<MainAppScreen> createState() => _MainAppScreenState();
 }
 
-class _MainAppScreenState extends State<MainAppScreen> 
+class _MainAppScreenState extends State<MainAppScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   int _currentIndex = 0;
@@ -26,8 +22,8 @@ class _MainAppScreenState extends State<MainAppScreen>
     _tabController.addListener(() {
       setState(() => _currentIndex = _tabController.index);
     });
-
-    // Load chats on init
+    
+    // Load chats
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Provider.of<ChatProvider>(context, listen: false).loadChats();
     });
@@ -44,158 +40,461 @@ class _MainAppScreenState extends State<MainAppScreen>
     final authProvider = Provider.of<AuthProvider>(context);
 
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        title: const Text('AURA CHAT'),
-        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
-        elevation: 0,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.search),
-            onPressed: () => Navigator.pushNamed(context, '/global_search'),
-          ),
-          PopupMenuButton<String>(
-            onSelected: (value) {
-              switch (value) {
-                case 'settings':
-                  Navigator.pushNamed(context, '/settings');
-                  break;
-                case 'profile':
-                  Navigator.pushNamed(context, '/profile');
-                  break;
-                case 'saved':
-                  Navigator.pushNamed(context, '/saved_messages');
-                  break;
-                case 'invite':
-                  Navigator.pushNamed(context, '/invite_friends');
-                  break;
-              }
-            },
-            itemBuilder: (context) => [
-              const PopupMenuItem(
-                value: 'profile',
-                child: Row(
-                  children: [
-                    Icon(Icons.person),
-                    SizedBox(width: 8),
-                    Text('Profile'),
-                  ],
+      backgroundColor: const Color(0xFF0A0A0F),
+      body: NestedScrollView(
+        headerSliverBuilder: (context, innerBoxIsScrolled) {
+          return [
+            SliverAppBar(
+              expandedHeight: 120,
+              floating: true,
+              pinned: true,
+              elevation: 0,
+              backgroundColor: const Color(0xFF0A0A0F),
+              flexibleSpace: FlexibleSpaceBar(
+                titlePadding: const EdgeInsets.only(left: 20, bottom: 60),
+                title: ShaderMask(
+                  shaderCallback: (bounds) => const LinearGradient(
+                    colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
+                  ).createShader(bounds),
+                  child: const Text(
+                    'AURA',
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 4,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+                background: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        const Color(0xFF8B5CF6).withOpacity(0.1),
+                        const Color(0xFF06B6D4).withOpacity(0.05),
+                        Colors.transparent,
+                      ],
+                    ),
+                  ),
                 ),
               ),
-              const PopupMenuItem(
-                value: 'settings',
-                child: Row(
-                  children: [
-                    Icon(Icons.settings),
-                    SizedBox(width: 8),
-                    Text('Settings'),
-                  ],
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.search, color: Colors.white70),
+                  onPressed: () => Navigator.pushNamed(context, '/global_search'),
                 ),
-              ),
-              const PopupMenuItem(
-                value: 'saved',
-                child: Row(
-                  children: [
-                    Icon(Icons.bookmark),
-                    SizedBox(width: 8),
-                    Text('Saved Messages'),
-                  ],
+                IconButton(
+                  icon: const Icon(Icons.more_vert, color: Colors.white70),
+                  onPressed: () => _showMenu(context),
                 ),
-              ),
-              const PopupMenuItem(
-                value: 'invite',
-                child: Row(
-                  children: [
-                    Icon(Icons.person_add),
-                    SizedBox(width: 8),
-                    Text('Invite Friends'),
-                  ],
+              ],
+              bottom: TabBar(
+                controller: _tabController,
+                indicator: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
+                  ),
+                  borderRadius: BorderRadius.circular(20),
                 ),
+                indicatorSize: TabBarIndicatorSize.tab,
+                indicatorPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                labelColor: Colors.white,
+                unselectedLabelColor: Colors.white.withOpacity(0.4),
+                labelStyle: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                ),
+                unselectedLabelStyle: const TextStyle(
+                  fontWeight: FontWeight.w400,
+                  fontSize: 14,
+                ),
+                tabs: const [
+                  Tab(text: 'CHATS'),
+                  Tab(text: 'STATUS'),
+                  Tab(text: 'CALLS'),
+                ],
               ),
-            ],
-          ),
-        ],
-        bottom: TabBar(
+            ),
+          ];
+        },
+        body: TabBarView(
           controller: _tabController,
-          indicatorColor: Colors.white,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white70,
-          tabs: const [
-            Tab(text: 'CHATS'),
-            Tab(text: 'STATUS'),
-            Tab(text: 'CALLS'),
+          children: [
+            _buildChatsTab(),
+            _buildStatusTab(),
+            _buildCallsTab(),
           ],
         ),
       ),
-      body: TabBarView(
-        controller: _tabController,
-        children: const [
-          ChatListScreen(),
-          StatusScreen(),
-          CallsScreen(),
-        ],
+      floatingActionButton: Container(
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
+          ),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF8B5CF6).withOpacity(0.4),
+              blurRadius: 20,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: FloatingActionButton(
+          onPressed: () => _showNewChatOptions(context),
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          child: const Icon(Icons.chat_bubble, color: Colors.white),
+        ),
       ),
-      floatingActionButton: _buildFAB(),
     );
   }
 
-  Widget? _buildFAB() {
-    switch (_currentIndex) {
-      case 0: // Chats
-        return FloatingActionButton(
-          onPressed: () => _showNewChatOptions(context),
-          child: const Icon(Icons.chat),
+  Widget _buildChatsTab() {
+    return Consumer<ChatProvider>(
+      builder: (context, chatProvider, child) {
+        if (chatProvider.isLoading) {
+          return const Center(
+            child: CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation(Color(0xFF8B5CF6)),
+            ),
+          );
+        }
+
+        if (chatProvider.chats.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.chat_bubble_outline,
+                  size: 80,
+                  color: Colors.white.withOpacity(0.1),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'No chats yet',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.3),
+                    fontSize: 16,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Start a new conversation!',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.2),
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        return ListView.builder(
+          padding: const EdgeInsets.only(top: 8),
+          itemCount: chatProvider.chats.length,
+          itemBuilder: (context, index) {
+            final chat = chatProvider.chats[index];
+            return _buildChatTile(chat);
+          },
         );
-      case 1: // Status
-        return FloatingActionButton(
-          onPressed: () => Navigator.pushNamed(context, '/create_status'),
-          child: const Icon(Icons.camera_alt),
-        );
-      case 2: // Calls
-        return FloatingActionButton(
-          onPressed: () {},
-          child: const Icon(Icons.add_call),
-        );
-      default:
-        return null;
-    }
+      },
+    );
+  }
+
+  Widget _buildChatTile(Map<String, dynamic> chat) {
+    final name = chat['name'] ?? 'Unknown';
+    final avatar = chat['avatar_url'];
+    final lastMessage = chat['last_message'] ?? '';
+    final time = chat['updated_at'];
+    final unread = chat['unread_count'] ?? 0;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.03),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Colors.white.withOpacity(0.05),
+        ),
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        leading: Container(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF8B5CF6).withOpacity(0.2),
+                blurRadius: 10,
+              ),
+            ],
+          ),
+          child: CircleAvatar(
+            radius: 28,
+            backgroundColor: const Color(0xFF1a103c),
+            backgroundImage: avatar != null ? NetworkImage(avatar) : null,
+            child: avatar == null
+                ? Text(
+                    name.isNotEmpty ? name[0].toUpperCase() : '?',
+                    style: const TextStyle(
+                      color: Color(0xFF8B5CF6),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18,
+                    ),
+                  )
+                : null,
+          ),
+        ),
+        title: Text(
+          name,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w600,
+            fontSize: 15,
+          ),
+        ),
+        subtitle: Text(
+          lastMessage,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: Colors.white.withOpacity(0.4),
+            fontSize: 13,
+          ),
+        ),
+        trailing: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            if (time != null)
+              Text(
+                _formatTime(time),
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.3),
+                  fontSize: 11,
+                ),
+              ),
+            if (unread > 0) ...[
+              const SizedBox(height: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
+                  ),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  unread.toString(),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+        onTap: () {
+          Navigator.pushNamed(
+            context,
+            '/chat',
+            arguments: {
+              'chatId': chat['id'],
+              'chatName': name,
+              'chatAvatar': avatar,
+              'isGroup': chat['type'] != 'direct',
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildStatusTab() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.circle_outlined,
+            size: 80,
+            color: Colors.white.withOpacity(0.1),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Status updates',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.3),
+              fontSize: 16,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCallsTab() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.phone_outlined,
+            size: 80,
+            color: Colors.white.withOpacity(0.1),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Call history',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.3),
+              fontSize: 16,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showNewChatOptions(BuildContext context) {
     showModalBottomSheet(
       context: context,
+      backgroundColor: const Color(0xFF1a103c),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
       builder: (context) => Container(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(20),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(
-              leading: const Icon(Icons.group_add),
-              title: const Text('New Group'),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 20),
+            _buildOptionTile(
+              icon: Icons.person_add,
+              label: 'New Chat',
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.pushNamed(context, '/global_search');
+              },
+            ),
+            _buildOptionTile(
+              icon: Icons.group_add,
+              label: 'New Group',
               onTap: () {
                 Navigator.pop(context);
                 Navigator.pushNamed(context, '/create_group');
               },
             ),
-            ListTile(
-              leading: const Icon(Icons.campaign),
-              title: const Text('New Channel'),
+            _buildOptionTile(
+              icon: Icons.campaign,
+              label: 'New Channel',
               onTap: () {
                 Navigator.pop(context);
                 Navigator.pushNamed(context, '/create_group');
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.person_add),
-              title: const Text('New Contact'),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.pushNamed(context, '/contacts');
               },
             ),
           ],
         ),
       ),
     );
+  }
+
+  void _showMenu(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1a103c),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 20),
+            _buildOptionTile(
+              icon: Icons.settings,
+              label: 'Settings',
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.pushNamed(context, '/settings');
+              },
+            ),
+            _buildOptionTile(
+              icon: Icons.person,
+              label: 'Profile',
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.pushNamed(context, '/profile');
+              },
+            ),
+            _buildOptionTile(
+              icon: Icons.logout,
+              label: 'Sign Out',
+              color: Colors.red,
+              onTap: () async {
+                Navigator.pop(context);
+                final authProvider = Provider.of<AuthProvider>(context, listen: false);
+                await authProvider.signOut();
+                if (context.mounted) {
+                  Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
+                }
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOptionTile({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    Color color = const Color(0xFF8B5CF6),
+  }) {
+    return ListTile(
+      leading: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.2),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(icon, color: color),
+      ),
+      title: Text(
+        label,
+        style: const TextStyle(color: Colors.white),
+      ),
+      onTap: onTap,
+    );
+  }
+
+  String _formatTime(dynamic time) {
+    // Simple time formatting - customize as needed
+    return 'Now';
   }
 }
