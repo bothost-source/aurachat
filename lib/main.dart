@@ -83,17 +83,17 @@ void main() async {
     ),
   );
 
-  runApp(const TarrificChatApp());
+  runApp(const AuraChatApp());
 }
 
-class TarrificChatApp extends StatefulWidget {
-  const TarrificChatApp({super.key});
+class AuraChatApp extends StatefulWidget {
+  const AuraChatApp({super.key});
 
   @override
-  State<TarrificChatApp> createState() => _TarrificChatAppState();
+  State<AuraChatApp> createState() => _AuraChatAppState();
 }
 
-class _TarrificChatAppState extends State<TarrificChatApp> 
+class _AuraChatAppState extends State<AuraChatApp> 
     with WidgetsBindingObserver {
 
   @override
@@ -101,7 +101,6 @@ class _TarrificChatAppState extends State<TarrificChatApp>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     
-    // Listen to auth state changes after first frame
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       authProvider.listenToAuthChanges();
@@ -136,7 +135,7 @@ class _TarrificChatAppState extends State<TarrificChatApp>
       child: Consumer2<ThemeProvider, AuthProvider>(
         builder: (context, themeProvider, authProvider, child) {
           return MaterialApp(
-            title: 'TARRIFIC CHAT',
+            title: 'AURA',
             debugShowCheckedModeBanner: false,
             theme: AppTheme.lightTheme,
             darkTheme: AppTheme.darkTheme,
