@@ -11,7 +11,6 @@ import 'package:just_audio/just_audio.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:intl/intl.dart';
-import 'package:timeago/timeago.dart' as timeago;
 import 'dart:io';
 import '../../providers/auth_provider.dart';
 import '../../providers/chat_provider.dart';
@@ -19,18 +18,7 @@ import '../../providers/settings_provider.dart';
 import 'package:dio/dio.dart'; 
 
 class ChatScreen extends StatefulWidget {
-  final String? chatId;
-  final String? chatName;
-  final String? chatAvatar;
-  final bool? isGroup;
-
-  const ChatScreen({
-    super.key,
-    this.chatId,
-    this.chatName,
-    this.chatAvatar,
-    this.isGroup,
-  });
+  const ChatScreen({super.key});
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -38,6 +26,7 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> {
   final _messageController = TextEditingController();
+  final _editController = TextEditingController();
   final _scrollController = ScrollController();
   final AudioPlayer _audioPlayer = AudioPlayer();
 
@@ -49,17 +38,41 @@ class _ChatScreenState extends State<ChatScreen> {
   RealtimeChannel? _messageSubscription;
   bool _isLoading = true;
   String? _replyingTo;
+  String? _editingMessageId;
+
+  // Route arguments
+  String? _chatId;
+  String? _chatName;
+  String? _chatAvatar;
+  bool _isGroup = false;
 
   @override
   void initState() {
     super.initState();
-    _loadMessages();
-    _subscribeToMessages();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    
+    final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+    if (args != null) {
+      _chatId = args['chatId'] as String?;
+      _chatName = args['chatName'] as String?;
+      _chatAvatar = args['chatAvatar'] as String?;
+      _isGroup = args['isGroup'] as bool? ?? false;
+    }
+
+    if (_chatId != null && _messages.isEmpty && _isLoading) {
+      _loadMessages();
+      _subscribeToMessages();
+    }
   }
 
   @override
   void dispose() {
     _messageController.dispose();
+    _editController.dispose();
     _scrollController.dispose();
     _audioPlayer.dispose();
     _messageSubscription?.unsubscribe();
@@ -67,7 +80,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _loadMessages() async {
-    if (widget.chatId == null) {
+    if (_chatId == null) {
       setState(() => _isLoading = false);
       return;
     }
@@ -77,7 +90,7 @@ class _ChatScreenState extends State<ChatScreen> {
       final response = await supabase
           .from('messages')
           .select('*, users(username, avatar_url)')
-          .eq('chat_id', widget.chatId!)
+          .eq('chat_id', _chatId!)
           .order('created_at', ascending: true);
 
       setState(() {
@@ -93,11 +106,11 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _subscribeToMessages() {
-    if (widget.chatId == null) return;
+    if (_chatId == null) return;
 
     final supabase = Supabase.instance.client;
     _messageSubscription = supabase
-        .channel('messages:${widget.chatId}')
+        .channel('messages:$_chatId')
         .onPostgresChanges(
           event: PostgresChangeEvent.insert,
           schema: 'public',
@@ -105,13 +118,47 @@ class _ChatScreenState extends State<ChatScreen> {
           filter: PostgresChangeFilter(
             type: PostgresChangeFilterType.eq,
             column: 'chat_id',
-            value: widget.chatId!,
+            value: _chatId!,
           ),
           callback: (payload) {
+            final newId = payload.newRecord['id'];
+            final exists = _messages.any((m) => m['id'] == newId);
+            if (!exists) {
+              setState(() {
+                _messages.add(payload.newRecord);
+              });
+              _scrollToBottom();
+            }
+          },
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'messages',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'chat_id',
+            value: _chatId!,
+          ),
+          callback: (payload) {
+            final updatedId = payload.newRecord['id'];
             setState(() {
-              _messages.add(payload.newRecord);
+              final index = _messages.indexWhere((m) => m['id'] == updatedId);
+              if (index >= 0) {
+                _messages[index] = payload.newRecord;
+              }
             });
-            _scrollToBottom();
+          },
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.delete,
+          schema: 'public',
+          table: 'messages',
+          callback: (payload) {
+            final deletedId = payload.oldRecord['id'];
+            setState(() {
+              _messages.removeWhere((m) => m['id'] == deletedId);
+            });
           },
         )
         .subscribe();
@@ -154,11 +201,11 @@ class _ChatScreenState extends State<ChatScreen> {
       final supabase = Supabase.instance.client;
       final userId = authProvider.user?.id;
 
-      if (userId == null || widget.chatId == null) return;
+      if (userId == null || _chatId == null) return;
 
       final message = {
         'id': const Uuid().v4(),
-        'chat_id': widget.chatId!,
+        'chat_id': _chatId!,
         'sender_id': userId,
         'type': type,
         'content': content,
@@ -168,6 +215,7 @@ class _ChatScreenState extends State<ChatScreen> {
         'reply_to': _replyingTo,
         'created_at': DateTime.now().toIso8601String(),
         'is_read': false,
+        'is_edited': false,
       };
 
       setState(() {
@@ -192,6 +240,139 @@ class _ChatScreenState extends State<ChatScreen> {
         );
       }
     }
+  }
+
+  Future<void> _editMessage(String messageId, String newContent) async {
+    if (newContent.trim().isEmpty) return;
+
+    try {
+      final supabase = Supabase.instance.client;
+      
+      await supabase.from('messages').update({
+        'content': newContent.trim(),
+        'is_edited': true,
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq('id', messageId);
+
+      setState(() {
+        _editingMessageId = null;
+        _editController.clear();
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Message edited')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Edit failed: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteMessage(String messageId) async {
+    try {
+      final supabase = Supabase.instance.client;
+      await supabase.from('messages').delete().eq('id', messageId);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Message deleted')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Delete failed: $e')),
+        );
+      }
+    }
+  }
+
+  void _showEditDialog(String messageId, String currentContent) {
+    _editController.text = currentContent;
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit Message'),
+        content: TextField(
+          controller: _editController,
+          maxLines: null,
+          decoration: const InputDecoration(
+            hintText: 'Edit your message...',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              _editController.clear();
+              Navigator.pop(context);
+            },
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _editMessage(messageId, _editController.text);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showMessageOptions(Map<String, dynamic> message, bool isMe) {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.withOpacity(0.3),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 16),
+            if (isMe && message['type'] == 'text') ...[
+              ListTile(
+                leading: const Icon(Icons.edit),
+                title: const Text('Edit'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showEditDialog(message['id'], message['content'] ?? '');
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.delete, color: Colors.red),
+                title: const Text('Delete', style: TextStyle(color: Colors.red)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _deleteMessage(message['id']);
+                },
+              ),
+            ],
+            ListTile(
+              leading: const Icon(Icons.reply),
+              title: const Text('Reply'),
+              onTap: () {
+                Navigator.pop(context);
+                setState(() => _replyingTo = message['id']);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _pickImage() async {
@@ -276,7 +457,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
       final fileBytes = await file.readAsBytes();
       final ext = file.path.split('.').last;
-      final uploadName = 'chat_media/${widget.chatId}/${const Uuid().v4()}.$ext';
+      final uploadName = 'chat_media/$_chatId/${const Uuid().v4()}.$ext';
 
       await supabase.storage.from('chat_media').uploadBinary(
         uploadName,
@@ -382,7 +563,6 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
-    final settingsProvider = Provider.of<SettingsProvider>(context);
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -392,12 +572,12 @@ class _ChatScreenState extends State<ChatScreen> {
           children: [
             CircleAvatar(
               radius: 20,
-              backgroundImage: widget.chatAvatar != null
-                  ? NetworkImage(widget.chatAvatar!)
+              backgroundImage: _chatAvatar != null
+                  ? NetworkImage(_chatAvatar!)
                   : null,
-              child: widget.chatAvatar == null
+              child: _chatAvatar == null
                   ? Icon(
-                      widget.isGroup == true ? Icons.group : Icons.person,
+                      _isGroup ? Icons.group : Icons.person,
                       size: 20,
                     )
                   : null,
@@ -408,7 +588,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    widget.chatName ?? 'Chat',
+                    _chatName ?? 'Chat',
                     style: const TextStyle(fontSize: 16),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -484,11 +664,14 @@ class _ChatScreenState extends State<ChatScreen> {
                           final showAvatar = !isMe && (index == 0 || 
                               _messages[index - 1]['sender_id'] != message['sender_id']);
 
-                          return _buildMessageBubble(
-                            context,
-                            message: message,
-                            isMe: isMe,
-                            showAvatar: showAvatar,
+                          return GestureDetector(
+                            onLongPress: () => _showMessageOptions(message, isMe),
+                            child: _buildMessageBubble(
+                              context,
+                              message: message,
+                              isMe: isMe,
+                              showAvatar: showAvatar,
+                            ),
                           );
                         },
                       ),
@@ -628,7 +811,12 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
 
                   IconButton(
-                    icon: const Icon(Icons.send, color: Colors.white),
+                    icon: Icon(
+                      Icons.send,
+                      color: _messageController.text.trim().isEmpty
+                          ? Colors.grey
+                          : Theme.of(context).primaryColor,
+                    ),
                     onPressed: _messageController.text.trim().isEmpty
                         ? null
                         : _sendTextMessage,
@@ -653,6 +841,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final mediaUrl = message['media_url'];
     final createdAt = DateTime.parse(message['created_at']);
     final user = message['users'];
+    final isEdited = message['is_edited'] == true;
 
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -777,6 +966,19 @@ class _ChatScreenState extends State<ChatScreen> {
                                 : Colors.grey,
                           ),
                         ),
+                        if (isEdited) ...[
+                          const SizedBox(width: 4),
+                          Text(
+                            'edited',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: isMe
+                                  ? Colors.white.withOpacity(0.5)
+                                  : Colors.grey.withOpacity(0.7),
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        ],
                         if (isMe) ...[
                           const SizedBox(width: 4),
                           Icon(
