@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:local_auth/local_auth.dart';
+import 'package:local_auth_android/local_auth_android.dart';
+import 'package:local_auth_ios/local_auth_ios.dart';
 import '../../providers/settings_provider.dart';
 
 class SecurityScreen extends StatefulWidget {
@@ -13,6 +16,8 @@ class SecurityScreen extends StatefulWidget {
 class _SecurityScreenState extends State<SecurityScreen> {
   final LocalAuthentication _localAuth = LocalAuthentication();
   bool _canCheckBiometrics = false;
+  bool _isBiometricAvailable = false;
+  List<BiometricType> _availableBiometrics = [];
   final _passcodeController = TextEditingController();
   final _confirmPasscodeController = TextEditingController();
 
@@ -23,10 +28,30 @@ class _SecurityScreenState extends State<SecurityScreen> {
   }
 
   Future<void> _checkBiometrics() async {
-    bool canCheck = await _localAuth.canCheckBiometrics;
-    setState(() {
-      _canCheckBiometrics = canCheck;
-    });
+    try {
+      bool canCheck = await _localAuth.canCheckBiometrics;
+      List<BiometricType> availableBiometrics = [];
+      
+      if (canCheck) {
+        availableBiometrics = await _localAuth.getAvailableBiometrics();
+      }
+
+      if (mounted) {
+        setState(() {
+          _canCheckBiometrics = canCheck;
+          _isBiometricAvailable = availableBiometrics.isNotEmpty;
+          _availableBiometrics = availableBiometrics;
+        });
+      }
+    } on PlatformException catch (e) {
+      debugPrint('Biometric check error: $e');
+      if (mounted) {
+        setState(() {
+          _canCheckBiometrics = false;
+          _isBiometricAvailable = false;
+        });
+      }
+    }
   }
 
   @override
@@ -37,20 +62,80 @@ class _SecurityScreenState extends State<SecurityScreen> {
   }
 
   Future<void> _toggleBiometric(bool value) async {
+    final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+
     if (value) {
+      if (!_isBiometricAvailable) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No biometric credentials are enrolled on this device. Please set up fingerprint or face ID in your device settings first.'),
+              duration: Duration(seconds: 4),
+            ),
+          );
+        }
+        return;
+      }
+
       try {
         bool didAuthenticate = await _localAuth.authenticate(
           localizedReason: 'Authenticate to enable biometric lock',
+          authMessages: const [
+            AndroidAuthMessages(
+              signInTitle: 'Biometric Authentication',
+              cancelButton: 'Cancel',
+              biometricHint: 'Verify your identity',
+              biometricNotRecognized: 'Not recognized, try again',
+              biometricRequiredTitle: 'Biometric authentication required',
+              biometricSuccess: 'Authentication successful',
+              deviceCredentialsRequiredTitle: 'Device credentials required',
+              deviceCredentialsSetupDescription: 'Please set up device credentials',
+              goToSettingsButton: 'Go to Settings',
+              goToSettingsDescription: 'Please set up biometric authentication in your device settings',
+            ),
+            IOSAuthMessages(
+              cancelButton: 'Cancel',
+              goToSettingsButton: 'Go to Settings',
+              goToSettingsDescription: 'Please set up biometric authentication in your device settings',
+              lockOut: 'Please re-enable biometric authentication',
+            ),
+          ],
           options: const AuthenticationOptions(
-            biometricOnly: true,
+            biometricOnly: false,
             stickyAuth: true,
+            sensitiveTransaction: true,
+            useErrorDialogs: true,
           ),
         );
+
         if (didAuthenticate) {
-          await Provider.of<SettingsProvider>(context, listen: false)
-              .setBiometricLock(true);
+          await settingsProvider.setBiometricLock(true);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Biometric lock enabled')),
+            );
+          }
+        }
+      } on PlatformException catch (e) {
+        debugPrint('Biometric auth error: $e');
+        if (mounted) {
+          String message = 'Biometric authentication failed';
+          if (e.code == 'NotAvailable') {
+            message = 'Biometric authentication is not available on this device';
+          } else if (e.code == 'NotEnrolled') {
+            message = 'No biometric credentials are enrolled. Please set up fingerprint or face ID in your device settings.';
+          } else if (e.code == 'PasscodeNotSet') {
+            message = 'Please set a device passcode first';
+          } else if (e.code == 'no_fragment_activity') {
+            message = 'App configuration issue. Please update the app.';
+          }
+          
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(message)),
+          );
         }
       } catch (e) {
+        debugPrint('Unexpected biometric error: $e');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Biometric error: $e')),
@@ -58,8 +143,12 @@ class _SecurityScreenState extends State<SecurityScreen> {
         }
       }
     } else {
-      await Provider.of<SettingsProvider>(context, listen: false)
-          .setBiometricLock(false);
+      await settingsProvider.setBiometricLock(false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Biometric lock disabled')),
+        );
+      }
     }
   }
 
@@ -188,9 +277,45 @@ class _SecurityScreenState extends State<SecurityScreen> {
               context,
               icon: Icons.fingerprint,
               title: 'Biometric Lock',
-              subtitle: 'Use fingerprint or face ID',
+              subtitle: _isBiometricAvailable
+                  ? 'Use fingerprint or face ID'
+                  : 'No biometric credentials enrolled',
               value: settingsProvider.biometricLock,
-              onChanged: _toggleBiometric,
+              onChanged: _isBiometricAvailable ? _toggleBiometric : null,
+            ),
+
+          if (!_canCheckBiometrics)
+            Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Theme.of(context).cardColor,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.fingerprint, color: Colors.grey.withOpacity(0.5)),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Biometric Lock',
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                        Text(
+                          'Not available on this device',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.withOpacity(0.7),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
 
           const SizedBox(height: 24),
@@ -257,7 +382,7 @@ class _SecurityScreenState extends State<SecurityScreen> {
     required String title,
     required String subtitle,
     required bool value,
-    required Function(bool) onChanged,
+    Function(bool)? onChanged,
   }) {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
