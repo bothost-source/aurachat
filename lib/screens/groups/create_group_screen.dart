@@ -41,26 +41,41 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
 
       try {
         final supabase = Supabase.instance.client;
+        final authProvider = Provider.of<AuthProvider>(context, listen: false);
+        final userId = authProvider.user?.id;
+
+        if (userId == null) throw Exception('Not authenticated');
+
         final fileBytes = await pickedFile.readAsBytes();
-        final fileName = 'groups/${const Uuid().v4()}.jpg';
+        final fileName = 'groups/$userId/${const Uuid().v4()}.jpg';
 
-        await supabase.storage.from('groups').uploadBinary(
-          fileName,
-          fileBytes,
-          fileOptions: const FileOptions(contentType: 'image/jpeg'),
-        );
+        try {
+          await supabase.storage.from('groups').uploadBinary(
+            fileName,
+            fileBytes,
+            fileOptions: const FileOptions(contentType: 'image/jpeg'),
+          );
 
-        final url = supabase.storage.from('groups').getPublicUrl(fileName);
+          final url = supabase.storage.from('groups').getPublicUrl(fileName);
+          setState(() => _groupPhotoUrl = url);
+        } catch (storageError) {
+          debugPrint('Storage upload failed: $storageError');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Photo upload failed. Group will be created without photo.'),
+                duration: Duration(seconds: 2),
+              ),
+            );
+          }
+        }
 
-        setState(() {
-          _groupPhotoUrl = url;
-          _isLoading = false;
-        });
+        setState(() => _isLoading = false);
       } catch (e) {
         setState(() => _isLoading = false);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error uploading photo: $e')),
+            SnackBar(content: Text('Error: $e')),
           );
         }
       }
@@ -75,15 +90,20 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
 
     try {
       final supabase = Supabase.instance.client;
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final currentUserId = authProvider.user?.id;
+
       final response = await supabase
           .from('users')
           .select('id, username, avatar_url, phone')
           .ilike('username', '%$query%')
           .limit(20);
 
-      setState(() {
-        _searchResults = List<Map<String, dynamic>>.from(response);
-      });
+      final filtered = List<Map<String, dynamic>>.from(response)
+          .where((u) => u['id'] != currentUserId)
+          .toList();
+
+      setState(() => _searchResults = filtered);
     } catch (e) {
       debugPrint('Search error: $e');
     }
@@ -108,13 +128,6 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
       return;
     }
 
-    if (_selectedMembers.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please add at least one member')),
-      );
-      return;
-    }
-
     setState(() => _isLoading = true);
 
     try {
@@ -127,38 +140,38 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
         throw Exception('Not authenticated');
       }
 
-      // Create group/chat
       final groupId = const Uuid().v4();
+      final now = DateTime.now().toIso8601String();
 
       await supabase.from('chats').insert({
         'id': groupId,
         'name': _nameController.text.trim(),
-        'description': _descriptionController.text.trim(),
+        'description': _descriptionController.text.trim().isNotEmpty 
+            ? _descriptionController.text.trim() 
+            : null,
         'avatar_url': _groupPhotoUrl,
         'type': _isChannel ? 'channel' : 'group',
         'created_by': userId,
-        'created_at': DateTime.now().toIso8601String(),
+        'created_at': now,
+        'updated_at': now,
       });
 
-      // Add creator as admin
       await supabase.from('chat_participants').insert({
         'chat_id': groupId,
         'user_id': userId,
         'role': 'admin',
-        'joined_at': DateTime.now().toIso8601String(),
+        'joined_at': now,
       });
 
-      // Add selected members
       for (final member in _selectedMembers) {
         await supabase.from('chat_participants').insert({
           'chat_id': groupId,
           'user_id': member['id'],
           'role': 'member',
-          'joined_at': DateTime.now().toIso8601String(),
+          'joined_at': now,
         });
       }
 
-      // Refresh chat list
       await chatProvider.loadChats();
 
       setState(() => _isLoading = false);
@@ -208,7 +221,6 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
       ),
       body: Column(
         children: [
-          // Group Photo & Name
           Container(
             padding: const EdgeInsets.all(24),
             child: Column(
@@ -289,7 +301,6 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
             ),
           ),
 
-          // Selected Members
           if (_selectedMembers.isNotEmpty) ...[
             Container(
               height: 100,
@@ -352,14 +363,13 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
             ),
           ],
 
-          // Search Users
           Padding(
             padding: const EdgeInsets.all(16),
             child: TextField(
               controller: _searchController,
               onChanged: _searchUsers,
               decoration: InputDecoration(
-                hintText: 'Search users to add...',
+                hintText: 'Search users to add... (optional)',
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon: _searchController.text.isNotEmpty
                     ? IconButton(
@@ -377,7 +387,6 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
             ),
           ),
 
-          // Search Results
           Expanded(
             child: _searchResults.isEmpty
                 ? Center(
@@ -391,7 +400,9 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          'Search for users to add',
+                          _searchController.text.isEmpty
+                              ? 'Search for users to add (optional)'
+                              : 'No users found',
                           style: TextStyle(color: Colors.grey.withOpacity(0.7)),
                         ),
                       ],
@@ -427,3 +438,4 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
     );
   }
 }
+
