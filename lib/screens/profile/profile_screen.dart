@@ -25,6 +25,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _loadUserData();
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final authProvider = Provider.of<AuthProvider>(context);
+    if (!_isEditing && !_isLoading) {
+      _nameController.text = authProvider.userName ?? '';
+      _bioController.text = authProvider.userBio ?? '';
+      _phoneController.text = authProvider.phoneNumber ?? '';
+    }
+  }
+
   void _loadUserData() {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     _nameController.text = authProvider.userName ?? '';
@@ -54,7 +65,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
         if (userId == null) return;
 
-        // Upload to Supabase Storage
         final fileBytes = await pickedFile.readAsBytes();
         final fileName = 'avatars/$userId/${DateTime.now().millisecondsSinceEpoch}.jpg';
 
@@ -102,7 +112,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(success ? 'Profile updated' : 'Update failed'),
+          content: Text(success ? 'Profile updated' : 'Update failed: ${authProvider.error}'),
         ),
       );
     }
@@ -110,181 +120,184 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final authProvider = Provider.of<AuthProvider>(context);
-    final settingsProvider = Provider.of<SettingsProvider>(context);
+    return Consumer<AuthProvider>(
+      builder: (context, authProvider, child) {
+        final settingsProvider = Provider.of<SettingsProvider>(context);
 
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        title: const Text('Profile'),
-        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
-        elevation: 0,
-        actions: [
-          if (!_isEditing)
-            IconButton(
-              icon: const Icon(Icons.edit),
-              onPressed: () => setState(() => _isEditing = true),
-            )
-          else
-            IconButton(
-              icon: _isLoading 
-                ? const SizedBox(
-                    width: 20, 
-                    height: 20, 
-                    child: CircularProgressIndicator(strokeWidth: 2)
-                  )
-                : const Icon(Icons.check),
-              onPressed: _isLoading ? null : _saveProfile,
-            ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        child: Column(
-          children: [
-            // Profile Photo Section
-            Container(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                children: [
-                  Stack(
+        return Scaffold(
+          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+          appBar: AppBar(
+            title: const Text('Profile'),
+            backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
+            elevation: 0,
+            actions: [
+              if (!_isEditing)
+                IconButton(
+                  icon: const Icon(Icons.edit),
+                  onPressed: () => setState(() => _isEditing = true),
+                )
+              else
+                IconButton(
+                  icon: _isLoading 
+                    ? const SizedBox(
+                        width: 20, 
+                        height: 20, 
+                        child: CircularProgressIndicator(strokeWidth: 2)
+                      )
+                    : const Icon(Icons.check),
+                  onPressed: _isLoading ? null : _saveProfile,
+                ),
+            ],
+          ),
+          body: SingleChildScrollView(
+            child: Column(
+              children: [
+                // Profile Photo Section
+                Container(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
                     children: [
-                      GestureDetector(
-                        onTap: _isEditing ? _pickImage : null,
-                        child: CircleAvatar(
-                          radius: 60,
-                          backgroundColor: Theme.of(context).primaryColor.withOpacity(0.2),
-                          backgroundImage: authProvider.userPhotoUrl != null
-                              ? NetworkImage(authProvider.userPhotoUrl!)
-                              : null,
-                          child: authProvider.userPhotoUrl == null
-                              ? Icon(
-                                  Icons.person,
-                                  size: 60,
-                                  color: Theme.of(context).primaryColor,
-                                )
-                              : null,
-                        ),
-                      ),
-                      if (_isEditing)
-                        Positioned(
-                          bottom: 0,
-                          right: 0,
-                          child: Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: Theme.of(context).primaryColor,
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(
-                              Icons.camera_alt,
-                              color: Colors.white,
-                              size: 20,
+                      Stack(
+                        children: [
+                          GestureDetector(
+                            onTap: _isEditing ? _pickImage : null,
+                            child: CircleAvatar(
+                              radius: 60,
+                              backgroundColor: Theme.of(context).primaryColor.withOpacity(0.2),
+                              backgroundImage: authProvider.userPhotoUrl != null && authProvider.userPhotoUrl!.isNotEmpty
+                                  ? NetworkImage(authProvider.userPhotoUrl!)
+                                  : null,
+                              child: authProvider.userPhotoUrl == null || authProvider.userPhotoUrl!.isEmpty
+                                  ? Icon(
+                                      Icons.person,
+                                      size: 60,
+                                      color: Theme.of(context).primaryColor,
+                                    )
+                                  : null,
                             ),
                           ),
+                          if (_isEditing)
+                            Positioned(
+                              bottom: 0,
+                              right: 0,
+                              child: Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: Theme.of(context).primaryColor,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.camera_alt,
+                                  color: Colors.white,
+                                  size: 20,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        authProvider.userName?.isNotEmpty == true ? authProvider.userName! : 'Your Name',
+                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
                         ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        authProvider.phoneNumber ?? '',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: Colors.grey,
+                        ),
+                      ),
                     ],
                   ),
-                  const SizedBox(height: 16),
-                  Text(
-                    authProvider.userName ?? 'Your Name',
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    authProvider.phoneNumber ?? '',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Colors.grey,
-                    ),
-                  ),
-                ],
-              ),
+                ),
+
+                // Info Cards
+                _buildInfoCard(
+                  context,
+                  icon: Icons.person_outline,
+                  title: 'Name',
+                  subtitle: authProvider.userName?.isNotEmpty == true ? authProvider.userName! : 'Not set',
+                  controller: _nameController,
+                  isEditing: _isEditing,
+                  hint: 'Enter your name',
+                ),
+
+                _buildInfoCard(
+                  context,
+                  icon: Icons.info_outline,
+                  title: 'Bio',
+                  subtitle: authProvider.userBio?.isNotEmpty == true ? authProvider.userBio! : 'No bio yet',
+                  controller: _bioController,
+                  isEditing: _isEditing,
+                  hint: 'Add a bio',
+                  maxLines: 3,
+                ),
+
+                _buildInfoCard(
+                  context,
+                  icon: Icons.phone,
+                  title: 'Phone',
+                  subtitle: authProvider.phoneNumber?.isNotEmpty == true ? authProvider.phoneNumber! : 'Not set',
+                  controller: _phoneController,
+                  isEditing: false,
+                  hint: '',
+                ),
+
+                const SizedBox(height: 24),
+
+                // Settings Section
+                _buildSectionHeader(context, 'Settings'),
+
+                ListTile(
+                  leading: const Icon(Icons.privacy_tip_outlined),
+                  title: const Text('Privacy'),
+                  subtitle: const Text('Control who can see your info'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.pushNamed(context, '/privacy_settings'),
+                ),
+
+                ListTile(
+                  leading: const Icon(Icons.security_outlined),
+                  title: const Text('Security'),
+                  subtitle: const Text('Passcode and biometric lock'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.pushNamed(context, '/security'),
+                ),
+
+                ListTile(
+                  leading: const Icon(Icons.notifications_outlined),
+                  title: const Text('Notifications'),
+                  subtitle: const Text('Message tones and alerts'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.pushNamed(context, '/notifications_settings'),
+                ),
+
+                const SizedBox(height: 24),
+
+                // Danger Zone
+                _buildSectionHeader(context, 'Danger Zone'),
+
+                ListTile(
+                  leading: const Icon(Icons.delete_outline, color: Colors.red),
+                  title: const Text('Delete Account', style: TextStyle(color: Colors.red)),
+                  subtitle: const Text('Permanently delete your account and data'),
+                  onTap: () => _showDeleteAccountDialog(context),
+                ),
+
+                ListTile(
+                  leading: const Icon(Icons.logout, color: Colors.red),
+                  title: const Text('Sign Out', style: TextStyle(color: Colors.red)),
+                  onTap: () => _showSignOutDialog(context),
+                ),
+
+                const SizedBox(height: 32),
+              ],
             ),
-
-            // Info Cards
-            _buildInfoCard(
-              context,
-              icon: Icons.person_outline,
-              title: 'Name',
-              subtitle: authProvider.userName ?? 'Not set',
-              controller: _nameController,
-              isEditing: _isEditing,
-              hint: 'Enter your name',
-            ),
-
-            _buildInfoCard(
-              context,
-              icon: Icons.info_outline,
-              title: 'Bio',
-              subtitle: authProvider.userBio ?? 'No bio yet',
-              controller: _bioController,
-              isEditing: _isEditing,
-              hint: 'Add a bio',
-              maxLines: 3,
-            ),
-
-            _buildInfoCard(
-              context,
-              icon: Icons.phone,
-              title: 'Phone',
-              subtitle: authProvider.phoneNumber ?? 'Not set',
-              controller: _phoneController,
-              isEditing: false, // Phone can't be edited
-              hint: '',
-            ),
-
-            const SizedBox(height: 24),
-
-            // Settings Section
-            _buildSectionHeader(context, 'Settings'),
-
-            ListTile(
-              leading: const Icon(Icons.privacy_tip_outlined),
-              title: const Text('Privacy'),
-              subtitle: const Text('Control who can see your info'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.pushNamed(context, '/privacy_settings'),
-            ),
-
-            ListTile(
-              leading: const Icon(Icons.security_outlined),
-              title: const Text('Security'),
-              subtitle: const Text('Passcode and biometric lock'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.pushNamed(context, '/security'),
-            ),
-
-            ListTile(
-              leading: const Icon(Icons.notifications_outlined),
-              title: const Text('Notifications'),
-              subtitle: const Text('Message tones and alerts'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.pushNamed(context, '/notifications_settings'),
-            ),
-
-            const SizedBox(height: 24),
-
-            // Danger Zone
-            _buildSectionHeader(context, 'Danger Zone'),
-
-            ListTile(
-              leading: const Icon(Icons.delete_outline, color: Colors.red),
-              title: const Text('Delete Account', style: TextStyle(color: Colors.red)),
-              subtitle: const Text('Permanently delete your account and data'),
-              onTap: () => _showDeleteAccountDialog(context),
-            ),
-
-            ListTile(
-              leading: const Icon(Icons.logout, color: Colors.red),
-              title: const Text('Sign Out', style: TextStyle(color: Colors.red)),
-              onTap: () => _showSignOutDialog(context),
-            ),
-
-            const SizedBox(height: 32),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 
