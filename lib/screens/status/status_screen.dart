@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/status_service.dart';
+import '../../services/app_localizations.dart';
 
 class StatusScreen extends StatefulWidget {
   const StatusScreen({super.key});
@@ -78,7 +79,7 @@ class _StatusScreenState extends State<StatusScreen> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1a103c),
-        title: const Text('Text Status', style: TextStyle(color: Colors.white)),
+        title: Text(AppLocalizations.get('text_status'), style: const TextStyle(color: Colors.white)),
         content: TextField(
           controller: controller,
           style: const TextStyle(color: Colors.white),
@@ -94,7 +95,7 @@ class _StatusScreenState extends State<StatusScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: TextStyle(color: Colors.white.withOpacity(0.6))),
+            child: Text(AppLocalizations.get('cancel'), style: TextStyle(color: Colors.white.withOpacity(0.6))),
           ),
           ElevatedButton(
             onPressed: () async {
@@ -113,7 +114,7 @@ class _StatusScreenState extends State<StatusScreen> {
               setState(() => _isLoading = false);
             },
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF8B5CF6)),
-            child: const Text('Post'),
+            child: Text(AppLocalizations.get('post') ?? 'Post'),
           ),
         ],
       ),
@@ -122,6 +123,9 @@ class _StatusScreenState extends State<StatusScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final authProvider = Provider.of<AuthProvider>(context);
+    final userId = authProvider.user?.id ?? authProvider.mockUserId;
+
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0F),
       body: SafeArea(
@@ -189,19 +193,22 @@ class _StatusScreenState extends State<StatusScreen> {
                         decoration: BoxDecoration(
                           color: const Color(0xFF8B5CF6),
                           shape: BoxShape.circle,
-                          border: Border.all(color: const Color(0xFF0A0A0F), width: 2),
+                          border: Border.all(
+                            color: const Color(0xFF0A0A0F),
+                            width: 2,
+                          ),
                         ),
                         child: const Icon(Icons.add, size: 14, color: Colors.white),
                       ),
                     ),
                   ],
                 ),
-                title: const Text(
-                  'My Status',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                title: Text(
+                  AppLocalizations.get('my_status'),
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
                 ),
                 subtitle: Text(
-                  'Tap to add status',
+                  AppLocalizations.get('tap_add_status'),
                   style: TextStyle(color: Colors.white.withOpacity(0.4)),
                 ),
                 onTap: () => _showAddStatusOptions(context),
@@ -216,7 +223,7 @@ class _StatusScreenState extends State<StatusScreen> {
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  'RECENT UPDATES',
+                  AppLocalizations.get('recent_updates'),
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
@@ -247,10 +254,18 @@ class _StatusScreenState extends State<StatusScreen> {
                               ),
                               const SizedBox(height: 16),
                               Text(
-                                'No status updates',
+                                AppLocalizations.get('no_status_updates'),
                                 style: TextStyle(
                                   color: Colors.white.withOpacity(0.3),
                                   fontSize: 16,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                AppLocalizations.get('tap_share_first_status'),
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.2),
+                                  fontSize: 13,
                                 ),
                               ),
                             ],
@@ -403,15 +418,14 @@ class _StatusScreenState extends State<StatusScreen> {
             const SizedBox(height: 20),
             _buildOptionTile(
               icon: Icons.camera_alt,
-              label: 'Camera',
+              label: AppLocalizations.get('camera'),
               onTap: () {
                 Navigator.pop(context);
-                // TODO: Open camera
               },
             ),
             _buildOptionTile(
               icon: Icons.photo_library,
-              label: 'Gallery',
+              label: AppLocalizations.get('gallery'),
               onTap: () {
                 Navigator.pop(context);
                 _pickImage();
@@ -419,7 +433,7 @@ class _StatusScreenState extends State<StatusScreen> {
             ),
             _buildOptionTile(
               icon: Icons.videocam,
-              label: 'Video',
+              label: AppLocalizations.get('video'),
               onTap: () {
                 Navigator.pop(context);
                 _pickVideo();
@@ -427,7 +441,7 @@ class _StatusScreenState extends State<StatusScreen> {
             ),
             _buildOptionTile(
               icon: Icons.text_fields,
-              label: 'Text Status',
+              label: AppLocalizations.get('text_status'),
               onTap: () {
                 Navigator.pop(context);
                 _addTextStatus();
