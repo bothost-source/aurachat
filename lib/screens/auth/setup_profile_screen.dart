@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../providers/auth_provider.dart';
+import '../../services/app_localizations.dart'; // ADD THIS
 
 class SetupProfileScreen extends StatefulWidget {
   const SetupProfileScreen({super.key});
@@ -44,11 +45,11 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
       return;
     }
     if (value.length < 3) {
-      setState(() => _usernameError = 'Username must be at least 3 characters');
+      setState(() => _usernameError = AppLocalizations.get('username_short'));
       return;
     }
     if (!RegExp(r'^[a-zA-Z0-9_]+$').hasMatch(value)) {
-      setState(() => _usernameError = 'Only letters, numbers, and underscores allowed');
+      setState(() => _usernameError = AppLocalizations.get('username_invalid'));
       return;
     }
     setState(() => _usernameError = null);
@@ -96,9 +97,9 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
               ),
             ),
             const SizedBox(height: 20),
-            const Text(
-              'Profile Photo',
-              style: TextStyle(
+            Text(
+              AppLocalizations.get('tap_add_photo'),
+              style: const TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.w600,
                 color: Colors.white,
@@ -107,7 +108,7 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
             const SizedBox(height: 20),
             _buildOptionTile(
               icon: Icons.camera_alt,
-              label: 'Camera',
+              label: AppLocalizations.get('camera'),
               onTap: () {
                 Navigator.pop(context);
                 _pickImage(ImageSource.camera);
@@ -116,7 +117,7 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
             const SizedBox(height: 8),
             _buildOptionTile(
               icon: Icons.photo_library,
-              label: 'Gallery',
+              label: AppLocalizations.get('gallery'),
               onTap: () {
                 Navigator.pop(context);
                 _pickImage(ImageSource.gallery);
@@ -201,11 +202,11 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
 
   void _completeSetup() async {
     if (_nameController.text.trim().isEmpty) {
-      _showError('Please enter your display name');
+      _showError(AppLocalizations.get('please_enter_name'));
       return;
     }
     if (_usernameError != null || _usernameController.text.trim().isEmpty) {
-      _showError('Please enter a valid username');
+      _showError(AppLocalizations.get('please_enter_username'));
       return;
     }
 
@@ -213,7 +214,6 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
 
     try {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
-
       final userId = authProvider.user?.id ?? authProvider.mockUserId;
 
       if (userId == null) {
@@ -225,7 +225,7 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
       if (taken) {
         setState(() {
           _isLoading = false;
-          _usernameError = 'Username is already taken';
+          _usernameError = AppLocalizations.get('username_taken');
         });
         return;
       }
@@ -304,9 +304,9 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
                     shaderCallback: (bounds) => const LinearGradient(
                       colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
                     ).createShader(bounds),
-                    child: const Text(
-                      'Set up your profile',
-                      style: TextStyle(
+                    child: Text(
+                      AppLocalizations.get('setup_profile'),
+                      style: const TextStyle(
                         fontSize: 32,
                         fontWeight: FontWeight.w900,
                         color: Colors.white,
@@ -315,7 +315,7 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Choose how others will see you on AURA. You can always change this later.',
+                    AppLocalizations.get('setup_description'),
                     style: TextStyle(
                       fontSize: 15,
                       color: Colors.white.withOpacity(0.5),
@@ -367,7 +367,7 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
                   const SizedBox(height: 8),
                   Center(
                     child: Text(
-                      'Tap to add photo',
+                      AppLocalizations.get('tap_add_photo'),
                       style: TextStyle(
                         fontSize: 12,
                         color: Colors.white.withOpacity(0.4),
@@ -377,15 +377,15 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
 
                   const SizedBox(height: 40),
                   _buildGlassInput(
-                    label: 'Display Name',
-                    hint: 'How you want to be known',
+                    label: AppLocalizations.get('display_name'),
+                    hint: AppLocalizations.get('display_name_hint'),
                     icon: Icons.person_outline,
                     controller: _nameController,
                   ),
                   const SizedBox(height: 16),
                   _buildGlassInput(
-                    label: 'Username',
-                    hint: 'Your unique @username',
+                    label: AppLocalizations.get('username'),
+                    hint: AppLocalizations.get('username_hint'),
                     icon: Icons.alternate_email,
                     controller: _usernameController,
                     onChanged: _validateUsername,
@@ -400,8 +400,8 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
                   ),
                   const SizedBox(height: 16),
                   _buildGlassInput(
-                    label: 'Bio',
-                    hint: 'Tell people about yourself',
+                    label: AppLocalizations.get('bio'),
+                    hint: AppLocalizations.get('bio_hint'),
                     icon: Icons.edit_note,
                     controller: _bioController,
                     maxLines: 3,
@@ -437,9 +437,9 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
-                                'Verification',
-                                style: TextStyle(
+                              Text(
+                                AppLocalizations.get('verification'),
+                                style: const TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w600,
                                   color: Colors.white,
@@ -447,7 +447,7 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
                               ),
                               const SizedBox(height: 4),
                               Text(
-                                'Verified badges are available for public figures, brands, and businesses. Apply after setup for \$4.99.',
+                                AppLocalizations.get('verification_desc'),
                                 style: TextStyle(
                                   fontSize: 13,
                                   color: Colors.white.withOpacity(0.4),
@@ -498,9 +498,9 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
                                   color: Colors.white,
                                 ),
                               )
-                            : const Text(
-                                'Complete Setup',
-                                style: TextStyle(
+                            : Text(
+                                AppLocalizations.get('complete_setup'),
+                                style: const TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.w700,
                                   color: Colors.white,
