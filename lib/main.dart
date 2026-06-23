@@ -175,7 +175,7 @@ class _AuraChatAppState extends State<AuraChatApp>
               '/ai_chatbot': (context) => const AIChatbotScreen(),
               '/ai_studio': (context) => const AIStudioScreen(),
               '/channel': (context) => const ChannelScreen(),
-              '/calls': (context) => const CallsScreen(),
+              '/calls': (context) => const CallScreen(),
               '/global_search': (context) => const GlobalSearchScreen(),
               '/contacts': (context) => const ContactsScreen(),
               '/settings': (context) => const SettingsScreen(),
