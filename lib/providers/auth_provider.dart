@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/online_status_service.dart';
 
 class AuthProvider extends ChangeNotifier {
   final _supabase = Supabase.instance.client;
@@ -57,9 +58,10 @@ class AuthProvider extends ChangeNotifier {
           }
         }
         
-        if (_isAuthenticated) {
-          await _loadUserProfile();
-        }
+        iif (_isAuthenticated) {
+  await _loadUserProfile();
+  await OnlineStatusService.setOnline(); 
+}
       }
     } catch (e) {
       _error = 'Auth init failed: $e';
@@ -139,25 +141,27 @@ class AuthProvider extends ChangeNotifier {
   }
 
   /// Sign in with email and password
-  Future<bool> signInWithEmail(String email, String password) async {
-    _setLoading(true);
-    try {
-      final response = await _supabase.auth.signInWithPassword(
-        email: email,
-        password: password,
-      );
-      _user = response.user;
-      _isAuthenticated = true;
-      _email = email;
-      await _loadUserProfile();
-      _setLoading(false);
-      return true;
-    } catch (e) {
-      _error = e.toString();
-      _setLoading(false);
-      return false;
-    }
+Future<bool> signInWithEmail(String email, String password) async {
+  _setLoading(true);
+  try {
+    final response = await _supabase.auth.signInWithPassword(
+      email: email,
+      password: password,
+    );
+    _user = response.user;
+    _isAuthenticated = true;
+    _email = email;
+    await _loadUserProfile();
+    await OnlineStatusService.setOnline(); 
+    _setLoading(false);
+    return true;
+  } catch (e) {
+    _error = e.toString();
+    _setLoading(false);
+    return false;
   }
+}
+
 
   /// Phone OTP sign in
   Future<bool> signInWithOtp(String phone) async {
@@ -174,27 +178,28 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  /// Verify OTP and complete sign in
-  Future<bool> verifyOtp(String phone, String token) async {
-    _setLoading(true);
-    try {
-      final response = await _supabase.auth.verifyOTP(
-        phone: phone,
-        token: token,
-        type: OtpType.sms,
-      );
-      _user = response.user;
-      _isAuthenticated = response.user != null;
-      _phoneNumber = phone;
-      await _loadUserProfile();
-      _setLoading(false);
-      return response.user != null;
-    } catch (e) {
-      _error = e.toString();
-      _setLoading(false);
-      return false;
-    }
+/// Verify OTP and complete sign in
+Future<bool> verifyOtp(String phone, String token) async {
+  _setLoading(true);
+  try {
+    final response = await _supabase.auth.verifyOTP(
+      phone: phone,
+      token: token,
+      type: OtpType.sms,
+    );
+    _user = response.user;
+    _isAuthenticated = response.user != null;
+    _phoneNumber = phone;
+    await _loadUserProfile();
+    await OnlineStatusService.setOnline(); // ✅ ADD THIS
+    _setLoading(false);
+    return response.user != null;
+  } catch (e) {
+    _error = e.toString();
+    _setLoading(false);
+    return false;
   }
+}
 
   Future<bool> _loadUserProfile() async {
     if (_user == null) return false;
@@ -296,16 +301,17 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> signOut() async {
-    _setLoading(true);
-    try {
-      await _supabase.auth.signOut();
-      await _clearAuth();
-    } catch (e) {
-      _error = 'Sign out failed: $e';
-    } finally {
-      _setLoading(false);
-    }
+  _setLoading(true);
+  try {
+    await OnlineStatusService.setOffline(); // ✅ ADD THIS
+    await _supabase.auth.signOut();
+    await _clearAuth();
+  } catch (e) {
+    _error = 'Sign out failed: $e';
+  } finally {
+    _setLoading(false);
   }
+}
 
   Future<void> _clearAuth() async {
     final prefs = await SharedPreferences.getInstance();
