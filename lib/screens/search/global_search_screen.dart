@@ -617,7 +617,7 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
           return Padding(
             padding: const EdgeInsets.only(bottom: 16, left: 4),
             child: Text(
-              '\${_users.length} result\${_users.length != 1 ? 's' : ''}',
+              '${_users.length} result${_users.length != 1 ? 's' : ''}',
               style: TextStyle(
                 color: Colors.white.withOpacity(0.4),
                 fontSize: 13,
