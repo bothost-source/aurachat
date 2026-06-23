@@ -64,16 +64,24 @@ class _OtpScreenState extends State<OtpScreen> {
 
     setState(() => _isLoading = true);
     await Future.delayed(const Duration(seconds: 1));
-    setState(() => _isLoading = false);
 
     if (enteredOtp == widget.expectedOtp) {
-      // Set phone for mock user before navigating
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
+
+      // ✅ FIX: Set phone AND create mock user
       authProvider.setMockPhone(widget.cleanPhoneNumber);
+      await authProvider.createMockUser();  // <-- THIS WAS MISSING
 
       await OnlineStatusService.setOnline();
-      if (mounted) Navigator.pushReplacementNamed(context, '/setup_profile');
+
+      setState(() => _isLoading = false);
+
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/setup_profile');
+      }
     } else {
+      setState(() => _isLoading = false);
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -117,7 +125,6 @@ class _OtpScreenState extends State<OtpScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Back button
                 GestureDetector(
                   onTap: () => Navigator.pop(context),
                   child: Container(
@@ -138,7 +145,6 @@ class _OtpScreenState extends State<OtpScreen> {
                 ),
                 const SizedBox(height: 40),
 
-                // Title
                 ShaderMask(
                   shaderCallback: (bounds) => const LinearGradient(
                     colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
@@ -155,7 +161,6 @@ class _OtpScreenState extends State<OtpScreen> {
                 ),
                 const SizedBox(height: 12),
 
-                // Subtitle
                 RichText(
                   text: TextSpan(
                     style: TextStyle(
@@ -177,7 +182,6 @@ class _OtpScreenState extends State<OtpScreen> {
                 ),
                 const SizedBox(height: 48),
 
-                // OTP Fields with glassmorphism
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: List.generate(6, (index) {
@@ -236,7 +240,6 @@ class _OtpScreenState extends State<OtpScreen> {
                 ),
                 const SizedBox(height: 40),
 
-                // Resend timer
                 Center(
                   child: _resendTimer > 0
                       ? Container(
@@ -249,7 +252,7 @@ class _OtpScreenState extends State<OtpScreen> {
                             ),
                           ),
                           child: Text(
-                            'Resend code in \$_resendTimer seconds',
+                            'Resend code in $_resendTimer seconds',  // ✅ FIX: removed backslash
                             style: TextStyle(
                               fontSize: 14,
                               color: Colors.white.withOpacity(0.4),
@@ -280,7 +283,6 @@ class _OtpScreenState extends State<OtpScreen> {
                 ),
                 const Spacer(),
 
-                // Verify button
                 SizedBox(
                   width: double.infinity,
                   height: 56,
