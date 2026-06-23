@@ -29,6 +29,12 @@ class AuthProvider extends ChangeNotifier {
   String? get userBio => _userBio;
   String? get userPhotoUrl => _userPhotoUrl;
   String? get mockUserId => _mockUserId;
+  
+  // ADDED: Setter for mockUserId
+  set mockUserId(String? value) {
+    _mockUserId = value;
+    notifyListeners();
+  }
 
   AuthProvider() {
     _initAuth();
@@ -242,6 +248,15 @@ class AuthProvider extends ChangeNotifier {
 
   void setMockPhone(String phone) {
     _phoneNumber = phone;
+    notifyListeners();
+  }
+
+  // ADDED: Create mock user for local OTP flow
+  Future<void> createMockUser() async {
+    final prefs = await SharedPreferences.getInstance();
+    _mockUserId = 'mock_${DateTime.now().millisecondsSinceEpoch}';
+    _isAuthenticated = true;
+    await prefs.setString('mock_user_id', _mockUserId!);
     notifyListeners();
   }
 
