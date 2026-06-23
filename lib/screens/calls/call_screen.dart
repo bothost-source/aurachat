@@ -38,7 +38,7 @@ class _CallScreenState extends State<CallScreen> {
   @override
   void dispose() {
     _client.engine.leaveChannel();
-    _client.engine.destroy();
+    _client.engine.release();
     super.dispose();
   }
 
