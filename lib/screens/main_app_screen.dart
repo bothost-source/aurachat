@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/chat_provider.dart';
 import '../../screens/status/status_screen.dart';
+import '../../screens/calls/call_screen.dart';
+import '../../services/call_service.dart';
 
 class MainAppScreen extends StatefulWidget {
   const MainAppScreen({super.key});
@@ -504,6 +506,8 @@ class _MainAppScreenState extends State<MainAppScreen>
   }
 
   void _showNewCallOptions(BuildContext context) {
+    final channelName = CallService.generateChannelName();
+    
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF1a103c),
@@ -524,12 +528,51 @@ class _MainAppScreenState extends State<MainAppScreen>
               ),
             ),
             const SizedBox(height: 20),
+            
+            // Share channel info
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.05),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white.withOpacity(0.08)),
+              ),
+              child: Column(
+                children: [
+                  Text(
+                    'Share this code with the person you want to call:',
+                    style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 13),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  SelectableText(
+                    channelName,
+                    style: const TextStyle(
+                      color: Color(0xFF8B5CF6),
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 2,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            
+            const SizedBox(height: 20),
             _buildOptionTile(
-              icon: Icons.person,
-              label: 'New Call',
+              icon: Icons.phone,
+              label: 'Voice Call',
               onTap: () {
                 Navigator.pop(context);
-                Navigator.pushNamed(context, '/contacts');
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => CallScreen(
+                      channelName: channelName,
+                      isVideoCall: false,
+                    ),
+                  ),
+                );
               },
             ),
             _buildOptionTile(
@@ -537,7 +580,15 @@ class _MainAppScreenState extends State<MainAppScreen>
               label: 'Video Call',
               onTap: () {
                 Navigator.pop(context);
-                // TODO: Video call
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => CallScreen(
+                      channelName: channelName,
+                      isVideoCall: true,
+                    ),
+                  ),
+                );
               },
             ),
           ],
