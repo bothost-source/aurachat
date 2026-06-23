@@ -50,9 +50,9 @@ import 'services/connectivity.dart';
 import 'services/online_status_service.dart'; // ✅ ADD THIS
 
 const String _supabaseUrl = String.fromEnvironment('SUPABASE_URL', 
-    defaultValue: 'https://eocvhkbjjqeinycdgshj.supabase.co');
+    defaultValue: 'https://ziesdpcajbzsffemgfiw.supabase.co');
 const String _supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY',
-    defaultValue: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVvY3Zoa2JqanFlaW55Y2Rnc2hqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAzNDMxODEsImV4cCI6MjA5NTkxOTE4MX0.Eqd4jqB7BpROM7LyXX4GoW0UBWkltKXuf1XrT0CwQQQ');
+    defaultValue: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InppZXNkcGNhamJ6c2ZmZW1nZml3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIxNjExNzAsImV4cCI6MjA5NzczNzE3MH0.TYexcUcB5N7z5tmSton2Hzdr0nuv8Nxc3Jf_O7akDd4');
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
