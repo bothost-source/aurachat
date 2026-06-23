@@ -146,11 +146,17 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       final currentUserId = authProvider.user?.id;
 
+      // FIXED: Removed backslash before $, added error logging
+      final searchTerm = '%${query.trim()}%';
+      debugPrint('Searching for: $searchTerm');
+
       final response = await supabase
           .from('users')
           .select('id, username, display_name, avatar_url, bio, phone, created_at')
-          .ilike('username', '%\${query.trim()}%')
+          .ilike('username', searchTerm)
           .limit(20);
+
+      debugPrint('Search response: $response');
 
       final filtered = List<Map<String, dynamic>>.from(response)
           .where((u) => u['id'] != currentUserId)
@@ -166,8 +172,9 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
 
       await _addRecentSearch(query);
     } catch (e) {
+      debugPrint('Search error: $e');
       setState(() {
-        _error = 'Search failed: \$e';
+        _error = 'Search failed: $e';
         _isLoading = false;
       });
     }
@@ -181,7 +188,6 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
 
     try {
       // Query presence table or use a custom online_status table
-      // Option 1: If you have an 'online_status' table
       final response = await supabase
           .from('online_status')
           .select('user_id, is_online')
@@ -203,7 +209,7 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
       }
     } catch (e) {
       // Fallback: assume all offline if table doesn't exist
-      debugPrint('Online status fetch error: \$e');
+      debugPrint('Online status fetch error: $e');
     }
   }
 
@@ -301,7 +307,7 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error starting chat: \$e')),
+          SnackBar(content: Text('Error starting chat: $e')),
         );
       }
     } finally {
@@ -922,7 +928,7 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        '@\$username',
+                        '@$username',
                         style: TextStyle(
                           color: const Color(0xFF8B5CF6).withOpacity(0.8),
                           fontSize: 12,
