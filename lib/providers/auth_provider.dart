@@ -26,6 +26,7 @@ class AuthProvider extends ChangeNotifier {
   String? get userName => _userName;
   String? get userBio => _userBio;
   String? get userPhotoUrl => _userPhotoUrl;
+  String? get mockUserId => _mockUserId;
 
   AuthProvider() {
     _initAuth();
