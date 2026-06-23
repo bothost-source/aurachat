@@ -121,6 +121,49 @@ class _StatusScreenState extends State<StatusScreen> {
     );
   }
 
+  void _showStatusMenu(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1a103c),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 20),
+            _buildOptionTile(
+              icon: Icons.settings,
+              label: AppLocalizations.get('settings') ?? 'Settings',
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.pushNamed(context, '/settings');
+              },
+            ),
+            _buildOptionTile(
+              icon: Icons.privacy_tip,
+              label: AppLocalizations.get('privacy') ?? 'Privacy',
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.pushNamed(context, '/privacy_settings');
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
@@ -153,11 +196,15 @@ class _StatusScreenState extends State<StatusScreen> {
                   const Spacer(),
                   IconButton(
                     icon: const Icon(Icons.search, color: Colors.white70),
-                    onPressed: () {},
+                    onPressed: () {
+                      Navigator.pushNamed(context, '/global_search');
+                    },
                   ),
                   IconButton(
                     icon: const Icon(Icons.more_vert, color: Colors.white70),
-                    onPressed: () {},
+                    onPressed: () {
+                      _showStatusMenu(context);
+                    },
                   ),
                 ],
               ),
