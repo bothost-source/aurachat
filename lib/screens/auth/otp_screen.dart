@@ -1,6 +1,8 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
+import '../../providers/auth_provider.dart';
 import '../../services/online_status_service.dart';
 
 class OtpScreen extends StatefulWidget {
@@ -65,6 +67,10 @@ class _OtpScreenState extends State<OtpScreen> {
     setState(() => _isLoading = false);
 
     if (enteredOtp == widget.expectedOtp) {
+      // Set phone for mock user before navigating
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      authProvider.setMockPhone(widget.cleanPhoneNumber);
+
       await OnlineStatusService.setOnline();
       if (mounted) Navigator.pushReplacementNamed(context, '/setup_profile');
     } else {
@@ -243,7 +249,7 @@ class _OtpScreenState extends State<OtpScreen> {
                             ),
                           ),
                           child: Text(
-                            'Resend code in $_resendTimer seconds',
+                            'Resend code in \$_resendTimer seconds',
                             style: TextStyle(
                               fontSize: 14,
                               color: Colors.white.withOpacity(0.4),
