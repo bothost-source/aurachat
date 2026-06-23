@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/chat_provider.dart';
+import '../../screens/status/status_screen.dart';
 
 class MainAppScreen extends StatefulWidget {
   const MainAppScreen({super.key});
@@ -128,28 +129,84 @@ class _MainAppScreenState extends State<MainAppScreen>
           ],
         ),
       ),
-      floatingActionButton: Container(
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
-          ),
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFF8B5CF6).withOpacity(0.4),
-              blurRadius: 20,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
-        child: FloatingActionButton(
-          onPressed: () => _showNewChatOptions(context),
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          child: const Icon(Icons.chat_bubble, color: Colors.white),
-        ),
-      ),
+      floatingActionButton: _buildFAB(),
     );
+  }
+
+  Widget? _buildFAB() {
+    switch (_currentIndex) {
+      case 0: // CHATS
+        return Container(
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
+            ),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF8B5CF6).withOpacity(0.4),
+                blurRadius: 20,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: FloatingActionButton(
+            onPressed: () => _showNewChatOptions(context),
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            child: const Icon(Icons.chat_bubble, color: Colors.white),
+          ),
+        );
+      
+      case 1: // STATUS
+        return Container(
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
+            ),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF8B5CF6).withOpacity(0.4),
+                blurRadius: 20,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: FloatingActionButton(
+            onPressed: () => _showAddStatusOptions(context),
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            child: const Icon(Icons.camera_alt, color: Colors.white),
+          ),
+        );
+      
+      case 2: // CALLS
+        return Container(
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
+            ),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF8B5CF6).withOpacity(0.4),
+                blurRadius: 20,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: FloatingActionButton(
+            onPressed: () => _showNewCallOptions(context),
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            child: const Icon(Icons.add_call, color: Colors.white),
+          ),
+        );
+      
+      default:
+        return null;
+    }
   }
 
   Widget _buildChatsTab() {
@@ -318,26 +375,7 @@ class _MainAppScreenState extends State<MainAppScreen>
   }
 
   Widget _buildStatusTab() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.circle_outlined,
-            size: 80,
-            color: Colors.white.withOpacity(0.1),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Status updates',
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.3),
-              fontSize: 16,
-            ),
-          ),
-        ],
-      ),
-    );
+    return const StatusScreen();
   }
 
   Widget _buildCallsTab() {
@@ -406,6 +444,100 @@ class _MainAppScreenState extends State<MainAppScreen>
               onTap: () {
                 Navigator.pop(context);
                 Navigator.pushNamed(context, '/create_group');
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showAddStatusOptions(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1a103c),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 20),
+            _buildOptionTile(
+              icon: Icons.camera_alt,
+              label: 'Camera',
+              onTap: () {
+                Navigator.pop(context);
+                // TODO: Open camera
+              },
+            ),
+            _buildOptionTile(
+              icon: Icons.photo_library,
+              label: 'Gallery',
+              onTap: () {
+                Navigator.pop(context);
+                // TODO: Open gallery
+              },
+            ),
+            _buildOptionTile(
+              icon: Icons.text_fields,
+              label: 'Text Status',
+              onTap: () {
+                Navigator.pop(context);
+                // TODO: Text status
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showNewCallOptions(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1a103c),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 20),
+            _buildOptionTile(
+              icon: Icons.person,
+              label: 'New Call',
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.pushNamed(context, '/contacts');
+              },
+            ),
+            _buildOptionTile(
+              icon: Icons.videocam,
+              label: 'Video Call',
+              onTap: () {
+                Navigator.pop(context);
+                // TODO: Video call
               },
             ),
           ],
@@ -494,7 +626,6 @@ class _MainAppScreenState extends State<MainAppScreen>
   }
 
   String _formatTime(dynamic time) {
-    // Simple time formatting - customize as needed
     return 'Now';
   }
 }
