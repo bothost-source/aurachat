@@ -546,14 +546,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   iconColor: const Color(0xFF8B5CF6),
                   title: AppLocalizations.get('account'),
                   subtitle: AppLocalizations.get('security_change_number'),
-                  onTap: () {},
+                  onTap: () => Navigator.pushNamed(context, '/account_settings'),
                 ),
                 _buildSettingTile(
                   icon: Icons.lock_outline,
                   iconColor: const Color(0xFF06B6D4),
                   title: AppLocalizations.get('privacy'),
                   subtitle: AppLocalizations.get('block_contacts'),
-                  onTap: () {},
+                  onTap: () => Navigator.pushNamed(context, '/privacy_settings'),
                 ),
                 _buildSettingTile(
                   icon: Icons.face,
@@ -569,21 +569,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   iconColor: const Color(0xFF8B5CF6),
                   title: AppLocalizations.get('chats'),
                   subtitle: AppLocalizations.get('theme_wallpapers'),
-                  onTap: () {},
+                  onTap: () => Navigator.pushNamed(context, '/settings'), // or create a dedicated chats settings route
                 ),
                 _buildSettingTile(
                   icon: Icons.notifications_none,
                   iconColor: const Color(0xFF06B6D4),
                   title: AppLocalizations.get('notifications'),
                   subtitle: AppLocalizations.get('message_group_call_tones'),
-                  onTap: () {},
+                  onTap: () => Navigator.pushNamed(context, '/notifications_settings'),
                 ),
                 _buildSettingTile(
                   icon: Icons.storage,
                   iconColor: const Color(0xFFF59E0B),
                   title: AppLocalizations.get('storage_and_data'),
                   subtitle: AppLocalizations.get('network_usage'),
-                  onTap: () {},
+                  onTap: () => Navigator.pushNamed(context, '/data_storage'),
                 ),
                 _buildSettingTile(
                   icon: Icons.language,
@@ -599,7 +599,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   iconColor: const Color(0xFF8B5CF6),
                   title: AppLocalizations.get('help'),
                   subtitle: AppLocalizations.get('help_center'),
-                  onTap: () {},
+                  onTap: () => Navigator.pushNamed(context, '/help'),
                 ),
 
                 const SizedBox(height: 16),
@@ -607,7 +607,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   icon: Icons.people_outline,
                   iconColor: const Color(0xFF06B6D4),
                   title: AppLocalizations.get('invite_friends'),
-                  onTap: () {},
+                  onTap: () => Navigator.pushNamed(context, '/invite_friends'),
                 ),
 
                 const SizedBox(height: 32),
