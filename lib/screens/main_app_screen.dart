@@ -5,6 +5,7 @@ import '../../providers/chat_provider.dart';
 import '../../screens/status/status_screen.dart';
 import '../../screens/calls/call_screen.dart';
 import '../../services/call_service.dart';
+import '../../services/app_localizations.dart';
 
 class MainAppScreen extends StatefulWidget {
   const MainAppScreen({super.key});
@@ -26,7 +27,6 @@ class _MainAppScreenState extends State<MainAppScreen>
       setState(() => _currentIndex = _tabController.index);
     });
     
-    // Load chats
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Provider.of<ChatProvider>(context, listen: false).loadChats();
     });
@@ -113,10 +113,10 @@ class _MainAppScreenState extends State<MainAppScreen>
                   fontWeight: FontWeight.w400,
                   fontSize: 14,
                 ),
-                tabs: const [
-                  Tab(text: 'CHATS'),
-                  Tab(text: 'STATUS'),
-                  Tab(text: 'CALLS'),
+                tabs: [
+                  Tab(text: AppLocalizations.get('chats')),
+                  Tab(text: AppLocalizations.get('status')),
+                  Tab(text: AppLocalizations.get('calls')),
                 ],
               ),
             ),
@@ -137,7 +137,7 @@ class _MainAppScreenState extends State<MainAppScreen>
 
   Widget? _buildFAB() {
     switch (_currentIndex) {
-      case 0: // CHATS
+      case 0:
         return Container(
           decoration: BoxDecoration(
             gradient: const LinearGradient(
@@ -160,7 +160,7 @@ class _MainAppScreenState extends State<MainAppScreen>
           ),
         );
       
-      case 1: // STATUS
+      case 1:
         return Container(
           decoration: BoxDecoration(
             gradient: const LinearGradient(
@@ -183,7 +183,7 @@ class _MainAppScreenState extends State<MainAppScreen>
           ),
         );
       
-      case 2: // CALLS
+      case 2:
         return Container(
           decoration: BoxDecoration(
             gradient: const LinearGradient(
@@ -234,7 +234,7 @@ class _MainAppScreenState extends State<MainAppScreen>
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  'No chats yet',
+                  AppLocalizations.get('no_chats'),
                   style: TextStyle(
                     color: Colors.white.withOpacity(0.3),
                     fontSize: 16,
@@ -242,7 +242,7 @@ class _MainAppScreenState extends State<MainAppScreen>
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Start a new conversation!',
+                  AppLocalizations.get('start_conversation'),
                   style: TextStyle(
                     color: Colors.white.withOpacity(0.2),
                     fontSize: 13,
@@ -392,7 +392,7 @@ class _MainAppScreenState extends State<MainAppScreen>
           ),
           const SizedBox(height: 16),
           Text(
-            'Call history',
+            AppLocalizations.get('call_history'),
             style: TextStyle(
               color: Colors.white.withOpacity(0.3),
               fontSize: 16,
@@ -426,7 +426,7 @@ class _MainAppScreenState extends State<MainAppScreen>
             const SizedBox(height: 20),
             _buildOptionTile(
               icon: Icons.person_add,
-              label: 'New Chat',
+              label: AppLocalizations.get('new_chat'),
               onTap: () {
                 Navigator.pop(context);
                 Navigator.pushNamed(context, '/global_search');
@@ -434,7 +434,7 @@ class _MainAppScreenState extends State<MainAppScreen>
             ),
             _buildOptionTile(
               icon: Icons.group_add,
-              label: 'New Group',
+              label: AppLocalizations.get('new_group'),
               onTap: () {
                 Navigator.pop(context);
                 Navigator.pushNamed(context, '/create_group');
@@ -442,7 +442,7 @@ class _MainAppScreenState extends State<MainAppScreen>
             ),
             _buildOptionTile(
               icon: Icons.campaign,
-              label: 'New Channel',
+              label: AppLocalizations.get('new_channel'),
               onTap: () {
                 Navigator.pop(context);
                 Navigator.pushNamed(context, '/create_group');
@@ -477,26 +477,23 @@ class _MainAppScreenState extends State<MainAppScreen>
             const SizedBox(height: 20),
             _buildOptionTile(
               icon: Icons.camera_alt,
-              label: 'Camera',
+              label: AppLocalizations.get('camera'),
               onTap: () {
                 Navigator.pop(context);
-                // TODO: Open camera
               },
             ),
             _buildOptionTile(
               icon: Icons.photo_library,
-              label: 'Gallery',
+              label: AppLocalizations.get('gallery'),
               onTap: () {
                 Navigator.pop(context);
-                // TODO: Open gallery
               },
             ),
             _buildOptionTile(
               icon: Icons.text_fields,
-              label: 'Text Status',
+              label: AppLocalizations.get('text_status'),
               onTap: () {
                 Navigator.pop(context);
-                // TODO: Text status
               },
             ),
           ],
@@ -529,7 +526,6 @@ class _MainAppScreenState extends State<MainAppScreen>
             ),
             const SizedBox(height: 20),
             
-            // Share channel info
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -540,7 +536,7 @@ class _MainAppScreenState extends State<MainAppScreen>
               child: Column(
                 children: [
                   Text(
-                    'Share this code with the person you want to call:',
+                    AppLocalizations.get('share_code'),
                     style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 13),
                     textAlign: TextAlign.center,
                   ),
@@ -561,7 +557,7 @@ class _MainAppScreenState extends State<MainAppScreen>
             const SizedBox(height: 20),
             _buildOptionTile(
               icon: Icons.phone,
-              label: 'Voice Call',
+              label: AppLocalizations.get('new_call'),
               onTap: () {
                 Navigator.pop(context);
                 Navigator.push(
@@ -577,7 +573,7 @@ class _MainAppScreenState extends State<MainAppScreen>
             ),
             _buildOptionTile(
               icon: Icons.videocam,
-              label: 'Video Call',
+              label: AppLocalizations.get('video_call'),
               onTap: () {
                 Navigator.pop(context);
                 Navigator.push(
@@ -620,7 +616,7 @@ class _MainAppScreenState extends State<MainAppScreen>
             const SizedBox(height: 20),
             _buildOptionTile(
               icon: Icons.settings,
-              label: 'Settings',
+              label: AppLocalizations.get('settings'),
               onTap: () {
                 Navigator.pop(context);
                 Navigator.pushNamed(context, '/settings');
@@ -628,7 +624,7 @@ class _MainAppScreenState extends State<MainAppScreen>
             ),
             _buildOptionTile(
               icon: Icons.person,
-              label: 'Profile',
+              label: AppLocalizations.get('profile'),
               onTap: () {
                 Navigator.pop(context);
                 Navigator.pushNamed(context, '/profile');
@@ -636,7 +632,7 @@ class _MainAppScreenState extends State<MainAppScreen>
             ),
             _buildOptionTile(
               icon: Icons.logout,
-              label: 'Sign Out',
+              label: AppLocalizations.get('sign_out'),
               color: Colors.red,
               onTap: () async {
                 Navigator.pop(context);
