@@ -185,7 +185,7 @@ class _SecurityScreenState extends State<SecurityScreen> {
                 fillColor: Colors.white.withOpacity(0.05),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: Border.none,
+                  borderSide: BorderSide.none,
                 ),
               ),
             ),
