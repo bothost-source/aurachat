@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/online_status_service.dart';
+import '../../services/app_localizations.dart'; // ADD THIS
 
 class OtpScreen extends StatefulWidget {
   final String phoneNumber;
@@ -64,28 +65,20 @@ class _OtpScreenState extends State<OtpScreen> {
 
     setState(() => _isLoading = true);
     await Future.delayed(const Duration(seconds: 1));
+    setState(() => _isLoading = false);
 
     if (enteredOtp == widget.expectedOtp) {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
-
-      // ✅ FIX: Set phone AND create mock user
       authProvider.setMockPhone(widget.cleanPhoneNumber);
-      await authProvider.createMockUser();  // <-- THIS WAS MISSING
+      await authProvider.createMockUser();
 
       await OnlineStatusService.setOnline();
-
-      setState(() => _isLoading = false);
-
-      if (mounted) {
-        Navigator.pushReplacementNamed(context, '/setup_profile');
-      }
+      if (mounted) Navigator.pushReplacementNamed(context, '/setup_profile');
     } else {
-      setState(() => _isLoading = false);
-
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('Invalid OTP. Please try again.'),
+            content: Text(AppLocalizations.get('invalid_otp')),
             backgroundColor: Colors.red.withOpacity(0.9),
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -149,9 +142,9 @@ class _OtpScreenState extends State<OtpScreen> {
                   shaderCallback: (bounds) => const LinearGradient(
                     colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
                   ).createShader(bounds),
-                  child: const Text(
-                    'Verify your number',
-                    style: TextStyle(
+                  child: Text(
+                    AppLocalizations.get('verify_number'),
+                    style: const TextStyle(
                       fontSize: 32,
                       fontWeight: FontWeight.w900,
                       color: Colors.white,
@@ -169,7 +162,7 @@ class _OtpScreenState extends State<OtpScreen> {
                       height: 1.5,
                     ),
                     children: [
-                      const TextSpan(text: 'Enter the 6-digit code sent to '),
+                      TextSpan(text: AppLocalizations.get('enter_code_sent_to') + ' '),
                       TextSpan(
                         text: widget.phoneNumber,
                         style: const TextStyle(
@@ -252,7 +245,7 @@ class _OtpScreenState extends State<OtpScreen> {
                             ),
                           ),
                           child: Text(
-                            'Resend code in $_resendTimer seconds',  // ✅ FIX: removed backslash
+                            '${AppLocalizations.get('resend_code_in')} $_resendTimer seconds',
                             style: TextStyle(
                               fontSize: 14,
                               color: Colors.white.withOpacity(0.4),
@@ -270,9 +263,9 @@ class _OtpScreenState extends State<OtpScreen> {
                                 color: const Color(0xFF8B5CF6).withOpacity(0.3),
                               ),
                             ),
-                            child: const Text(
-                              'Resend Code',
-                              style: TextStyle(
+                            child: Text(
+                              AppLocalizations.get('resend_code'),
+                              style: const TextStyle(
                                 color: Color(0xFF8B5CF6),
                                 fontWeight: FontWeight.w600,
                                 fontSize: 14,
@@ -318,9 +311,9 @@ class _OtpScreenState extends State<OtpScreen> {
                                 color: Colors.white,
                               ),
                             )
-                          : const Text(
-                              'Verify',
-                              style: TextStyle(
+                          : Text(
+                              AppLocalizations.get('verify'),
+                              style: const TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w700,
                                 color: Colors.white,
