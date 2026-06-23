@@ -105,7 +105,7 @@ class _LoginScreenState extends State<LoginScreen>
     final fullPhone = _phoneNumber!.completeNumber;
 
     await _saveRegisteredNumber(cleanNumber);
-    // await NotificationService.showOTP(otp, fullPhone);
+    await NotificationService.showOTP(otp, fullPhone);
 
     setState(() => _isLoading = false);
 
