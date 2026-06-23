@@ -30,18 +30,15 @@ class AuthProvider extends ChangeNotifier {
     _initAuth();
   }
 
-  /// Initialize auth state
   Future<void> _initAuth() async {
     _setLoading(true);
     try {
-      // Supabase automatically restores session from local storage
       final session = _supabase.auth.currentSession;
-      
+
       if (session != null) {
         _user = session.user;
         _isAuthenticated = true;
-        
-        // Try to refresh if expired
+
         if (session.isExpired) {
           try {
             final response = await _supabase.auth.refreshSession();
@@ -57,49 +54,47 @@ class AuthProvider extends ChangeNotifier {
             _user = null;
           }
         }
-        
-        iif (_isAuthenticated) {
-  await _loadUserProfile();
-  await OnlineStatusService.setOnline(); 
-}
+
+        if (_isAuthenticated) {
+          await _loadUserProfile();
+          await OnlineStatusService.setOnline();
+        }
       }
     } catch (e) {
-      _error = 'Auth init failed: $e';
-      debugPrint('Auth init error: $e');
+      _error = 'Auth init failed: \$e';
+      debugPrint('Auth init error: \$e');
     } finally {
       _setLoading(false);
     }
   }
 
-  /// Listen to auth changes (call this from main.dart or splash)
-void listenToAuthChanges() {
-  _supabase.auth.onAuthStateChange.listen((data) async {
-    final event = data.event;
-    final session = data.session;
+  void listenToAuthChanges() {
+    _supabase.auth.onAuthStateChange.listen((data) {
+      final event = data.event;
+      final session = data.session;
 
-    switch (event) {
-      case AuthChangeEvent.signedIn:
-      case AuthChangeEvent.tokenRefreshed:
-      case AuthChangeEvent.initialSession:
-        _user = session?.user;
-        _isAuthenticated = session != null;
-        if (_isAuthenticated) {
-          await _loadUserProfile();
-          await OnlineStatusService.setOnline();
-        }
-        break;
-      case AuthChangeEvent.signedOut:
-      case AuthChangeEvent.userDeleted:
-        await OnlineStatusService.setOffline();
-        await _clearAuth();
-        break;
-      default:
-        break;
-    }
-    notifyListeners();
-  });
-}
-    
+      switch (event) {
+        case AuthChangeEvent.signedIn:
+        case AuthChangeEvent.tokenRefreshed:
+        case AuthChangeEvent.initialSession:
+          _user = session?.user;
+          _isAuthenticated = session != null;
+          if (_isAuthenticated) {
+            _loadUserProfile();
+            OnlineStatusService.setOnline();
+          }
+          break;
+        case AuthChangeEvent.signedOut:
+        case AuthChangeEvent.userDeleted:
+          OnlineStatusService.setOffline();
+          _clearAuth();
+          break;
+        default:
+          break;
+      }
+      notifyListeners();
+    });
+  }
 
   Future<void> refreshSession() async {
     try {
@@ -124,7 +119,6 @@ void listenToAuthChanges() {
     notifyListeners();
   }
 
-  /// Sign up with email (for profile creation after OTP verification)
   Future<bool> signUpWithEmail(String email, String password, String phone) async {
     _setLoading(true);
     try {
@@ -145,30 +139,27 @@ void listenToAuthChanges() {
     }
   }
 
-  /// Sign in with email and password
-Future<bool> signInWithEmail(String email, String password) async {
-  _setLoading(true);
-  try {
-    final response = await _supabase.auth.signInWithPassword(
-      email: email,
-      password: password,
-    );
-    _user = response.user;
-    _isAuthenticated = true;
-    _email = email;
-    await _loadUserProfile();
-    await OnlineStatusService.setOnline(); 
-    _setLoading(false);
-    return true;
-  } catch (e) {
-    _error = e.toString();
-    _setLoading(false);
-    return false;
+  Future<bool> signInWithEmail(String email, String password) async {
+    _setLoading(true);
+    try {
+      final response = await _supabase.auth.signInWithPassword(
+        email: email,
+        password: password,
+      );
+      _user = response.user;
+      _isAuthenticated = true;
+      _email = email;
+      await _loadUserProfile();
+      await OnlineStatusService.setOnline();
+      _setLoading(false);
+      return true;
+    } catch (e) {
+      _error = e.toString();
+      _setLoading(false);
+      return false;
+    }
   }
-}
 
-
-  /// Phone OTP sign in
   Future<bool> signInWithOtp(String phone) async {
     _setLoading(true);
     try {
@@ -183,28 +174,27 @@ Future<bool> signInWithEmail(String email, String password) async {
     }
   }
 
-/// Verify OTP and complete sign in
-Future<bool> verifyOtp(String phone, String token) async {
-  _setLoading(true);
-  try {
-    final response = await _supabase.auth.verifyOTP(
-      phone: phone,
-      token: token,
-      type: OtpType.sms,
-    );
-    _user = response.user;
-    _isAuthenticated = response.user != null;
-    _phoneNumber = phone;
-    await _loadUserProfile();
-    await OnlineStatusService.setOnline(); // ✅ ADD THIS
-    _setLoading(false);
-    return response.user != null;
-  } catch (e) {
-    _error = e.toString();
-    _setLoading(false);
-    return false;
+  Future<bool> verifyOtp(String phone, String token) async {
+    _setLoading(true);
+    try {
+      final response = await _supabase.auth.verifyOTP(
+        phone: phone,
+        token: token,
+        type: OtpType.sms,
+      );
+      _user = response.user;
+      _isAuthenticated = response.user != null;
+      _phoneNumber = phone;
+      await _loadUserProfile();
+      await OnlineStatusService.setOnline();
+      _setLoading(false);
+      return response.user != null;
+    } catch (e) {
+      _error = e.toString();
+      _setLoading(false);
+      return false;
+    }
   }
-}
 
   Future<bool> _loadUserProfile() async {
     if (_user == null) return false;
@@ -226,7 +216,7 @@ Future<bool> verifyOtp(String phone, String token) async {
       }
       return false;
     } catch (e) {
-      debugPrint('Profile load error: $e');
+      debugPrint('Profile load error: \$e');
       return false;
     }
   }
@@ -263,8 +253,8 @@ Future<bool> verifyOtp(String phone, String token) async {
       _setLoading(false);
       return true;
     } catch (e) {
-      _error = 'Profile setup failed: $e';
-      debugPrint('Profile setup error: $e');
+      _error = 'Profile setup failed: \$e';
+      debugPrint('Profile setup error: \$e');
       _setLoading(false);
       return false;
     }
@@ -299,24 +289,24 @@ Future<bool> verifyOtp(String phone, String token) async {
       _setLoading(false);
       return true;
     } catch (e) {
-      _error = 'Update failed: $e';
+      _error = 'Update failed: \$e';
       _setLoading(false);
       return false;
     }
   }
 
   Future<void> signOut() async {
-  _setLoading(true);
-  try {
-    await OnlineStatusService.setOffline(); // ✅ ADD THIS
-    await _supabase.auth.signOut();
-    await _clearAuth();
-  } catch (e) {
-    _error = 'Sign out failed: $e';
-  } finally {
-    _setLoading(false);
+    _setLoading(true);
+    try {
+      await OnlineStatusService.setOffline();
+      await _supabase.auth.signOut();
+      await _clearAuth();
+    } catch (e) {
+      _error = 'Sign out failed: \$e';
+    } finally {
+      _setLoading(false);
+    }
   }
-}
 
   Future<void> _clearAuth() async {
     final prefs = await SharedPreferences.getInstance();
@@ -356,7 +346,7 @@ Future<bool> verifyOtp(String phone, String token) async {
       _setLoading(false);
       return true;
     } catch (e) {
-      _error = 'Account deletion failed: $e';
+      _error = 'Account deletion failed: \$e';
       _setLoading(false);
       return false;
     }
