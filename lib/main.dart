@@ -60,7 +60,8 @@ void main() async {
   await NotificationService.init();
 await NotificationService.requestPermission();  // ADD THIS LINE
 ConnectivityService().initialize();
-
+CallService.initialize('8a2cea909f994b0d9e61146e99710277');
+    
   try {
     await Supabase.initialize(
       url: _supabaseUrl,
