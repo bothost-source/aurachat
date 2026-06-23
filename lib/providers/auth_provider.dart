@@ -71,30 +71,36 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  /// Listen to auth changes (call this from main.dart or splash)
-  void listenToAuthChanges() {
-    _supabase.auth.onAuthStateChange.listen((data) {
-      final event = data.event;
-      final session = data.session;
+  // In listenToAuthChanges() — DON'T use await inside, it's not async
+void listenToAuthChanges() {
+  _supabase.auth.onAuthStateChange.listen((data) async {  // ✅ Make the callback async
+    final event = data.event;
+    final session = data.session;
 
-      switch (event) {
-        case AuthChangeEvent.signedIn:
-        case AuthChangeEvent.tokenRefreshed:
-        case AuthChangeEvent.initialSession:
-          _user = session?.user;
-          _isAuthenticated = session != null;
-          if (_isAuthenticated) _loadUserProfile();
-          break;
-        case AuthChangeEvent.signedOut:
-        case AuthChangeEvent.userDeleted:
-          _clearAuth();
-          break;
-        default:
-          break;
-      }
-      notifyListeners();
-    });
-  }
+    switch (event) {
+      case AuthChangeEvent.signedIn:
+      case AuthChangeEvent.tokenRefreshed:
+      case AuthChangeEvent.initialSession:
+        _user = session?.user;
+        _isAuthenticated = session != null;
+        if (_isAuthenticated) {
+          await _loadUserProfile();
+          await OnlineStatusService.setOnline(); // ✅ Now this works
+        }
+        break;
+      case AuthChangeEvent.signedOut:
+      case AuthChangeEvent.userDeleted:
+        await OnlineStatusService.setOffline(); // ✅ Add this too
+        _clearAuth();
+        break;
+      default:
+        break;
+    }
+    notifyListeners();
+  });
+}
+
+    
 
   Future<void> refreshSession() async {
     try {
