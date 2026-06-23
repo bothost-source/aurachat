@@ -69,7 +69,7 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error picking image: $e')),
+          SnackBar(content: Text('Error picking image: \$e')),
         );
       }
     }
@@ -169,7 +169,7 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
     try {
       final supabase = Supabase.instance.client;
       final fileBytes = await _profileImage!.readAsBytes();
-      final fileName = 'avatars/$userId/${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final fileName = 'avatars/\$userId/\${DateTime.now().millisecondsSinceEpoch}.jpg';
 
       await supabase.storage.from('profiles').uploadBinary(
         fileName,
@@ -179,7 +179,7 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
 
       return supabase.storage.from('profiles').getPublicUrl(fileName);
     } catch (e) {
-      debugPrint('Error uploading profile image: $e');
+      debugPrint('Error uploading profile image: \$e');
       return null;
     }
   }
@@ -194,7 +194,7 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
           .maybeSingle();
       return response != null;
     } catch (e) {
-      debugPrint('Username check error: $e');
+      debugPrint('Username check error: \$e');
       return false;
     }
   }
@@ -213,7 +213,9 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
 
     try {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      final userId = authProvider.user?.id;
+
+      // Use real user ID or mock user ID (both are real users in the database)
+      final userId = authProvider.user?.id ?? authProvider.mockUserId;
 
       if (userId == null) {
         throw Exception('Not authenticated. Please log in again.');
@@ -248,7 +250,7 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
       }
     } catch (e) {
       setState(() => _isLoading = false);
-      _showError('Error: $e');
+      _showError('Error: \$e');
     }
   }
 
