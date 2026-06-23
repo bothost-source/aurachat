@@ -48,6 +48,8 @@ import 'screens/archive/archived_chats_screen.dart';
 import 'services/notification_service.dart';
 import 'services/connectivity.dart';
 import 'services/online_status_service.dart'; // ✅ ADD THIS
+import 'package:agora_uikit/controllers/session_controller.dart'; // or correct import
+
 
 const String _supabaseUrl = String.fromEnvironment('SUPABASE_URL', 
     defaultValue: 'https://ziesdpcajbzsffemgfiw.supabase.co');
