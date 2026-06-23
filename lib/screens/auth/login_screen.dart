@@ -5,6 +5,7 @@ import 'package:intl_phone_field/intl_phone_field.dart';
 import 'package:intl_phone_field/phone_number.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'otp_screen.dart';
+import '../../services/notification_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
