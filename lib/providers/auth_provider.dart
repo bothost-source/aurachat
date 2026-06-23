@@ -15,6 +15,7 @@ class AuthProvider extends ChangeNotifier {
   String? _userName;
   String? _userBio;
   String? _userPhotoUrl;
+  String? _mockUserId;
 
   User? get user => _user;
   bool get isLoading => _isLoading;
@@ -58,6 +59,18 @@ class AuthProvider extends ChangeNotifier {
         if (_isAuthenticated) {
           await _loadUserProfile();
           await OnlineStatusService.setOnline();
+        }
+      } else {
+        // Check for mock user
+        final prefs = await SharedPreferences.getInstance();
+        _mockUserId = prefs.getString('mock_user_id');
+        if (_mockUserId != null) {
+          _isAuthenticated = true;
+          _phoneNumber = prefs.getString('mock_phone');
+          _userName = prefs.getString('mock_username');
+          _userBio = prefs.getString('mock_bio');
+          _userPhotoUrl = prefs.getString('mock_avatar');
+          await _loadUserProfile();
         }
       }
     } catch (e) {
@@ -197,12 +210,13 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<bool> _loadUserProfile() async {
-    if (_user == null) return false;
+    final userId = _user?.id ?? _mockUserId;
+    if (userId == null) return false;
     try {
       final response = await _supabase
           .from('users')
           .select()
-          .eq('id', _user!.id)
+          .eq('id', userId)
           .maybeSingle();
 
       if (response != null) {
@@ -221,6 +235,11 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  void setMockPhone(String phone) {
+    _phoneNumber = phone;
+    notifyListeners();
+  }
+
   Future<bool> setupProfile({
     required String username,
     String? bio,
@@ -228,15 +247,16 @@ class AuthProvider extends ChangeNotifier {
   }) async {
     _setLoading(true);
     try {
-      if (_user == null) {
-        _error = 'Not authenticated';
-        _setLoading(false);
-        return false;
+      // Allow mock users (no real Supabase user)
+      final userId = _user?.id ?? _mockUserId ?? 'mock_\${DateTime.now().millisecondsSinceEpoch}';
+
+      if (_user == null && _mockUserId == null) {
+        _mockUserId = userId;
       }
 
       final now = DateTime.now().toIso8601String();
       await _supabase.from('users').upsert({
-        'id': _user!.id,
+        'id': userId,
         'phone': _phoneNumber,
         'email': _email,
         'username': username,
@@ -249,6 +269,16 @@ class AuthProvider extends ChangeNotifier {
       _userName = username;
       _userBio = bio;
       _userPhotoUrl = photoUrl;
+      _isAuthenticated = true;
+
+      // Save mock user data
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('mock_user_id', userId);
+      await prefs.setString('mock_phone', _phoneNumber ?? '');
+      await prefs.setString('mock_username', username);
+      await prefs.setString('mock_bio', bio ?? '');
+      await prefs.setString('mock_avatar', photoUrl ?? '');
+
       notifyListeners();
       _setLoading(false);
       return true;
@@ -267,7 +297,8 @@ class AuthProvider extends ChangeNotifier {
   }) async {
     _setLoading(true);
     try {
-      if (_user == null) {
+      final userId = _user?.id ?? _mockUserId;
+      if (userId == null) {
         _error = 'Not authenticated';
         _setLoading(false);
         return false;
@@ -280,11 +311,18 @@ class AuthProvider extends ChangeNotifier {
       if (bio != null) updates['bio'] = bio;
       if (photoUrl != null) updates['avatar_url'] = photoUrl;
 
-      await _supabase.from('users').update(updates).eq('id', _user!.id);
+      await _supabase.from('users').update(updates).eq('id', userId);
 
       if (username != null) _userName = username;
       if (bio != null) _userBio = bio;
       if (photoUrl != null) _userPhotoUrl = photoUrl;
+
+      // Update mock prefs too
+      final prefs = await SharedPreferences.getInstance();
+      if (username != null) await prefs.setString('mock_username', username);
+      if (bio != null) await prefs.setString('mock_bio', bio);
+      if (photoUrl != null) await prefs.setString('mock_avatar', photoUrl);
+
       notifyListeners();
       _setLoading(false);
       return true;
@@ -298,8 +336,10 @@ class AuthProvider extends ChangeNotifier {
   Future<void> signOut() async {
     _setLoading(true);
     try {
-      await OnlineStatusService.setOffline();
-      await _supabase.auth.signOut();
+      if (_user != null) {
+        await OnlineStatusService.setOffline();
+        await _supabase.auth.signOut();
+      }
       await _clearAuth();
     } catch (e) {
       _error = 'Sign out failed: \$e';
@@ -319,29 +359,33 @@ class AuthProvider extends ChangeNotifier {
     _userName = null;
     _userBio = null;
     _userPhotoUrl = null;
+    _mockUserId = null;
     notifyListeners();
   }
 
   Future<bool> deleteAccount() async {
     _setLoading(true);
     try {
-      if (_user == null) {
+      final userId = _user?.id ?? _mockUserId;
+      if (userId == null) {
         _error = 'Not authenticated';
         _setLoading(false);
         return false;
       }
 
-      await _supabase.from('messages').delete().eq('sender_id', _user!.id);
-      await _supabase.from('chat_participants').delete().eq('user_id', _user!.id);
-      await _supabase.from('user_settings').delete().eq('user_id', _user!.id);
-      await _supabase.from('status_views').delete().eq('user_id', _user!.id);
-      await _supabase.from('statuses').delete().eq('user_id', _user!.id);
-      await _supabase.from('contacts').delete().eq('user_id', _user!.id);
-      await _supabase.from('blocked_users').delete().eq('user_id', _user!.id);
-      await _supabase.from('bots').delete().eq('creator_id', _user!.id);
-      await _supabase.from('users').delete().eq('id', _user!.id);
+      await _supabase.from('messages').delete().eq('sender_id', userId);
+      await _supabase.from('chat_participants').delete().eq('user_id', userId);
+      await _supabase.from('user_settings').delete().eq('user_id', userId);
+      await _supabase.from('status_views').delete().eq('user_id', userId);
+      await _supabase.from('statuses').delete().eq('user_id', userId);
+      await _supabase.from('contacts').delete().eq('user_id', userId);
+      await _supabase.from('blocked_users').delete().eq('user_id', userId);
+      await _supabase.from('bots').delete().eq('creator_id', userId);
+      await _supabase.from('users').delete().eq('id', userId);
 
-      await _supabase.auth.signOut();
+      if (_user != null) {
+        await _supabase.auth.signOut();
+      }
       await _clearAuth();
       _setLoading(false);
       return true;
