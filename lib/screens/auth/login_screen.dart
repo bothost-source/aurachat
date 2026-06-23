@@ -6,6 +6,7 @@ import 'package:intl_phone_field/phone_number.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'otp_screen.dart';
 import '../../services/notification_service.dart';
+import '../../services/app_localizations.dart'; // ADD THIS
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -74,8 +75,10 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   void _requestOTP() async {
+    await NotificationService.requestPermission();
+
     if (_phoneNumber == null || _phoneNumber!.number.isEmpty) {
-      setState(() => _errorMessage = 'Please enter a valid phone number');
+      setState(() => _errorMessage = AppLocalizations.get('invalid_phone'));
       return;
     }
 
@@ -95,11 +98,6 @@ class _LoginScreenState extends State<LoginScreen>
         _errorMessage = 'This number has been permanently banned. Contact support.';
       });
       return;
-    }
-
-    final registeredNumbers = await _getRegisteredNumbers();
-    if (registeredNumbers.contains(cleanNumber)) {
-      // Already registered - just send OTP to log in
     }
 
     final otp = _generateOTP();
@@ -184,9 +182,9 @@ class _LoginScreenState extends State<LoginScreen>
                     shaderCallback: (bounds) => const LinearGradient(
                       colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
                     ).createShader(bounds),
-                    child: const Text(
-                      'Enter your phone number',
-                      style: TextStyle(
+                    child: Text(
+                      AppLocalizations.get('enter_phone'),
+                      style: const TextStyle(
                         fontSize: 28,
                         fontWeight: FontWeight.w900,
                         color: Colors.white,
@@ -195,7 +193,7 @@ class _LoginScreenState extends State<LoginScreen>
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'AURA will send you a one-time password to verify your number.',
+                    AppLocalizations.get('otp_description'),
                     style: TextStyle(
                       fontSize: 15,
                       color: Colors.white.withOpacity(0.5),
@@ -216,7 +214,7 @@ class _LoginScreenState extends State<LoginScreen>
                     child: IntlPhoneField(
                       controller: _phoneController,
                       decoration: InputDecoration(
-                        hintText: 'Phone number',
+                        hintText: AppLocalizations.get('phone_hint'),
                         hintStyle: TextStyle(
                           color: Colors.white.withOpacity(0.3),
                         ),
@@ -260,7 +258,7 @@ class _LoginScreenState extends State<LoginScreen>
                           _errorMessage = null;
                         });
                       },
-                      invalidNumberMessage: 'Invalid phone number for this country',
+                      invalidNumberMessage: AppLocalizations.get('invalid_phone'),
                       disableLengthCheck: false,
                     ),
                   ),
@@ -320,7 +318,7 @@ class _LoginScreenState extends State<LoginScreen>
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
-                            'You can hide your phone number after signup. Other users will only see your username.',
+                            AppLocalizations.get('hide_number_info'),
                             style: TextStyle(
                               fontSize: 13,
                               color: Colors.white.withOpacity(0.5),
@@ -368,9 +366,9 @@ class _LoginScreenState extends State<LoginScreen>
                                   color: Colors.white,
                                 ),
                               )
-                            : const Text(
-                                'Request OTP',
-                                style: TextStyle(
+                            : Text(
+                                AppLocalizations.get('request_otp'),
+                                style: const TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.w700,
                                   color: Colors.white,
@@ -384,7 +382,7 @@ class _LoginScreenState extends State<LoginScreen>
                     child: TextButton(
                       onPressed: () => Navigator.pushReplacementNamed(context, '/terms'),
                       child: Text(
-                        'Back to Terms',
+                        AppLocalizations.get('back_to_terms'),
                         style: TextStyle(
                           color: Colors.white.withOpacity(0.4),
                         ),
