@@ -71,9 +71,9 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  // In listenToAuthChanges() — DON'T use await inside, it's not async
+  /// Listen to auth changes (call this from main.dart or splash)
 void listenToAuthChanges() {
-  _supabase.auth.onAuthStateChange.listen((data) async {  // ✅ Make the callback async
+  _supabase.auth.onAuthStateChange.listen((data) {
     final event = data.event;
     final session = data.session;
 
@@ -84,13 +84,13 @@ void listenToAuthChanges() {
         _user = session?.user;
         _isAuthenticated = session != null;
         if (_isAuthenticated) {
-          await _loadUserProfile();
-          await OnlineStatusService.setOnline(); // ✅ Now this works
+          _loadUserProfile(); // No await here - it's fire-and-forget
+          OnlineStatusService.setOnline(); // No await - fire-and-forget
         }
         break;
       case AuthChangeEvent.signedOut:
       case AuthChangeEvent.userDeleted:
-        await OnlineStatusService.setOffline(); // ✅ Add this too
+        OnlineStatusService.setOffline(); // No await
         _clearAuth();
         break;
       default:
