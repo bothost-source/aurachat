@@ -58,7 +58,8 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await NotificationService.init();
-  ConnectivityService().initialize();
+await NotificationService.requestPermission();  // ADD THIS LINE
+ConnectivityService().initialize();
 
   try {
     await Supabase.initialize(
