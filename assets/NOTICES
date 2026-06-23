@@ -5269,6 +5269,7 @@ image_picker_windows
 local_auth
 local_auth_android
 local_auth_darwin
+local_auth_ios
 local_auth_platform_interface
 local_auth_windows
 path_provider
