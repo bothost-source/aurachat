@@ -13,6 +13,7 @@ class AuthProvider extends ChangeNotifier {
   String? _phoneNumber;
   String? _email;
   String? _userName;
+  String? _displayName;
   String? _userBio;
   String? _userPhotoUrl;
   String? _mockUserId;
@@ -24,6 +25,7 @@ class AuthProvider extends ChangeNotifier {
   String? get phoneNumber => _phoneNumber;
   String? get email => _email;
   String? get userName => _userName;
+  String? get displayName => _displayName;
   String? get userBio => _userBio;
   String? get userPhotoUrl => _userPhotoUrl;
   String? get mockUserId => _mockUserId;
@@ -69,14 +71,15 @@ class AuthProvider extends ChangeNotifier {
           _isAuthenticated = true;
           _phoneNumber = prefs.getString('mock_phone');
           _userName = prefs.getString('mock_username');
+          _displayName = prefs.getString('mock_display_name');
           _userBio = prefs.getString('mock_bio');
           _userPhotoUrl = prefs.getString('mock_avatar');
           await _loadUserProfile();
         }
       }
     } catch (e) {
-      _error = 'Auth init failed: \$e';
-      debugPrint('Auth init error: \$e');
+      _error = 'Auth init failed: $e';
+      debugPrint('Auth init error: $e');
     } finally {
       _setLoading(false);
     }
@@ -222,6 +225,7 @@ class AuthProvider extends ChangeNotifier {
 
       if (response != null) {
         _userName = response['username'] as String?;
+        _displayName = response['display_name'] as String?;
         _userBio = response['bio'] as String?;
         _userPhotoUrl = response['avatar_url'] as String?;
         _phoneNumber = response['phone'] as String? ?? _phoneNumber;
@@ -231,7 +235,7 @@ class AuthProvider extends ChangeNotifier {
       }
       return false;
     } catch (e) {
-      debugPrint('Profile load error: \$e');
+      debugPrint('Profile load error: $e');
       return false;
     }
   }
@@ -243,13 +247,14 @@ class AuthProvider extends ChangeNotifier {
 
   Future<bool> setupProfile({
     required String username,
+    String? displayName,
     String? bio,
     String? photoUrl,
   }) async {
     _setLoading(true);
     try {
       // Allow mock users (no real Supabase user)
-      final userId = _user?.id ?? _mockUserId ?? 'mock_\${DateTime.now().millisecondsSinceEpoch}';
+      final userId = _user?.id ?? _mockUserId ?? 'mock_${DateTime.now().millisecondsSinceEpoch}';
 
       if (_user == null && _mockUserId == null) {
         _mockUserId = userId;
@@ -261,6 +266,7 @@ class AuthProvider extends ChangeNotifier {
         'phone': _phoneNumber,
         'email': _email,
         'username': username,
+        'display_name': displayName ?? username,
         'bio': bio ?? '',
         'avatar_url': photoUrl,
         'created_at': now,
@@ -268,6 +274,7 @@ class AuthProvider extends ChangeNotifier {
       }, onConflict: 'id');
 
       _userName = username;
+      _displayName = displayName ?? username;
       _userBio = bio;
       _userPhotoUrl = photoUrl;
       _isAuthenticated = true;
@@ -277,6 +284,7 @@ class AuthProvider extends ChangeNotifier {
       await prefs.setString('mock_user_id', userId);
       await prefs.setString('mock_phone', _phoneNumber ?? '');
       await prefs.setString('mock_username', username);
+      await prefs.setString('mock_display_name', displayName ?? username);
       await prefs.setString('mock_bio', bio ?? '');
       await prefs.setString('mock_avatar', photoUrl ?? '');
 
@@ -284,8 +292,8 @@ class AuthProvider extends ChangeNotifier {
       _setLoading(false);
       return true;
     } catch (e) {
-      _error = 'Profile setup failed: \$e';
-      debugPrint('Profile setup error: \$e');
+      _error = 'Profile setup failed: $e';
+      debugPrint('Profile setup error: $e');
       _setLoading(false);
       return false;
     }
@@ -293,6 +301,7 @@ class AuthProvider extends ChangeNotifier {
 
   Future<bool> updateProfile({
     String? username,
+    String? displayName,
     String? bio,
     String? photoUrl,
   }) async {
@@ -309,18 +318,21 @@ class AuthProvider extends ChangeNotifier {
         'updated_at': DateTime.now().toIso8601String(),
       };
       if (username != null) updates['username'] = username;
+      if (displayName != null) updates['display_name'] = displayName;
       if (bio != null) updates['bio'] = bio;
       if (photoUrl != null) updates['avatar_url'] = photoUrl;
 
       await _supabase.from('users').update(updates).eq('id', userId);
 
       if (username != null) _userName = username;
+      if (displayName != null) _displayName = displayName;
       if (bio != null) _userBio = bio;
       if (photoUrl != null) _userPhotoUrl = photoUrl;
 
       // Update mock prefs too
       final prefs = await SharedPreferences.getInstance();
       if (username != null) await prefs.setString('mock_username', username);
+      if (displayName != null) await prefs.setString('mock_display_name', displayName);
       if (bio != null) await prefs.setString('mock_bio', bio);
       if (photoUrl != null) await prefs.setString('mock_avatar', photoUrl);
 
@@ -328,7 +340,7 @@ class AuthProvider extends ChangeNotifier {
       _setLoading(false);
       return true;
     } catch (e) {
-      _error = 'Update failed: \$e';
+      _error = 'Update failed: $e';
       _setLoading(false);
       return false;
     }
@@ -343,7 +355,7 @@ class AuthProvider extends ChangeNotifier {
       }
       await _clearAuth();
     } catch (e) {
-      _error = 'Sign out failed: \$e';
+      _error = 'Sign out failed: $e';
     } finally {
       _setLoading(false);
     }
@@ -358,6 +370,7 @@ class AuthProvider extends ChangeNotifier {
     _phoneNumber = null;
     _email = null;
     _userName = null;
+    _displayName = null;
     _userBio = null;
     _userPhotoUrl = null;
     _mockUserId = null;
@@ -391,7 +404,7 @@ class AuthProvider extends ChangeNotifier {
       _setLoading(false);
       return true;
     } catch (e) {
-      _error = 'Account deletion failed: \$e';
+      _error = 'Account deletion failed: $e';
       _setLoading(false);
       return false;
     }
