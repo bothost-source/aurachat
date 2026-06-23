@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../services/online_status_service.dart';
 
 class OtpScreen extends StatefulWidget {
   final String phoneNumber;
@@ -56,25 +57,27 @@ class _OtpScreenState extends State<OtpScreen> {
   }
 
   void _verifyOTP() async {
-    final enteredOtp = _controllers.map((c) => c.text).join();
+  final enteredOtp = _controllers.map((c) => c.text).join();
 
-    setState(() => _isLoading = true);
-    await Future.delayed(const Duration(seconds: 1));
-    setState(() => _isLoading = false);
+  setState(() => _isLoading = true);
+  await Future.delayed(const Duration(seconds: 1));
+  setState(() => _isLoading = false);
 
-    if (enteredOtp == widget.expectedOtp) {
-      if (mounted) Navigator.pushReplacementNamed(context, '/setup_profile');
-    } else {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Invalid OTP. Please try again.'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+  if (enteredOtp == widget.expectedOtp) {
+    // ✅ SET ONLINE STATUS HERE
+    await OnlineStatusService.setOnline();
+    if (mounted) Navigator.pushReplacementNamed(context, '/setup_profile');
+  } else {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Invalid OTP. Please try again.'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
+}
 
   @override
   Widget build(BuildContext context) {
