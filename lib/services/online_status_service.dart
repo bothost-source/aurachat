@@ -15,7 +15,7 @@ class OnlineStatusService {
         'last_seen': DateTime.now().toIso8601String(),
       });
     } catch (e) {
-      debugPrint('setOnline error: $e');
+      print('setOnline error: $e');
     }
   }
 
@@ -31,7 +31,7 @@ class OnlineStatusService {
         'last_seen': DateTime.now().toIso8601String(),
       });
     } catch (e) {
-      debugPrint('setOffline error: $e');
+      print('setOffline error: $e');
     }
   }
 }
