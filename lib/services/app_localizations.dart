@@ -49,7 +49,13 @@ class AppLocalizations {
       'start_conversation': 'Start a new conversation!',
       'call_history': 'Call history',
       'status_updates': 'Status updates',
-      
+      'my_status': 'My Status',
+      'tap_add_status': 'Tap to add status',
+      'recent_updates': 'RECENT UPDATES',
+      'no_status_updates': 'No status updates',
+      'tap_share_first_status': 'Tap + to share your first status',
+      'post': 'Post',
+
       // FAB options
       'new_chat': 'New Chat',
       'new_group': 'New Group',
