@@ -4,7 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../providers/auth_provider.dart';
-import '../../services/app_localizations.dart'; // ADD THIS
+import '../../services/app_localizations.dart';
 
 class SetupProfileScreen extends StatefulWidget {
   const SetupProfileScreen({super.key});
@@ -170,7 +170,7 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
     try {
       final supabase = Supabase.instance.client;
       final fileBytes = await _profileImage!.readAsBytes();
-      final fileName = 'avatars/$userId/${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final fileName = '$userId/${DateTime.now().millisecondsSinceEpoch}.jpg';
 
       await supabase.storage.from('profiles').uploadBinary(
         fileName,
@@ -181,6 +181,15 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
       return supabase.storage.from('profiles').getPublicUrl(fileName);
     } catch (e) {
       debugPrint('Error uploading profile image: $e');
+      // Show error to user instead of silently failing
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to upload image: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
       return null;
     }
   }
@@ -230,7 +239,16 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
         return;
       }
 
-      final photoUrl = await _uploadProfileImage(userId);
+      String? photoUrl;
+      if (_profileImage != null) {
+        photoUrl = await _uploadProfileImage(userId);
+        // If upload failed and user selected an image, stop here
+        if (photoUrl == null) {
+          setState(() => _isLoading = false);
+          _showError('Profile image upload failed. Please try again.');
+          return;
+        }
+      }
 
       final success = await authProvider.setupProfile(
         username: username,
