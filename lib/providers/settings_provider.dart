@@ -11,6 +11,7 @@ class SettingsProvider extends ChangeNotifier {
   bool _appPasscode = false;
   bool _biometricLock = false;
   String _passcode = '';
+  int _autoLockTimeout = 1; // minutes: 1, 5, 10
 
   // Notification Settings
   bool _messageTones = true;
@@ -47,6 +48,7 @@ class SettingsProvider extends ChangeNotifier {
   bool get appPasscode => _appPasscode;
   bool get biometricLock => _biometricLock;
   String get passcode => _passcode;
+  int get autoLockTimeout => _autoLockTimeout;
 
   bool get messageTones => _messageTones;
   bool get groupNotifications => _groupNotifications;
@@ -84,6 +86,7 @@ class SettingsProvider extends ChangeNotifier {
     _appPasscode = prefs.getBool('app_passcode') ?? false;
     _biometricLock = prefs.getBool('biometric_lock') ?? false;
     _passcode = prefs.getString('passcode') ?? '';
+    _autoLockTimeout = prefs.getInt('auto_lock_timeout') ?? 1;
 
     // Notifications
     _messageTones = prefs.getBool('message_tones') ?? true;
@@ -196,6 +199,13 @@ class SettingsProvider extends ChangeNotifier {
     _passcode = value;
     final prefs = await _prefs;
     await prefs.setString('passcode', value);
+    notifyListeners();
+  }
+
+  Future<void> setAutoLockTimeout(int minutes) async {
+    _autoLockTimeout = minutes;
+    final prefs = await _prefs;
+    await prefs.setInt('auto_lock_timeout', minutes);
     notifyListeners();
   }
 
