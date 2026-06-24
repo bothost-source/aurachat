@@ -43,7 +43,8 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
     try {
       final supabase = Supabase.instance.client;
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      final userId = authProvider.user?.id;
+      // FIXED: Use mockUserId as fallback
+      final userId = authProvider.user?.id ?? authProvider.mockUserId;
 
       if (userId == null) {
         throw Exception('Not authenticated');
@@ -84,7 +85,8 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
     try {
       final supabase = Supabase.instance.client;
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      final currentUserId = authProvider.user?.id;
+      // FIXED: Use mockUserId as fallback
+      final currentUserId = authProvider.user?.id ?? authProvider.mockUserId;
 
       final response = await supabase
           .from('users')
@@ -127,7 +129,8 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       final chatProvider = Provider.of<ChatProvider>(context, listen: false);
       final supabase = Supabase.instance.client;
-      final userId = authProvider.user?.id;
+      // FIXED: Use mockUserId as fallback
+      final userId = authProvider.user?.id ?? authProvider.mockUserId;
 
       if (userId == null) {
         throw Exception('Not authenticated');
