@@ -21,6 +21,12 @@ class _SecurityScreenState extends State<SecurityScreen> {
   final _passcodeController = TextEditingController();
   final _confirmPasscodeController = TextEditingController();
 
+  final List<Map<String, dynamic>> _autoLockOptions = [
+    {'label': '1 minute', 'value': 1},
+    {'label': '5 minutes', 'value': 5},
+    {'label': '10 minutes', 'value': 10},
+  ];
+
   @override
   void initState() {
     super.initState();
@@ -156,6 +162,92 @@ class _SecurityScreenState extends State<SecurityScreen> {
         );
       }
     }
+  }
+
+  void _showAutoLockPicker() {
+    final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+    
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1a103c),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              'Auto-Lock Timer',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Lock app after being in background for:',
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.4),
+                fontSize: 14,
+              ),
+            ),
+            const SizedBox(height: 16),
+            ..._autoLockOptions.map((option) {
+              final isSelected = settingsProvider.autoLockTimeout == option['value'];
+              return ListTile(
+                leading: Container(
+                  width: 24,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: isSelected
+                        ? const Color(0xFF8B5CF6)
+                        : Colors.white.withOpacity(0.1),
+                    border: Border.all(
+                      color: isSelected
+                          ? const Color(0xFF8B5CF6)
+                          : Colors.white.withOpacity(0.2),
+                    ),
+                  ),
+                  child: isSelected
+                      ? const Icon(Icons.check, size: 14, color: Colors.white)
+                      : null,
+                ),
+                title: Text(
+                  option['label'],
+                  style: TextStyle(
+                    color: isSelected ? const Color(0xFF8B5CF6) : Colors.white,
+                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                  ),
+                ),
+                onTap: () {
+                  settingsProvider.setAutoLockTimeout(option['value']);
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Auto-lock set to ${option['label']}'),
+                      backgroundColor: const Color(0xFF8B5CF6),
+                    ),
+                  );
+                },
+              );
+            }),
+          ],
+        ),
+      ),
+    );
   }
 
   void _showPasscodeDialog() {
@@ -317,6 +409,15 @@ class _SecurityScreenState extends State<SecurityScreen> {
             },
           ),
 
+          // NEW: Auto-Lock Timer
+          _buildActionCard(
+            icon: Icons.timer_outlined,
+            iconColor: const Color(0xFFF59E0B),
+            title: 'Auto-Lock Timer',
+            subtitle: '${settingsProvider.autoLockTimeout} minute${settingsProvider.autoLockTimeout != 1 ? 's' : ''}',
+            onTap: _showAutoLockPicker,
+          ),
+
           if (_canCheckBiometrics)
             _buildToggleCard(
               icon: Icons.fingerprint,
@@ -433,6 +534,7 @@ class _SecurityScreenState extends State<SecurityScreen> {
                 Text(
                   'Two-Step Verification: Requires OTP every time you sign in on a new device.\n\n'
                   'App Passcode: Locks the app when you close it. You will need to enter the passcode to open it.\n\n'
+                  'Auto-Lock: Automatically locks the app after being in the background for the selected time.\n\n'
                   'Biometric Lock: Uses your device fingerprint or face recognition to unlock the app.',
                   style: TextStyle(
                     fontSize: 13,
@@ -511,6 +613,70 @@ class _SecurityScreenState extends State<SecurityScreen> {
             inactiveTrackColor: Colors.grey.withOpacity(0.3),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildActionCard({
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.03),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: Colors.white.withOpacity(0.06),
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: iconColor.withOpacity(0.15),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: iconColor, size: 22),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 15,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.white.withOpacity(0.4),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.chevron_right,
+              color: Colors.white.withOpacity(0.2),
+              size: 20,
+            ),
+          ],
+        ),
       ),
     );
   }
