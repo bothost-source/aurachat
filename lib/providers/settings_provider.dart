@@ -45,7 +45,7 @@ class SettingsProvider extends ChangeNotifier {
 
   // Getters
   bool get twoStepVerification => _twoStepVerification;
-  bool get appPasscode => _appPasscode;
+  bool get passcodeLock => _appPasscode;
   bool get biometricLock => _biometricLock;
   String get passcode => _passcode;
   int get autoLockTimeout => _autoLockTimeout;
