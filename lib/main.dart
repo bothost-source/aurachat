@@ -2,9 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:local_auth/local_auth.dart';
-import 'package:local_auth_android/local_auth_android.dart';
-import 'package:local_auth_ios/local_auth_ios.dart';
 
 import 'themes/app_theme.dart';
 import 'providers/auth_provider.dart';
@@ -52,6 +49,7 @@ import 'services/notification_service.dart';
 import 'services/connectivity.dart';
 import 'services/online_status_service.dart';
 import 'services/call_service.dart';
+import 'services/call_signaling_service.dart';
 
 const String _supabaseUrl = String.fromEnvironment('SUPABASE_URL', 
     defaultValue: 'https://ziesdpcajbzsffemgfiw.supabase.co');
@@ -114,12 +112,30 @@ class _AuraChatAppState extends State<AuraChatApp>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       authProvider.listenToAuthChanges();
+      
+      // Start listening for incoming calls
+      final currentUser = Supabase.instance.client.auth.currentUser;
+      if (currentUser != null) {
+        CallSignalingService.startListening(currentUser.id);
+        
+        CallSignalingService.onCallSignal.listen((signal) {
+          if (signal.type == CallSignalType.incoming && mounted) {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                fullscreenDialog: true,
+                builder: (_) => CallScreen.incoming(callSignal: signal),
+              ),
+            );
+          }
+        });
+      }
     });
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    CallSignalingService.dispose();
     super.dispose();
   }
 
@@ -128,88 +144,75 @@ class _AuraChatAppState extends State<AuraChatApp>
     final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
     
     if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
-      // App went to background
       _backgroundTime = DateTime.now();
       
-      // If any lock is enabled, lock immediately
-      if (settingsProvider.biometricLock || settingsProvider.passcodeLock) {
+      if (settingsProvider.biometricLock || settingsProvider.appPasscode) {
         setState(() => _isLocked = true);
       }
     } else if (state == AppLifecycleState.resumed) {
-      // App came back to foreground
       OnlineStatusService.setOnline();
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       authProvider.refreshSession();
       
-      // Check if we need to show unlock prompt
       if (_isLocked && _backgroundTime != null) {
         final elapsed = DateTime.now().difference(_backgroundTime!);
         final timeoutMinutes = settingsProvider.autoLockTimeout;
         
         if (elapsed.inMinutes >= timeoutMinutes) {
-          // Time exceeded, stay locked and prompt for unlock
-          _promptUnlock();
+          _showLockScreen();
         } else {
-          // Within timeout, unlock automatically
           setState(() => _isLocked = false);
         }
       }
     }
   }
 
-  Future<void> _promptUnlock() async {
+  Future<void> _showLockScreen() async {
     final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
     
-    // If biometric is enabled, try that first
     if (settingsProvider.biometricLock) {
       final localAuth = LocalAuthentication();
-      final bool canCheckBiometrics = await localAuth.canCheckBiometrics;
-      final bool isDeviceSupported = await localAuth.isDeviceSupported();
-      
-      if (canCheckBiometrics && isDeviceSupported) {
-        try {
-          final didAuth = await localAuth.authenticate(
-            localizedReason: 'Unlock AURA Chat',
-            authMessages: const [
-              AndroidAuthMessages(
-                signInTitle: 'Biometric Authentication',
-                cancelButton: 'Use Passcode',
-                biometricHint: 'Verify your identity',
-                biometricNotRecognized: 'Not recognized, try again',
-                biometricRequiredTitle: 'Biometric authentication required',
-                biometricSuccess: 'Authentication successful',
-                deviceCredentialsRequiredTitle: 'Device credentials required',
-                deviceCredentialsSetupDescription: 'Please set up device credentials',
-                goToSettingsButton: 'Go to Settings',
-                goToSettingsDescription: 'Please set up biometric authentication in your device settings',
-              ),
-              IOSAuthMessages(
-                cancelButton: 'Use Passcode',
-                goToSettingsButton: 'Go to Settings',
-                goToSettingsDescription: 'Please set up biometric authentication in your device settings',
-                lockOut: 'Please re-enable biometric authentication',
-              ),
-            ],
-            options: const AuthenticationOptions(
-              biometricOnly: false,      // Allow fallback to device PIN/password
-              stickyAuth: true,
-              sensitiveTransaction: true,
-              useErrorDialogs: true,
+      try {
+        final didAuth = await localAuth.authenticate(
+          localizedReason: 'Unlock AURA Chat',
+          authMessages: const [
+            AndroidAuthMessages(
+              signInTitle: 'Biometric Authentication',
+              cancelButton: 'Cancel',
+              biometricHint: 'Verify your identity',
+              biometricNotRecognized: 'Not recognized, try again',
+              biometricRequiredTitle: 'Biometric authentication required',
+              biometricSuccess: 'Authentication successful',
+              deviceCredentialsRequiredTitle: 'Device credentials required',
+              deviceCredentialsSetupDescription: 'Please set up device credentials',
+              goToSettingsButton: 'Go to Settings',
+              goToSettingsDescription: 'Please set up biometric authentication in your device settings',
             ),
-          );
-          
-          if (didAuth && mounted) {
-            setState(() => _isLocked = false);
-            return;
-          }
-        } catch (e) {
-          debugPrint('Biometric auth failed: $e');
+            IOSAuthMessages(
+              cancelButton: 'Cancel',
+              goToSettingsButton: 'Go to Settings',
+              goToSettingsDescription: 'Please set up biometric authentication in your device settings',
+              lockOut: 'Please re-enable biometric authentication',
+            ),
+          ],
+          options: const AuthenticationOptions(
+            biometricOnly: false,
+            stickyAuth: true,
+            sensitiveTransaction: true,
+            useErrorDialogs: true,
+          ),
+        );
+        
+        if (didAuth) {
+          setState(() => _isLocked = false);
+          return;
         }
+      } catch (e) {
+        debugPrint('Biometric auth failed: $e');
       }
     }
     
-    // If biometric failed or not available, and passcode is enabled, show passcode dialog
-    if (settingsProvider.passcodeLock && mounted) {
+    if (settingsProvider.appPasscode && mounted) {
       final result = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
@@ -218,109 +221,10 @@ class _AuraChatAppState extends State<AuraChatApp>
         ),
       );
       
-      if (result == true && mounted) {
+      if (result == true) {
         setState(() => _isLocked = false);
       }
     }
-  }
-
-  Widget _buildLockScreen() {
-    final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
-    final bool hasBiometric = settingsProvider.biometricLock;
-    final bool hasPasscode = settingsProvider.passcodeLock;
-    
-    return Scaffold(
-      backgroundColor: const Color(0xFF0A0A0A),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              hasBiometric ? Icons.fingerprint : Icons.lock_outline,
-              size: 80,
-              color: Colors.white70,
-            ),
-            const SizedBox(height: 24),
-            const Text(
-              'AURA is Locked',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              hasBiometric 
-                ? 'Authentication required to continue' 
-                : 'Enter your passcode to continue',
-              style: const TextStyle(
-                fontSize: 16,
-                color: Colors.white54,
-              ),
-            ),
-            const SizedBox(height: 32),
-            if (hasBiometric)
-              ElevatedButton.icon(
-                onPressed: _promptUnlock,
-                icon: const Icon(Icons.fingerprint),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white,
-                  foregroundColor: Colors.black,
-                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(24),
-                  ),
-                ),
-                label: const Text(
-                  'Unlock with Biometric',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                ),
-              ),
-            if (hasPasscode && !hasBiometric)
-              ElevatedButton.icon(
-                onPressed: _promptUnlock,
-                icon: const Icon(Icons.dialpad),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white,
-                  foregroundColor: Colors.black,
-                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(24),
-                  ),
-                ),
-                label: const Text(
-                  'Enter Passcode',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                ),
-              ),
-            if (hasBiometric && hasPasscode) ...[
-              const SizedBox(height: 16),
-              TextButton(
-                onPressed: () {
-                  // Show passcode dialog directly
-                  showDialog<bool>(
-                    context: context,
-                    barrierDismissible: false,
-                    builder: (context) => _PasscodeDialog(
-                      correctPasscode: settingsProvider.passcode,
-                    ),
-                  ).then((result) {
-                    if (result == true && mounted) {
-                      setState(() => _isLocked = false);
-                    }
-                  });
-                },
-                child: const Text(
-                  'Use Passcode Instead',
-                  style: TextStyle(color: Colors.white70),
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
   }
 
   @override
@@ -344,7 +248,6 @@ class _AuraChatAppState extends State<AuraChatApp>
             themeMode: themeProvider.themeMode,
             initialRoute: '/',
             builder: (context, child) {
-              // Show lock screen if locked
               if (_isLocked) {
                 return _buildLockScreen();
               }
@@ -374,10 +277,7 @@ class _AuraChatAppState extends State<AuraChatApp>
               '/ai_chatbot': (context) => const AIChatbotScreen(),
               '/ai_studio': (context) => const AIStudioScreen(),
               '/channel': (context) => const ChannelScreen(),
-              '/calls': (context) => const CallScreen(
-                channelName: 'test_channel',
-                isVideoCall: true,
-              ),
+              '/calls': (context) => const CallScreen.pick(),
               '/global_search': (context) => const GlobalSearchScreen(),
               '/contacts': (context) => const ContactsScreen(),
               '/settings': (context) => const SettingsScreen(),
@@ -391,6 +291,57 @@ class _AuraChatAppState extends State<AuraChatApp>
             },
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildLockScreen() {
+    return Scaffold(
+      backgroundColor: const Color(0xFF0A0A0A),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(
+              Icons.lock_outline,
+              size: 80,
+              color: Colors.white70,
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'AURA is Locked',
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Authentication required to continue',
+              style: TextStyle(
+                fontSize: 16,
+                color: Colors.white54,
+              ),
+            ),
+            const SizedBox(height: 32),
+            ElevatedButton(
+              onPressed: _showLockScreen,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: Colors.black,
+                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(24),
+                ),
+              ),
+              child: const Text(
+                'Unlock',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -467,7 +418,6 @@ class _PasscodeDialogState extends State<_PasscodeDialog> {
               ),
             ),
             const SizedBox(height: 24),
-            // Passcode dots
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: List.generate(6, (index) {
@@ -492,7 +442,6 @@ class _PasscodeDialogState extends State<_PasscodeDialog> {
               ),
             ],
             const SizedBox(height: 24),
-            // Number pad
             GridView.count(
               shrinkWrap: true,
               crossAxisCount: 3,
