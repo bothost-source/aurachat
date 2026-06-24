@@ -131,8 +131,8 @@ class _AuraChatAppState extends State<AuraChatApp>
       // App went to background
       _backgroundTime = DateTime.now();
       
-      // If biometric or passcode is enabled, lock immediately
-      if (settingsProvider.biometricLock || settingsProvider.appPasscode) {
+      // If any lock is enabled, lock immediately
+      if (settingsProvider.biometricLock || settingsProvider.passcodeLock) {
         setState(() => _isLocked = true);
       }
     } else if (state == AppLifecycleState.resumed) {
@@ -141,14 +141,14 @@ class _AuraChatAppState extends State<AuraChatApp>
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       authProvider.refreshSession();
       
-      // Check if we need to unlock
+      // Check if we need to show unlock prompt
       if (_isLocked && _backgroundTime != null) {
         final elapsed = DateTime.now().difference(_backgroundTime!);
         final timeoutMinutes = settingsProvider.autoLockTimeout;
         
         if (elapsed.inMinutes >= timeoutMinutes) {
-          // Time exceeded, show lock screen
-          _showLockScreen();
+          // Time exceeded, stay locked and prompt for unlock
+          _promptUnlock();
         } else {
           // Within timeout, unlock automatically
           setState(() => _isLocked = false);
@@ -157,54 +157,59 @@ class _AuraChatAppState extends State<AuraChatApp>
     }
   }
 
-  Future<void> _showLockScreen() async {
+  Future<void> _promptUnlock() async {
     final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
     
+    // If biometric is enabled, try that first
     if (settingsProvider.biometricLock) {
-      // Try biometric first
       final localAuth = LocalAuthentication();
-      try {
-        final didAuth = await localAuth.authenticate(
-          localizedReason: 'Unlock AURA Chat',
-          authMessages: const [
-            AndroidAuthMessages(
-              signInTitle: 'Biometric Authentication',
-              cancelButton: 'Cancel',
-              biometricHint: 'Verify your identity',
-              biometricNotRecognized: 'Not recognized, try again',
-              biometricRequiredTitle: 'Biometric authentication required',
-              biometricSuccess: 'Authentication successful',
-              deviceCredentialsRequiredTitle: 'Device credentials required',
-              deviceCredentialsSetupDescription: 'Please set up device credentials',
-              goToSettingsButton: 'Go to Settings',
-              goToSettingsDescription: 'Please set up biometric authentication in your device settings',
+      final bool canCheckBiometrics = await localAuth.canCheckBiometrics;
+      final bool isDeviceSupported = await localAuth.isDeviceSupported();
+      
+      if (canCheckBiometrics && isDeviceSupported) {
+        try {
+          final didAuth = await localAuth.authenticate(
+            localizedReason: 'Unlock AURA Chat',
+            authMessages: const [
+              AndroidAuthMessages(
+                signInTitle: 'Biometric Authentication',
+                cancelButton: 'Use Passcode',
+                biometricHint: 'Verify your identity',
+                biometricNotRecognized: 'Not recognized, try again',
+                biometricRequiredTitle: 'Biometric authentication required',
+                biometricSuccess: 'Authentication successful',
+                deviceCredentialsRequiredTitle: 'Device credentials required',
+                deviceCredentialsSetupDescription: 'Please set up device credentials',
+                goToSettingsButton: 'Go to Settings',
+                goToSettingsDescription: 'Please set up biometric authentication in your device settings',
+              ),
+              IOSAuthMessages(
+                cancelButton: 'Use Passcode',
+                goToSettingsButton: 'Go to Settings',
+                goToSettingsDescription: 'Please set up biometric authentication in your device settings',
+                lockOut: 'Please re-enable biometric authentication',
+              ),
+            ],
+            options: const AuthenticationOptions(
+              biometricOnly: false,      // Allow fallback to device PIN/password
+              stickyAuth: true,
+              sensitiveTransaction: true,
+              useErrorDialogs: true,
             ),
-            IOSAuthMessages(
-              cancelButton: 'Cancel',
-              goToSettingsButton: 'Go to Settings',
-              goToSettingsDescription: 'Please set up biometric authentication in your device settings',
-              lockOut: 'Please re-enable biometric authentication',
-            ),
-          ],
-          options: const AuthenticationOptions(
-            biometricOnly: false,
-            stickyAuth: true,
-            sensitiveTransaction: true,
-            useErrorDialogs: true,
-          ),
-        );
-        
-        if (didAuth) {
-          setState(() => _isLocked = false);
-          return;
+          );
+          
+          if (didAuth && mounted) {
+            setState(() => _isLocked = false);
+            return;
+          }
+        } catch (e) {
+          debugPrint('Biometric auth failed: $e');
         }
-      } catch (e) {
-        debugPrint('Biometric auth failed: $e');
       }
     }
     
-    if (settingsProvider.appPasscode && mounted) {
-      // Show passcode dialog
+    // If biometric failed or not available, and passcode is enabled, show passcode dialog
+    if (settingsProvider.passcodeLock && mounted) {
       final result = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
@@ -213,10 +218,109 @@ class _AuraChatAppState extends State<AuraChatApp>
         ),
       );
       
-      if (result == true) {
+      if (result == true && mounted) {
         setState(() => _isLocked = false);
       }
     }
+  }
+
+  Widget _buildLockScreen() {
+    final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+    final bool hasBiometric = settingsProvider.biometricLock;
+    final bool hasPasscode = settingsProvider.passcodeLock;
+    
+    return Scaffold(
+      backgroundColor: const Color(0xFF0A0A0A),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              hasBiometric ? Icons.fingerprint : Icons.lock_outline,
+              size: 80,
+              color: Colors.white70,
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'AURA is Locked',
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              hasBiometric 
+                ? 'Authentication required to continue' 
+                : 'Enter your passcode to continue',
+              style: const TextStyle(
+                fontSize: 16,
+                color: Colors.white54,
+              ),
+            ),
+            const SizedBox(height: 32),
+            if (hasBiometric)
+              ElevatedButton.icon(
+                onPressed: _promptUnlock,
+                icon: const Icon(Icons.fingerprint),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: Colors.black,
+                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                ),
+                label: const Text(
+                  'Unlock with Biometric',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+              ),
+            if (hasPasscode && !hasBiometric)
+              ElevatedButton.icon(
+                onPressed: _promptUnlock,
+                icon: const Icon(Icons.dialpad),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: Colors.black,
+                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                ),
+                label: const Text(
+                  'Enter Passcode',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+              ),
+            if (hasBiometric && hasPasscode) ...[
+              const SizedBox(height: 16),
+              TextButton(
+                onPressed: () {
+                  // Show passcode dialog directly
+                  showDialog<bool>(
+                    context: context,
+                    barrierDismissible: false,
+                    builder: (context) => _PasscodeDialog(
+                      correctPasscode: settingsProvider.passcode,
+                    ),
+                  ).then((result) {
+                    if (result == true && mounted) {
+                      setState(() => _isLocked = false);
+                    }
+                  });
+                },
+                child: const Text(
+                  'Use Passcode Instead',
+                  style: TextStyle(color: Colors.white70),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -278,4 +382,154 @@ class _AuraChatAppState extends State<AuraChatApp>
               '/contacts': (context) => const ContactsScreen(),
               '/settings': (context) => const SettingsScreen(),
               '/notifications_settings': (context) => const NotificationsSettingsScreen(),
-              '/data_storage': (context) =>
+              '/data_storage': (context) => const DataStorageScreen(),
+              '/account_settings': (context) => const AccountSettingsScreen(),
+              '/bot_settings': (context) => const BotSettingsScreen(),
+              '/invite_friends': (context) => const InviteFriendsScreen(),
+              '/saved_messages': (context) => const SavedMessagesScreen(),
+              '/archived_chats': (context) => const ArchivedChatsScreen(),
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _PasscodeDialog extends StatefulWidget {
+  final String? correctPasscode;
+
+  const _PasscodeDialog({required this.correctPasscode});
+
+  @override
+  State<_PasscodeDialog> createState() => _PasscodeDialogState();
+}
+
+class _PasscodeDialogState extends State<_PasscodeDialog> {
+  String _enteredPasscode = '';
+  String _errorMessage = '';
+
+  void _onDigitPressed(String digit) {
+    if (_enteredPasscode.length < 6) {
+      setState(() {
+        _enteredPasscode += digit;
+        _errorMessage = '';
+      });
+
+      if (_enteredPasscode.length == 6) {
+        _verifyPasscode();
+      }
+    }
+  }
+
+  void _onBackspace() {
+    if (_enteredPasscode.isNotEmpty) {
+      setState(() {
+        _enteredPasscode = _enteredPasscode.substring(0, _enteredPasscode.length - 1);
+        _errorMessage = '';
+      });
+    }
+  }
+
+  void _verifyPasscode() {
+    if (_enteredPasscode == widget.correctPasscode) {
+      Navigator.of(context).pop(true);
+    } else {
+      setState(() {
+        _errorMessage = 'Incorrect passcode. Try again.';
+        _enteredPasscode = '';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: const Color(0xFF1C1C1E),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.lock_outline,
+              size: 48,
+              color: Colors.white70,
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Enter Passcode',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 24),
+            // Passcode dots
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(6, (index) {
+                return Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 6),
+                  width: 14,
+                  height: 14,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: index < _enteredPasscode.length
+                        ? Colors.white
+                        : Colors.white24,
+                  ),
+                );
+              }),
+            ),
+            if (_errorMessage.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(
+                _errorMessage,
+                style: const TextStyle(color: Colors.redAccent, fontSize: 14),
+              ),
+            ],
+            const SizedBox(height: 24),
+            // Number pad
+            GridView.count(
+              shrinkWrap: true,
+              crossAxisCount: 3,
+              childAspectRatio: 1.5,
+              physics: const NeverScrollableScrollPhysics(),
+              children: [
+                for (var i = 1; i <= 9; i++)
+                  _buildDigitButton(i.toString()),
+                const SizedBox.shrink(),
+                _buildDigitButton('0'),
+                IconButton(
+                  onPressed: _onBackspace,
+                  icon: const Icon(Icons.backspace_outlined, color: Colors.white70),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDigitButton(String digit) {
+    return InkWell(
+      onTap: () => _onDigitPressed(digit),
+      borderRadius: BorderRadius.circular(40),
+      child: Container(
+        alignment: Alignment.center,
+        child: Text(
+          digit,
+          style: const TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.w500,
+            color: Colors.white,
+          ),
+        ),
+      ),
+    );
+  }
+}
