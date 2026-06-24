@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:local_auth/local_auth.dart';
+import 'package:local_auth_android/local_auth_android.dart';
+import 'package:local_auth_ios/local_auth_ios.dart';
 
 import 'themes/app_theme.dart';
 import 'providers/auth_provider.dart';
@@ -47,10 +50,8 @@ import 'screens/saved/saved_messages_screen.dart';
 import 'screens/archive/archived_chats_screen.dart';
 import 'services/notification_service.dart';
 import 'services/connectivity.dart';
-import 'services/online_status_service.dart'; // ✅ ADD THIS
-// import 'package:agora_uikit/agora_uikit.dart'; // or correct import
+import 'services/online_status_service.dart';
 import 'services/call_service.dart';
-
 
 const String _supabaseUrl = String.fromEnvironment('SUPABASE_URL', 
     defaultValue: 'https://ziesdpcajbzsffemgfiw.supabase.co');
@@ -61,9 +62,9 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await NotificationService.init();
-await NotificationService.requestPermission();  // ADD THIS LINE
-ConnectivityService().initialize();
-CallService.initialize('8a2cea909f994b0d9e61146e99710277');
+  await NotificationService.requestPermission();
+  ConnectivityService().initialize();
+  CallService.initialize('8a2cea909f994b0d9e61146e99710277');
     
   try {
     await Supabase.initialize(
@@ -102,6 +103,9 @@ class AuraChatApp extends StatefulWidget {
 class _AuraChatAppState extends State<AuraChatApp> 
     with WidgetsBindingObserver {
 
+  DateTime? _backgroundTime;
+  bool _isLocked = false;
+
   @override
   void initState() {
     super.initState();
@@ -121,13 +125,97 @@ class _AuraChatAppState extends State<AuraChatApp>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // ✅ ADD ONLINE STATUS HANDLING
-    if (state == AppLifecycleState.resumed) {
+    final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+    
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
+      // App went to background
+      _backgroundTime = DateTime.now();
+      
+      // If biometric or passcode is enabled, lock immediately
+      if (settingsProvider.biometricLock || settingsProvider.appPasscode) {
+        setState(() => _isLocked = true);
+      }
+    } else if (state == AppLifecycleState.resumed) {
+      // App came back to foreground
       OnlineStatusService.setOnline();
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       authProvider.refreshSession();
-    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
-      OnlineStatusService.setOffline();
+      
+      // Check if we need to unlock
+      if (_isLocked && _backgroundTime != null) {
+        final elapsed = DateTime.now().difference(_backgroundTime!);
+        final timeoutMinutes = settingsProvider.autoLockTimeout;
+        
+        if (elapsed.inMinutes >= timeoutMinutes) {
+          // Time exceeded, show lock screen
+          _showLockScreen();
+        } else {
+          // Within timeout, unlock automatically
+          setState(() => _isLocked = false);
+        }
+      }
+    }
+  }
+
+  Future<void> _showLockScreen() async {
+    final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+    
+    if (settingsProvider.biometricLock) {
+      // Try biometric first
+      final localAuth = LocalAuthentication();
+      try {
+        final didAuth = await localAuth.authenticate(
+          localizedReason: 'Unlock AURA Chat',
+          authMessages: const [
+            AndroidAuthMessages(
+              signInTitle: 'Biometric Authentication',
+              cancelButton: 'Cancel',
+              biometricHint: 'Verify your identity',
+              biometricNotRecognized: 'Not recognized, try again',
+              biometricRequiredTitle: 'Biometric authentication required',
+              biometricSuccess: 'Authentication successful',
+              deviceCredentialsRequiredTitle: 'Device credentials required',
+              deviceCredentialsSetupDescription: 'Please set up device credentials',
+              goToSettingsButton: 'Go to Settings',
+              goToSettingsDescription: 'Please set up biometric authentication in your device settings',
+            ),
+            IOSAuthMessages(
+              cancelButton: 'Cancel',
+              goToSettingsButton: 'Go to Settings',
+              goToSettingsDescription: 'Please set up biometric authentication in your device settings',
+              lockOut: 'Please re-enable biometric authentication',
+            ),
+          ],
+          options: const AuthenticationOptions(
+            biometricOnly: false,
+            stickyAuth: true,
+            sensitiveTransaction: true,
+            useErrorDialogs: true,
+          ),
+        );
+        
+        if (didAuth) {
+          setState(() => _isLocked = false);
+          return;
+        }
+      } catch (e) {
+        debugPrint('Biometric auth failed: $e');
+      }
+    }
+    
+    if (settingsProvider.appPasscode && mounted) {
+      // Show passcode dialog
+      final result = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => _PasscodeDialog(
+          correctPasscode: settingsProvider.passcode,
+        ),
+      );
+      
+      if (result == true) {
+        setState(() => _isLocked = false);
+      }
     }
   }
 
@@ -151,6 +239,13 @@ class _AuraChatAppState extends State<AuraChatApp>
             darkTheme: AppTheme.darkTheme,
             themeMode: themeProvider.themeMode,
             initialRoute: '/',
+            builder: (context, child) {
+              // Show lock screen if locked
+              if (_isLocked) {
+                return _buildLockScreen();
+              }
+              return child!;
+            },
             routes: {
               '/': (context) => const SplashScreen(),
               '/terms': (context) => const TermsScreen(),
@@ -176,23 +271,11 @@ class _AuraChatAppState extends State<AuraChatApp>
               '/ai_studio': (context) => const AIStudioScreen(),
               '/channel': (context) => const ChannelScreen(),
               '/calls': (context) => const CallScreen(
-               channelName: 'test_channel',
-               isVideoCall: true,
-               ),
+                channelName: 'test_channel',
+                isVideoCall: true,
+              ),
               '/global_search': (context) => const GlobalSearchScreen(),
               '/contacts': (context) => const ContactsScreen(),
               '/settings': (context) => const SettingsScreen(),
               '/notifications_settings': (context) => const NotificationsSettingsScreen(),
-              '/data_storage': (context) => const DataStorageScreen(),
-              '/account_settings': (context) => const AccountSettingsScreen(),
-              '/bot_settings': (context) => const BotSettingsScreen(),
-              '/invite_friends': (context) => const InviteFriendsScreen(),
-              '/saved_messages': (context) => const SavedMessagesScreen(),
-              '/archived_chats': (context) => const ArchivedChatsScreen(),
-            },
-          );
-        },
-      ),
-    );
-  }
-}
+              '/data_storage': (context) =>
