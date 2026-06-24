@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:local_auth/local_auth.dart';
+import 'package:local_auth_android/local_auth_android.dart';
+import 'package:local_auth_ios/local_auth_ios.dart';
 
 import 'themes/app_theme.dart';
 import 'providers/auth_provider.dart';
@@ -113,7 +116,6 @@ class _AuraChatAppState extends State<AuraChatApp>
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       authProvider.listenToAuthChanges();
       
-      // Start listening for incoming calls
       final currentUser = Supabase.instance.client.auth.currentUser;
       if (currentUser != null) {
         CallSignalingService.startListening(currentUser.id);
@@ -123,7 +125,7 @@ class _AuraChatAppState extends State<AuraChatApp>
             Navigator.of(context).push(
               MaterialPageRoute(
                 fullscreenDialog: true,
-                builder: (_) => CallScreen.incoming(callSignal: signal),
+                builder: (_) => CallScreen.incoming(incomingSignal: signal),
               ),
             );
           }
