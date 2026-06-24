@@ -117,7 +117,8 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
 
   void _trackPresence() {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    final currentUserId = authProvider.user?.id;
+    // FIXED: Use mockUserId as fallback
+    final currentUserId = authProvider.user?.id ?? authProvider.mockUserId;
     if (currentUserId == null) return;
 
     _presenceChannel?.track({'user_id': currentUserId});
@@ -144,9 +145,9 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
     try {
       final supabase = Supabase.instance.client;
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      final currentUserId = authProvider.user?.id;
+      // FIXED: Use mockUserId as fallback
+      final currentUserId = authProvider.user?.id ?? authProvider.mockUserId;
 
-      // FIXED: Removed backslash before $, added error logging
       final searchTerm = '%${query.trim()}%';
       debugPrint('Searching for: $searchTerm');
 
@@ -221,7 +222,8 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
     try {
       final supabase = Supabase.instance.client;
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      final currentUserId = authProvider.user?.id;
+      // FIXED: Use mockUserId as fallback
+      final currentUserId = authProvider.user?.id ?? authProvider.mockUserId;
 
       if (currentUserId == null) {
         throw Exception('Not authenticated');
