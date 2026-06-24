@@ -191,7 +191,8 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       final supabase = Supabase.instance.client;
-      final userId = authProvider.user?.id;
+      // FIXED: Use mockUserId as fallback
+      final userId = authProvider.user?.id ?? authProvider.mockUserId;
 
       if (userId == null || _chatId == null) return;
 
@@ -470,7 +471,8 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       final supabase = Supabase.instance.client;
-      final userId = authProvider.user?.id;
+      // FIXED: Use mockUserId as fallback
+      final userId = authProvider.user?.id ?? authProvider.mockUserId;
 
       if (userId == null) return;
 
@@ -599,6 +601,8 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
+    // FIXED: Use mockUserId as fallback for current user ID
+    final currentUserId = authProvider.user?.id ?? authProvider.mockUserId;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0F),
@@ -652,7 +656,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     overflow: TextOverflow.ellipsis,
                   ),
                   Text(
-                    'Online',
+                    _isGroup ? 'Group' : 'Online',
                     style: TextStyle(
                       fontSize: 12,
                       color: const Color(0xFF06B6D4).withOpacity(0.8),
@@ -713,7 +717,8 @@ class _ChatScreenState extends State<ChatScreen> {
                         itemCount: _messages.length,
                         itemBuilder: (context, index) {
                           final message = _messages[index];
-                          final isMe = message['sender_id'] == authProvider.user?.id;
+                          // FIXED: Use mockUserId as fallback for ownership check
+                          final isMe = message['sender_id'] == currentUserId;
                           final showAvatar = !isMe && (index == 0 || 
                               _messages[index - 1]['sender_id'] != message['sender_id']);
 
@@ -897,7 +902,7 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Widget _buildMessageBubble(
+    Widget _buildMessageBubble(
     BuildContext context, {
     required Map<String, dynamic> message,
     required bool isMe,
@@ -909,6 +914,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final createdAt = DateTime.parse(message['created_at']);
     final user = message['users'];
     final isEdited = message['is_edited'] == true;
+    final senderId = message['sender_id'] as String?;
 
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -923,21 +929,47 @@ class _ChatScreenState extends State<ChatScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (!isMe && showAvatar)
-              CircleAvatar(
-                radius: 16,
-                backgroundColor: const Color(0xFF1a103c),
-                backgroundImage: user?['avatar_url'] != null
-                    ? NetworkImage(user['avatar_url'])
+              GestureDetector(
+                onTap: senderId != null
+                    ? () => Navigator.pushNamed(
+                          context,
+                          '/public_profile',
+                          arguments: {
+                            'userId': senderId,
+                            'username': user?['username'],
+                            'avatarUrl': user?['avatar_url'],
+                            'bio': user?['bio'],
+                          },
+                        )
                     : null,
-                child: user?['avatar_url'] == null
-                    ? Text(
-                        (user?['username'] ?? 'U')[0].toUpperCase(),
-                        style: const TextStyle(
-                          color: Color(0xFF8B5CF6),
-                          fontSize: 12,
-                        ),
-                      )
-                    : null,
+                child: Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: user?['avatar_url'] == null
+                        ? const LinearGradient(
+                            colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
+                          )
+                        : null,
+                    image: user?['avatar_url'] != null
+                        ? DecorationImage(
+                            image: NetworkImage(user['avatar_url']),
+                            fit: BoxFit.cover,
+                          )
+                        : null,
+                  ),
+                  child: user?['avatar_url'] == null
+                      ? Text(
+                          (user?['username'] ?? 'U')[0].toUpperCase(),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        )
+                      : null,
+                ),
               ),
             if (!isMe && !showAvatar)
               const SizedBox(width: 32),
@@ -968,6 +1000,34 @@ class _ChatScreenState extends State<ChatScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // Show sender name in group chats (tappable)
+                    if (_isGroup && !isMe && showAvatar)
+                      GestureDetector(
+                        onTap: senderId != null
+                            ? () => Navigator.pushNamed(
+                                  context,
+                                  '/public_profile',
+                                  arguments: {
+                                    'userId': senderId,
+                                    'username': user?['username'],
+                                    'avatarUrl': user?['avatar_url'],
+                                    'bio': user?['bio'],
+                                  },
+                                )
+                            : null,
+                        child: Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: Text(
+                            user?['username'] ?? 'Unknown',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: const Color(0xFF8B5CF6).withOpacity(0.9),
+                            ),
+                          ),
+                        ),
+                      ),
+
                     if (message['reply_to'] != null)
                       Container(
                         margin: const EdgeInsets.only(bottom: 4),
