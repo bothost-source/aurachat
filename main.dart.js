@@ -118228,10 +118228,10 @@ s=s.PB(0,"online_users",B.l_)
 this.z=s
 s.aJM(new A.aKO(this)).UH(0,new A.aKP(this))},
 oL(a){return this.axt(a)},
-axt(a){var s=0,r=A.m(t.H),q,p=2,o,n=this,m,l,k,j,i,h,g,f,e,d,c
-var $async$oL=A.i(function(b,a0){if(b===1){o=a0
-s=p}while(true)switch(s){case 0:d=B.d.d_(a)
-if(d.length===0){n.L(new A.aKE(n))
+axt(a){var s=0,r=A.m(t.H),q,p=2,o,n=this,m,l,k,j,i,h,g,f,e,d,c,b
+var $async$oL=A.i(function(a0,a1){if(a0===1){o=a1
+s=p}while(true)switch(s){case 0:c=B.d.d_(a)
+if(c.length===0){n.L(new A.aKE(n))
 s=1
 break}A.ala()
 n.L(new A.aKF(n))
@@ -118243,17 +118243,18 @@ f=n.c
 f.toString
 l=A.cc(f,!1,t.d)
 f=l.b
-k=f==null?null:f.a
-j="%"+d+"%"
+e=f==null?null:f.a
+k=e==null?l.Q:e
+j="%"+c+"%"
 A.da().$1("Searching for: "+A.h(j))
-d=m.bt("users").jN(0,"id, username, display_name, avatar_url, bio, phone, created_at")
+c=m.bt("users").jN(0,"id, username, display_name, avatar_url, bio, phone, created_at")
 s=7
-return A.e(A.la(d.os(d.m2("username","ilike."+j)),d.$ti.c).a7i(20),$async$oL)
-case 7:i=a0
+return A.e(A.la(c.os(c.m2("username","ilike."+j)),c.$ti.c).a7i(20),$async$oL)
+case 7:i=a1
 A.da().$1("Search response: "+A.h(i))
-d=A.dH(i,!0,t.a)
-f=A.a8(d).i("b4<1>")
-h=A.a9(new A.b4(d,new A.aKG(k),f),!0,f.i("z.E"))
+c=A.dH(i,!0,t.a)
+f=A.a8(c).i("b4<1>")
+h=A.a9(new A.b4(c,new A.aKG(k),f),!0,f.i("z.E"))
 s=8
 return A.e(n.DW(h),$async$oL)
 case 8:n.L(new A.aKH(n,h))
@@ -118263,8 +118264,8 @@ case 9:p=2
 s=6
 break
 case 4:p=3
-c=o
-g=A.W(c)
+b=o
+g=A.W(b)
 A.da().$1("Search error: "+A.h(g))
 n.L(new A.aKI(n,g))
 s=6
@@ -118306,8 +118307,8 @@ case 6:case 1:return A.k(q,r)
 case 2:return A.j(o,r)}})
 return A.l($async$DW,r)},
 qU(a){return this.ayO(a)},
-ayO(a3){var s=0,r=A.m(t.H),q,p=2,o,n=[],m=this,l,k,j,i,h,g,f,e,d,c,b,a,a0,a1,a2
-var $async$qU=A.i(function(a4,a5){if(a4===1){o=a5
+ayO(a4){var s=0,r=A.m(t.H),q,p=2,o,n=[],m=this,l,k,j,i,h,g,f,e,d,c,b,a,a0,a1,a2,a3
+var $async$qU=A.i(function(a5,a6){if(a5===1){o=a6
 s=p}while(true)switch(s){case 0:m.L(new A.aKJ(m))
 p=4
 c=$.dh().b
@@ -118317,45 +118318,46 @@ c=m.c
 c.toString
 k=A.cc(c,!1,t.d)
 c=k.b
-j=c==null?null:c.a
+b=c==null?null:c.a
+j=b==null?k.Q:b
 if(j==null){c=A.bW("Not authenticated")
-throw A.d(c)}c=J.ad(a3)
-i=A.aT(c.h(a3,"id"))
+throw A.d(c)}c=J.ad(a4)
+i=A.aT(c.h(a4,"id"))
 s=7
 return A.e(l.bt("chat_participants").jN(0,"chat_id").dW("user_id",j),$async$qU)
-case 7:h=a5
-b=A.dH(h,!0,t.a)
-a=A.a8(b).i("ai<1,p>")
-g=A.a9(new A.ai(b,new A.aKK(),a),!0,a.i("aC.E"))
+case 7:h=a6
+a=A.dH(h,!0,t.a)
+a0=A.a8(a).i("ai<1,p>")
+g=A.a9(new A.ai(a,new A.aKK(),a0),!0,a0.i("aC.E"))
 s=J.bw(g)!==0?8:9
 break
 case 8:s=10
 return A.e(l.bt("chat_participants").jN(0,"chat_id, chats!inner(type)").dW("user_id",i).a6E("chat_id",g).dW("chats.type","direct").S3(),$async$qU)
-case 10:f=a5
-if(f!=null){b=m.c
-if(b!=null){a=J.a7(f,"chat_id")
-a0=c.h(a3,"username")
-if(a0==null)a0="Chat"
-c=A.X(["chatId",a,"chatName",a0,"chatAvatar",c.h(a3,"avatar_url"),"isGroup",!1],t.N,t.z)
-A.aS(b,!1).dG("/chat",c,t.X)}m.L(new A.aKL(m))
+case 10:f=a6
+if(f!=null){a=m.c
+if(a!=null){a0=J.a7(f,"chat_id")
+a1=c.h(a4,"username")
+if(a1==null)a1="Chat"
+c=A.X(["chatId",a0,"chatName",a1,"chatAvatar",c.h(a4,"avatar_url"),"isGroup",!1],t.N,t.z)
+A.aS(a,!1).dG("/chat",c,t.X)}m.L(new A.aKL(m))
 n=[1]
 s=5
 break}case 9:e=B.h.j(Date.now())
-b=t.N
+a=t.N
 s=11
-return A.e(l.bt("chats").i6(0,A.X(["id",e,"name",null,"type","direct","created_by",j,"created_at",new A.bI(Date.now(),!1).f_()],b,t.T)),$async$qU)
+return A.e(l.bt("chats").i6(0,A.X(["id",e,"name",null,"type","direct","created_by",j,"created_at",new A.bI(Date.now(),!1).f_()],a,t.T)),$async$qU)
 case 11:s=12
-return A.e(l.bt("chat_participants").i6(0,A.c([A.X(["chat_id",e,"user_id",j,"role","member","joined_at",new A.bI(Date.now(),!1).f_()],b,b),A.X(["chat_id",e,"user_id",i,"role","member","joined_at",new A.bI(Date.now(),!1).f_()],b,b)],t.m0)),$async$qU)
-case 12:a=m.c
-if(a!=null){a0=c.h(a3,"username")
-if(a0==null)a0="Chat"
-b=A.X(["chatId",e,"chatName",a0,"chatAvatar",c.h(a3,"avatar_url"),"isGroup",!1],b,t.z)
-A.aS(a,!1).dG("/chat",b,t.X)}n.push(6)
+return A.e(l.bt("chat_participants").i6(0,A.c([A.X(["chat_id",e,"user_id",j,"role","member","joined_at",new A.bI(Date.now(),!1).f_()],a,a),A.X(["chat_id",e,"user_id",i,"role","member","joined_at",new A.bI(Date.now(),!1).f_()],a,a)],t.m0)),$async$qU)
+case 12:a0=m.c
+if(a0!=null){a1=c.h(a4,"username")
+if(a1==null)a1="Chat"
+a=A.X(["chatId",e,"chatName",a1,"chatAvatar",c.h(a4,"avatar_url"),"isGroup",!1],a,t.z)
+A.aS(a0,!1).dG("/chat",a,t.X)}n.push(6)
 s=5
 break
 case 4:p=3
-a2=o
-d=A.W(a2)
+a3=o
+d=A.W(a3)
 c=m.c
 if(c!=null){c=c.a7(t.J)
 c.toString
