@@ -392,7 +392,7 @@ class _MainAppScreenState extends State<MainAppScreen>
           ),
           const SizedBox(height: 16),
           Text(
-            AppLocalizations.get('call_history'),
+            'Tap + to start a call',
             style: TextStyle(
               color: Colors.white.withOpacity(0.3),
               fontSize: 16,
@@ -536,7 +536,7 @@ class _MainAppScreenState extends State<MainAppScreen>
               child: Column(
                 children: [
                   Text(
-                    AppLocalizations.get('share_code'),
+                    'Share this code to join',
                     style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 13),
                     textAlign: TextAlign.center,
                   ),
@@ -556,16 +556,31 @@ class _MainAppScreenState extends State<MainAppScreen>
             
             const SizedBox(height: 20),
             _buildOptionTile(
-              icon: Icons.phone,
-              label: AppLocalizations.get('new_call'),
+              icon: Icons.person_search,
+              label: 'Call from Contacts',
               onTap: () {
                 Navigator.pop(context);
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => CallScreen(
+                    builder: (context) => const CallScreen.pick(),
+                  ),
+                );
+              },
+            ),
+            _buildOptionTile(
+              icon: Icons.phone,
+              label: 'Start Voice Call',
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => CallScreen.active(
                       channelName: channelName,
                       isVideoCall: false,
+                      targetUserId: 'unknown',
+                      targetUserName: 'Unknown',
                     ),
                   ),
                 );
@@ -573,22 +588,104 @@ class _MainAppScreenState extends State<MainAppScreen>
             ),
             _buildOptionTile(
               icon: Icons.videocam,
-              label: AppLocalizations.get('video_call'),
+              label: 'Start Video Call',
               onTap: () {
                 Navigator.pop(context);
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => CallScreen(
+                    builder: (context) => CallScreen.active(
                       channelName: channelName,
                       isVideoCall: true,
+                      targetUserId: 'unknown',
+                      targetUserName: 'Unknown',
                     ),
                   ),
                 );
               },
             ),
+            _buildOptionTile(
+              icon: Icons.dialpad,
+              label: 'Join by Code',
+              onTap: () {
+                Navigator.pop(context);
+                _showCallCodeDialog(context);
+              },
+            ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _showCallCodeDialog(BuildContext context) {
+    final codeController = TextEditingController();
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1a103c),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text(
+          'Join Call',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: TextField(
+          controller: codeController,
+          style: const TextStyle(color: Colors.white),
+          decoration: InputDecoration(
+            hintText: 'Enter channel name...',
+            hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: Color(0xFF8B5CF6)),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: Colors.white.withOpacity(0.5)),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final code = codeController.text.trim();
+              if (code.isNotEmpty) {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => CallScreen.active(
+                      channelName: code,
+                      isVideoCall: true,
+                      targetUserId: 'unknown',
+                      targetUserName: 'Unknown',
+                    ),
+                  ),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF8B5CF6),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: const Text('Join'),
+          ),
+        ],
       ),
     );
   }
