@@ -11,7 +11,7 @@ class SettingsProvider extends ChangeNotifier {
   bool _appPasscode = false;
   bool _biometricLock = false;
   String _passcode = '';
-  int _autoLockTimeout = 1; // minutes: 1, 5, 10
+  int _autoLockTimeout = 5; // minutes
 
   // Notification Settings
   bool _messageTones = true;
@@ -45,10 +45,13 @@ class SettingsProvider extends ChangeNotifier {
 
   // Getters
   bool get twoStepVerification => _twoStepVerification;
-  bool get passcodeLock => _appPasscode;
+  bool get appPasscode => _appPasscode;
   bool get biometricLock => _biometricLock;
   String get passcode => _passcode;
   int get autoLockTimeout => _autoLockTimeout;
+
+  // Alias for appPasscode (used by lock screen)
+  bool get passcodeLock => _appPasscode;
 
   bool get messageTones => _messageTones;
   bool get groupNotifications => _groupNotifications;
@@ -86,7 +89,7 @@ class SettingsProvider extends ChangeNotifier {
     _appPasscode = prefs.getBool('app_passcode') ?? false;
     _biometricLock = prefs.getBool('biometric_lock') ?? false;
     _passcode = prefs.getString('passcode') ?? '';
-    _autoLockTimeout = prefs.getInt('auto_lock_timeout') ?? 1;
+    _autoLockTimeout = prefs.getInt('auto_lock_timeout') ?? 5;
 
     // Notifications
     _messageTones = prefs.getBool('message_tones') ?? true;
@@ -122,7 +125,6 @@ class SettingsProvider extends ChangeNotifier {
 
     notifyListeners();
 
-    // Also sync from Supabase if user is logged in
     _syncFromSupabase();
   }
 
@@ -202,10 +204,10 @@ class SettingsProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> setAutoLockTimeout(int minutes) async {
-    _autoLockTimeout = minutes;
+  Future<void> setAutoLockTimeout(int value) async {
+    _autoLockTimeout = value;
     final prefs = await _prefs;
-    await prefs.setInt('auto_lock_timeout', minutes);
+    await prefs.setInt('auto_lock_timeout', value);
     notifyListeners();
   }
 
