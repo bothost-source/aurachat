@@ -39,7 +39,7 @@ class CallService {
     await engine.setVideoEncoderConfiguration(
       const VideoEncoderConfiguration(
         dimensions: VideoDimensions(width: 640, height: 360),
-        frameRate: VideoFrameRate.fps15,
+        frameRate: 15, // Changed from VideoFrameRate.fps15 to int
         bitrate: 0,
       ),
     );
