@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class SettingsProvider extends ChangeNotifier {
   final _prefs = SharedPreferences.getInstance();
-  final _supabase = Supabase.instance.client;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   // Security Settings
   bool _twoStepVerification = false;
@@ -125,39 +127,36 @@ class SettingsProvider extends ChangeNotifier {
 
     notifyListeners();
 
-    _syncFromSupabase();
+    _syncFromFirebase();
   }
 
-  Future<void> _syncFromSupabase() async {
+  Future<void> _syncFromFirebase() async {
     try {
-      final user = _supabase.auth.currentUser;
+      final user = _auth.currentUser;
       if (user == null) return;
 
-      final response = await _supabase
-          .from('user_settings')
-          .select()
-          .eq('user_id', user.id)
-          .single();
+      final doc = await _firestore.collection('user_settings').doc(user.uid).get();
 
-      if (response != null) {
-        _twoStepVerification = response['two_step_verification'] ?? _twoStepVerification;
-        _phoneNumberVisible = response['phone_number_visible'] ?? _phoneNumberVisible;
-        _lastSeenVisible = response['last_seen_visible'] ?? _lastSeenVisible;
-        _profilePhotoVisible = response['profile_photo_visible'] ?? _profilePhotoVisible;
+      if (doc.exists) {
+        final data = doc.data()!;
+        _twoStepVerification = data['two_step_verification'] ?? _twoStepVerification;
+        _phoneNumberVisible = data['phone_number_visible'] ?? _phoneNumberVisible;
+        _lastSeenVisible = data['last_seen_visible'] ?? _lastSeenVisible;
+        _profilePhotoVisible = data['profile_photo_visible'] ?? _profilePhotoVisible;
         notifyListeners();
       }
     } catch (e) {
-      debugPrint('Sync from Supabase error: $e');
+      debugPrint('Sync from Firebase error: $e');
     }
   }
 
-  Future<void> _saveToSupabase() async {
+  Future<void> _saveToFirebase() async {
     try {
-      final user = _supabase.auth.currentUser;
+      final user = _auth.currentUser;
       if (user == null) return;
 
-      await _supabase.from('user_settings').upsert({
-        'user_id': user.id,
+      await _firestore.collection('user_settings').doc(user.uid).set({
+        'user_id': user.uid,
         'two_step_verification': _twoStepVerification,
         'phone_number_visible': _phoneNumberVisible,
         'last_seen_visible': _lastSeenVisible,
@@ -167,10 +166,10 @@ class SettingsProvider extends ChangeNotifier {
         'voice_video_calls_visible': _voiceVideoCallsVisible,
         'find_by_phone': _findByPhone,
         'find_by_username': _findByUsername,
-        'updated_at': DateTime.now().toIso8601String(),
-      });
+        'updated_at': Timestamp.now(),
+      }, SetOptions(merge: true));
     } catch (e) {
-      debugPrint('Save to Supabase error: $e');
+      debugPrint('Save to Firebase error: $e');
     }
   }
 
@@ -180,7 +179,7 @@ class SettingsProvider extends ChangeNotifier {
     final prefs = await _prefs;
     await prefs.setBool('two_step_verification', value);
     notifyListeners();
-    _saveToSupabase();
+    _saveToFirebase();
   }
 
   Future<void> setAppPasscode(bool value) async {
@@ -267,7 +266,7 @@ class SettingsProvider extends ChangeNotifier {
     final prefs = await _prefs;
     await prefs.setBool('phone_number_visible', value);
     notifyListeners();
-    _saveToSupabase();
+    _saveToFirebase();
   }
 
   Future<void> setLastSeenVisible(bool value) async {
@@ -275,7 +274,7 @@ class SettingsProvider extends ChangeNotifier {
     final prefs = await _prefs;
     await prefs.setBool('last_seen_visible', value);
     notifyListeners();
-    _saveToSupabase();
+    _saveToFirebase();
   }
 
   Future<void> setProfilePhotoVisible(bool value) async {
@@ -283,7 +282,7 @@ class SettingsProvider extends ChangeNotifier {
     final prefs = await _prefs;
     await prefs.setBool('profile_photo_visible', value);
     notifyListeners();
-    _saveToSupabase();
+    _saveToFirebase();
   }
 
   Future<void> setForwardedMessages(bool value) async {
@@ -291,7 +290,7 @@ class SettingsProvider extends ChangeNotifier {
     final prefs = await _prefs;
     await prefs.setBool('forwarded_messages', value);
     notifyListeners();
-    _saveToSupabase();
+    _saveToFirebase();
   }
 
   Future<void> setAddToGroups(bool value) async {
@@ -299,7 +298,7 @@ class SettingsProvider extends ChangeNotifier {
     final prefs = await _prefs;
     await prefs.setBool('add_to_groups', value);
     notifyListeners();
-    _saveToSupabase();
+    _saveToFirebase();
   }
 
   Future<void> setVoiceVideoCallsVisible(bool value) async {
@@ -307,7 +306,7 @@ class SettingsProvider extends ChangeNotifier {
     final prefs = await _prefs;
     await prefs.setBool('voice_video_calls_visible', value);
     notifyListeners();
-    _saveToSupabase();
+    _saveToFirebase();
   }
 
   Future<void> setFindByPhone(bool value) async {
@@ -315,7 +314,7 @@ class SettingsProvider extends ChangeNotifier {
     final prefs = await _prefs;
     await prefs.setBool('find_by_phone', value);
     notifyListeners();
-    _saveToSupabase();
+    _saveToFirebase();
   }
 
   Future<void> setFindByUsername(bool value) async {
@@ -323,7 +322,7 @@ class SettingsProvider extends ChangeNotifier {
     final prefs = await _prefs;
     await prefs.setBool('find_by_username', value);
     notifyListeners();
-    _saveToSupabase();
+    _saveToFirebase();
   }
 
   // Theme
