@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../../providers/auth_provider.dart';
+import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../services/app_localizations.dart';
 
 class SetupProfileScreen extends StatefulWidget {
