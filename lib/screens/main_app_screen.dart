@@ -40,7 +40,7 @@ class _MainAppScreenState extends State<MainAppScreen>
 
   @override
   Widget build(BuildContext context) {
-    final authProvider = Provider.of<AuthProvider>(context);
+    final authProvider = Provider.of<AuraAuthProvider>(context);
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0F),
@@ -733,7 +733,7 @@ class _MainAppScreenState extends State<MainAppScreen>
               color: Colors.red,
               onTap: () async {
                 Navigator.pop(context);
-                final authProvider = Provider.of<AuthProvider>(context, listen: false);
+                final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
                 await authProvider.signOut();
                 if (context.mounted) {
                   Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
