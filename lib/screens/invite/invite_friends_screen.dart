@@ -29,13 +29,13 @@ class InviteFriendsScreen extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Share TARRIFIC CHAT with your friends',
+              'Share AURACHAT with your friends',
               style: TextStyle(color: Colors.grey.withOpacity(0.7)),
             ),
             const SizedBox(height: 32),
             ElevatedButton(
               onPressed: () {
-                Share.share('Join me on TARRIFIC CHAT! Download the app now.');
+                Share.share('Join me on AURACHAT! Download the app now.');
               },
               child: const Text('Share Invite Link'),
             ),
