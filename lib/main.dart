@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:local_auth_android/local_auth_android.dart';
 import 'package:local_auth_ios/local_auth_ios.dart';
 
+import 'firebase_options.dart';
 import 'themes/app_theme.dart';
 import 'providers/auth_provider.dart';
 import 'providers/chat_provider.dart';
@@ -54,28 +56,17 @@ import 'services/online_status_service.dart';
 import 'services/call_service.dart';
 import 'services/call_signaling_service.dart';
 
-const String _supabaseUrl = String.fromEnvironment('SUPABASE_URL', 
-    defaultValue: 'https://ziesdpcajbzsffemgfiw.supabase.co');
-const String _supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY',
-    defaultValue: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InppZXNkcGNhamJ6c2ZmZW1nZml3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIxNjExNzAsImV4cCI6MjA5NzczNzE3MH0.TYexcUcB5N7z5tmSton2Hzdr0nuv8Nxc3Jf_O7akDd4');
-
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
 
   await NotificationService.init();
   await NotificationService.requestPermission();
   ConnectivityService().initialize();
   CallService.initialize('8a2cea909f994b0d9e61146e99710277');
-    
-  try {
-    await Supabase.initialize(
-      url: _supabaseUrl,
-      anonKey: _supabaseAnonKey,
-      debug: false,
-    );
-  } catch (e) {
-    debugPrint('Supabase init error: $e');
-  }
 
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
@@ -116,9 +107,9 @@ class _AuraChatAppState extends State<AuraChatApp>
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       authProvider.listenToAuthChanges();
       
-      final currentUser = Supabase.instance.client.auth.currentUser;
+      final currentUser = FirebaseAuth.instance.currentUser;
       if (currentUser != null) {
-        CallSignalingService.startListening(currentUser.id);
+        CallSignalingService.startListening(currentUser.uid);
         
         CallSignalingService.onCallSignal.listen((signal) {
           if (signal.type == CallSignalType.incoming && mounted) {
