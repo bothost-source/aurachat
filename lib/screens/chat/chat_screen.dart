@@ -14,7 +14,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:intl/intl.dart';
 import 'dart:io';
-import '../../providers/auth_provider.dart';
+import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../providers/chat_provider.dart';
 import 'package:dio/dio.dart';
 
