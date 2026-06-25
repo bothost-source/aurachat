@@ -2,7 +2,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../providers/auth_provider.dart';
 
 // Language support
@@ -207,26 +208,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     try {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      final userId = authProvider.user?.id ?? authProvider.mockUserId;
+      final userId = authProvider.user?.uid ?? authProvider.mockUserId;
       if (userId == null) return;
 
       final fileBytes = await _newProfileImage!.readAsBytes();
       final fileName = 'avatars/$userId/profile_${DateTime.now().millisecondsSinceEpoch}.jpg';
 
-      final supabase = Supabase.instance.client;
-      await supabase.storage.from('profiles').uploadBinary(
-        fileName,
-        fileBytes,
-        fileOptions: const FileOptions(contentType: 'image/jpeg'),
-      );
+      final storage = FirebaseStorage.instance;
+      final ref = storage.ref().child(fileName);
+      await ref.putData(fileBytes);
 
-      final publicUrl = supabase.storage.from('profiles').getPublicUrl(fileName);
+      final publicUrl = await ref.getDownloadURL();
 
       // Update user profile in database
-      await supabase.from('users').update({
+      final firestore = FirebaseFirestore.instance;
+      await firestore.collection('users').doc(userId).update({
         'avatar_url': publicUrl,
-        'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', userId);
+        'updated_at': FieldValue.serverTimestamp(),
+      });
 
       // Update local provider
       await authProvider.updateProfile(photoUrl: publicUrl);
@@ -569,7 +568,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   iconColor: const Color(0xFF8B5CF6),
                   title: AppLocalizations.get('chats'),
                   subtitle: AppLocalizations.get('theme_wallpapers'),
-                  onTap: () => Navigator.pushNamed(context, '/settings'), // or create a dedicated chats settings route
+                  onTap: () => Navigator.pushNamed(context, '/settings'),
                 ),
                 _buildSettingTile(
                   icon: Icons.notifications_none,
