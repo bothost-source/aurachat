@@ -43,7 +43,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
 
     try {
       final storage = FirebaseStorage.instance;
-      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
       final userId = authProvider.user?.uid ?? authProvider.mockUserId;
 
       if (userId == null) {
@@ -81,7 +81,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
 
     try {
       final firestore = FirebaseFirestore.instance;
-      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
       final currentUserId = authProvider.user?.uid ?? authProvider.mockUserId;
 
       final snapshot = await firestore
@@ -92,7 +92,10 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
           .get();
 
       final filtered = snapshot.docs
-          .map((doc) => doc.data())
+          .map((doc) => {
+                'id': doc.id,
+                ...doc.data(),
+              })
           .where((u) => u['id'] != currentUserId)
           .toList();
 
@@ -124,7 +127,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
       final chatProvider = Provider.of<ChatProvider>(context, listen: false);
       final firestore = FirebaseFirestore.instance;
       final userId = authProvider.user?.uid ?? authProvider.mockUserId;
