@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
@@ -14,7 +16,7 @@ import 'package:intl/intl.dart';
 import 'dart:io';
 import '../../providers/auth_provider.dart';
 import '../../providers/chat_provider.dart';
-import 'package:dio/dio.dart'; 
+import 'package:dio/dio.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -33,7 +35,7 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isPlayingAudio = false;
   String? _currentlyPlayingAudioId;
   List<Map<String, dynamic>> _messages = [];
-  RealtimeChannel? _messageSubscription;
+  StreamSubscription? _messageSubscription;
   bool _isLoading = true;
   String? _replyingTo;
   String? _editingMessageId;
@@ -46,7 +48,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    
+
     final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
     if (args != null) {
       _chatId = args['chatId'] as String?;
@@ -67,7 +69,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _editController.dispose();
     _scrollController.dispose();
     _audioPlayer.dispose();
-    _messageSubscription?.unsubscribe();
+    _messageSubscription?.cancel();
     super.dispose();
   }
 
@@ -78,15 +80,41 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     try {
-      final supabase = Supabase.instance.client;
-      final response = await supabase
-          .from('messages')
-          .select('*, users(username, avatar_url)')
-          .eq('chat_id', _chatId!)
-          .order('created_at', ascending: true);
+      final firestore = FirebaseFirestore.instance;
+      final snapshot = await firestore
+          .collection('chats')
+          .doc(_chatId!)
+          .collection('messages')
+          .orderBy('created_at', descending: false)
+          .get();
+
+      final List<Map<String, dynamic>> loadedMessages = [];
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+        final senderId = data['sender_id'] as String?;
+
+        // Get sender info
+        if (senderId != null) {
+          final userDoc = await firestore.collection('users').doc(senderId).get();
+          if (userDoc.exists) {
+            final userData = userDoc.data()!;
+            data['users'] = {
+              'username': userData['username'],
+              'avatar_url': userData['avatar_url'],
+              'bio': userData['bio'],
+            };
+          }
+        }
+
+        loadedMessages.add({
+          'id': doc.id,
+          ...data,
+          'created_at': data['created_at']?.toDate()?.toIso8601String() ?? DateTime.now().toIso8601String(),
+        });
+      }
 
       setState(() {
-        _messages = List<Map<String, dynamic>>.from(response);
+        _messages = loadedMessages;
         _isLoading = false;
       });
 
@@ -100,60 +128,49 @@ class _ChatScreenState extends State<ChatScreen> {
   void _subscribeToMessages() {
     if (_chatId == null) return;
 
-    final supabase = Supabase.instance.client;
-    _messageSubscription = supabase
-        .channel('messages:$_chatId')
-        .onPostgresChanges(
-          event: PostgresChangeEvent.insert,
-          schema: 'public',
-          table: 'messages',
-          filter: PostgresChangeFilter(
-            type: PostgresChangeFilterType.eq,
-            column: 'chat_id',
-            value: _chatId!,
-          ),
-          callback: (payload) {
-            final newId = payload.newRecord['id'];
-            final exists = _messages.any((m) => m['id'] == newId);
-            if (!exists) {
-              setState(() {
-                _messages.add(payload.newRecord);
-              });
-              _scrollToBottom();
-            }
-          },
-        )
-        .onPostgresChanges(
-          event: PostgresChangeEvent.update,
-          schema: 'public',
-          table: 'messages',
-          filter: PostgresChangeFilter(
-            type: PostgresChangeFilterType.eq,
-            column: 'chat_id',
-            value: _chatId!,
-          ),
-          callback: (payload) {
-            final updatedId = payload.newRecord['id'];
-            setState(() {
-              final index = _messages.indexWhere((m) => m['id'] == updatedId);
-              if (index >= 0) {
-                _messages[index] = payload.newRecord;
+    final firestore = FirebaseFirestore.instance;
+    _messageSubscription = firestore
+        .collection('chats')
+        .doc(_chatId!)
+        .collection('messages')
+        .orderBy('created_at', descending: false)
+        .snapshots()
+        .listen((snapshot) {
+          for (final change in snapshot.docChanges) {
+            final doc = change.doc;
+            final data = doc.data()!;
+            final messageId = doc.id;
+
+            if (change.type == DocumentChangeType.added) {
+              final exists = _messages.any((m) => m['id'] == messageId);
+              if (!exists) {
+                setState(() {
+                  _messages.add({
+                    'id': messageId,
+                    ...data,
+                    'created_at': data['created_at']?.toDate()?.toIso8601String() ?? DateTime.now().toIso8601String(),
+                  });
+                });
+                _scrollToBottom();
               }
-            });
-          },
-        )
-        .onPostgresChanges(
-          event: PostgresChangeEvent.delete,
-          schema: 'public',
-          table: 'messages',
-          callback: (payload) {
-            final deletedId = payload.oldRecord['id'];
-            setState(() {
-              _messages.removeWhere((m) => m['id'] == deletedId);
-            });
-          },
-        )
-        .subscribe();
+            } else if (change.type == DocumentChangeType.modified) {
+              setState(() {
+                final index = _messages.indexWhere((m) => m['id'] == messageId);
+                if (index >= 0) {
+                  _messages[index] = {
+                    'id': messageId,
+                    ...data,
+                    'created_at': data['created_at']?.toDate()?.toIso8601String() ?? DateTime.now().toIso8601String(),
+                  };
+                }
+              });
+            } else if (change.type == DocumentChangeType.removed) {
+              setState(() {
+                _messages.removeWhere((m) => m['id'] == messageId);
+              });
+            }
+          }
+        });
   }
 
   void _scrollToBottom() {
@@ -190,14 +207,16 @@ class _ChatScreenState extends State<ChatScreen> {
   }) async {
     try {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      final supabase = Supabase.instance.client;
-      // FIXED: Use mockUserId as fallback
-      final userId = authProvider.user?.id ?? authProvider.mockUserId;
+      final firestore = FirebaseFirestore.instance;
+      // FIXED: Use uid instead of id for Firebase
+      final userId = authProvider.user?.uid ?? authProvider.mockUserId;
 
       if (userId == null || _chatId == null) return;
 
+      final messageId = const Uuid().v4();
+
       final message = {
-        'id': const Uuid().v4(),
+        'id': messageId,
         'chat_id': _chatId!,
         'sender_id': userId,
         'type': type,
@@ -206,25 +225,30 @@ class _ChatScreenState extends State<ChatScreen> {
         'file_name': fileName,
         'file_size': fileSize,
         'reply_to': _replyingTo,
-        'created_at': DateTime.now().toIso8601String(),
+        'created_at': FieldValue.serverTimestamp(),
         'is_read': false,
         'is_edited': false,
       };
 
+      // Add to Firestore
+      await firestore
+          .collection('chats')
+          .doc(_chatId!)
+          .collection('messages')
+          .doc(messageId)
+          .set(message);
+
+      // Update chat last message
+      await firestore.collection('chats').doc(_chatId!).update({
+        'last_message': content,
+        'last_message_at': FieldValue.serverTimestamp(),
+      });
+
       setState(() {
-        _messages.add({
-          ...message,
-          'users': {
-            'username': authProvider.userName,
-            'avatar_url': authProvider.userPhotoUrl,
-          }
-        });
         _replyingTo = null;
       });
 
       _scrollToBottom();
-
-      await supabase.from('messages').insert(message);
     } catch (e) {
       debugPrint('Send message error: $e');
       if (mounted) {
@@ -239,13 +263,18 @@ class _ChatScreenState extends State<ChatScreen> {
     if (newContent.trim().isEmpty) return;
 
     try {
-      final supabase = Supabase.instance.client;
-      
-      await supabase.from('messages').update({
+      final firestore = FirebaseFirestore.instance;
+
+      await firestore
+          .collection('chats')
+          .doc(_chatId!)
+          .collection('messages')
+          .doc(messageId)
+          .update({
         'content': newContent.trim(),
         'is_edited': true,
-        'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', messageId);
+        'updated_at': FieldValue.serverTimestamp(),
+      });
 
       setState(() {
         _editingMessageId = null;
@@ -268,8 +297,13 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _deleteMessage(String messageId) async {
     try {
-      final supabase = Supabase.instance.client;
-      await supabase.from('messages').delete().eq('id', messageId);
+      final firestore = FirebaseFirestore.instance;
+      await firestore
+          .collection('chats')
+          .doc(_chatId!)
+          .collection('messages')
+          .doc(messageId)
+          .delete();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -287,7 +321,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _showEditDialog(String messageId, String currentContent) {
     _editController.text = currentContent;
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -470,9 +504,9 @@ class _ChatScreenState extends State<ChatScreen> {
   }) async {
     try {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      final supabase = Supabase.instance.client;
-      // FIXED: Use mockUserId as fallback
-      final userId = authProvider.user?.id ?? authProvider.mockUserId;
+      final storage = FirebaseStorage.instance;
+      // FIXED: Use uid instead of id for Firebase
+      final userId = authProvider.user?.uid ?? authProvider.mockUserId;
 
       if (userId == null) return;
 
@@ -493,17 +527,13 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       );
 
-      final fileBytes = await file.readAsBytes();
       final ext = file.path.split('.').last;
       final uploadName = 'chat_media/$_chatId/${const Uuid().v4()}.$ext';
 
-      await supabase.storage.from('chat_media').uploadBinary(
-        uploadName,
-        fileBytes,
-        fileOptions: FileOptions(contentType: _getMimeType(ext)),
-      );
+      final ref = storage.ref().child(uploadName);
+      await ref.putFile(file);
 
-      final mediaUrl = supabase.storage.from('chat_media').getPublicUrl(uploadName);
+      final mediaUrl = await ref.getDownloadURL();
 
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
 
@@ -601,8 +631,8 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
-    // FIXED: Use mockUserId as fallback for current user ID
-    final currentUserId = authProvider.user?.id ?? authProvider.mockUserId;
+    // FIXED: Use uid instead of id for Firebase
+    final currentUserId = authProvider.user?.uid ?? authProvider.mockUserId;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0F),
@@ -717,9 +747,9 @@ class _ChatScreenState extends State<ChatScreen> {
                         itemCount: _messages.length,
                         itemBuilder: (context, index) {
                           final message = _messages[index];
-                          // FIXED: Use mockUserId as fallback for ownership check
+                          // FIXED: Use uid instead of id for Firebase
                           final isMe = message['sender_id'] == currentUserId;
-                          final showAvatar = !isMe && (index == 0 || 
+                          final showAvatar = !isMe && (index == 0 ||
                               _messages[index - 1]['sender_id'] != message['sender_id']);
 
                           return GestureDetector(
@@ -976,7 +1006,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
             Flexible(
               child: Container(
-                padding: type == 'text' 
+                padding: type == 'text'
                     ? const EdgeInsets.symmetric(horizontal: 14, vertical: 10)
                     : const EdgeInsets.all(4),
                 decoration: BoxDecoration(
