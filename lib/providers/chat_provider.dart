@@ -1,15 +1,17 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:uuid/uuid.dart'; 
+import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:uuid/uuid.dart';
 
 class ChatProvider extends ChangeNotifier {
-  final _supabase = Supabase.instance.client;
+  final firebase_auth.FirebaseAuth _auth = firebase_auth.FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   List<Map<String, dynamic>> _chats = [];
   List<Map<String, dynamic>> _contacts = [];
   bool _isLoading = false;
   String? _error;
-  RealtimeChannel? _chatsSubscription;
+  StreamSubscription? _chatsSubscription;
 
   List<Map<String, dynamic>> get chats => _chats;
   List<Map<String, dynamic>> get contacts => _contacts;
@@ -26,45 +28,43 @@ class ChatProvider extends ChangeNotifier {
     _error = null;
 
     try {
-      final userId = _supabase.auth.currentUser?.id;
+      final userId = _auth.currentUser?.uid;
       if (userId == null) {
         _setLoading(false);
         return;
       }
 
-      final response = await _supabase
-          .from('chat_participants')
-          .select('chat_id, role, chats!inner(id, name, description, avatar_url, type, created_by, created_at, last_message, last_message_at)')
-          .eq('user_id', userId)
-          .order('chats(last_message_at)', ascending: false);
+      final snapshot = await _firestore
+          .collection('chats')
+          .where('participants', arrayContains: userId)
+          .orderBy('last_message_at', descending: true)
+          .get();
 
       final List<Map<String, dynamic>> formattedChats = [];
 
-      for (final item in response) {
-        final chat = item['chats'] as Map<String, dynamic>;
-        final chatId = chat['id'];
+      for (final doc in snapshot.docs) {
+        final chat = doc.data();
+        final chatId = doc.id;
 
-        final unreadResponse = await _supabase
-            .from('messages')
-            .select('id')
-            .eq('chat_id', chatId)
-            .eq('is_read', false)
-            .neq('sender_id', userId);
+        final unreadSnapshot = await _firestore
+            .collection('chats')
+            .doc(chatId)
+            .collection('messages')
+            .where('is_read', isEqualTo: false)
+            .where('sender_id', isNotEqualTo: userId)
+            .get();
 
-        final unreadCount = unreadResponse.length;
+        final unreadCount = unreadSnapshot.docs.length;
 
         int participantsCount = 0;
         if (chat['type'] == 'group' || chat['type'] == 'channel') {
-          final participantsResponse = await _supabase
-              .from('chat_participants')
-              .select('id')
-              .eq('chat_id', chatId);
-          participantsCount = participantsResponse.length;
+          participantsCount = (chat['participants'] as List<dynamic>?)?.length ?? 0;
         }
 
         formattedChats.add({
           ...chat,
-          'role': item['role'],
+          'id': chatId,
+          'role': (chat['participants_data'] as Map<String, dynamic>?)?[userId]?['role'] ?? 'member',
           'unread_count': unreadCount,
           'participants_count': participantsCount,
         });
@@ -79,52 +79,36 @@ class ChatProvider extends ChangeNotifier {
   }
 
   void _subscribeToChats() {
-    final userId = _supabase.auth.currentUser?.id;
+    final userId = _auth.currentUser?.uid;
     if (userId == null) return;
 
-    _chatsSubscription = _supabase
-        .channel('chats:$userId')
-        .onPostgresChanges(
-          event: PostgresChangeEvent.insert,
-          schema: 'public',
-          table: 'chat_participants',
-          filter: PostgresChangeFilter(
-            type: PostgresChangeFilterType.eq,
-            column: 'user_id',
-            value: userId,
-          ),
-          callback: (payload) {
-            loadChats();
-          },
-        )
-        .onPostgresChanges(
-          event: PostgresChangeEvent.update,
-          schema: 'public',
-          table: 'chats',
-          callback: (payload) {
-            loadChats();
-          },
-        )
-        .subscribe();
+    _chatsSubscription = _firestore
+        .collection('chats')
+        .where('participants', arrayContains: userId)
+        .snapshots()
+        .listen((snapshot) {
+          loadChats();
+        });
   }
 
   Future<void> loadContacts() async {
     _setLoading(true);
 
     try {
-      final userId = _supabase.auth.currentUser?.id;
+      final userId = _auth.currentUser?.uid;
       if (userId == null) {
         _setLoading(false);
         return;
       }
 
-      final response = await _supabase
-          .from('users')
-          .select('id, username, avatar_url, phone, bio')
-          .neq('id', userId)
-          .order('username');
+      final snapshot = await _firestore
+          .collection('users')
+          .where('id', isNotEqualTo: userId)
+          .orderBy('id')
+          .orderBy('username')
+          .get();
 
-      _contacts = List<Map<String, dynamic>>.from(response);
+      _contacts = snapshot.docs.map((doc) => doc.data()).toList();
       _setLoading(false);
     } catch (e) {
       _error = 'Failed to load contacts: $e';
@@ -134,31 +118,22 @@ class ChatProvider extends ChangeNotifier {
 
   Future<Map<String, dynamic>?> startDirectChat(String otherUserId) async {
     try {
-      final userId = _supabase.auth.currentUser?.id;
+      final userId = _auth.currentUser?.uid;
       if (userId == null) return null;
 
       final chatId = const Uuid().v4();
 
-      await _supabase.from('chats').insert({
+      await _firestore.collection('chats').doc(chatId).set({
         'id': chatId,
         'type': 'direct',
-        'created_at': DateTime.now().toIso8601String(),
+        'participants': [userId, otherUserId],
+        'participants_data': {
+          userId: {'role': 'member', 'joined_at': FieldValue.serverTimestamp()},
+          otherUserId: {'role': 'member', 'joined_at': FieldValue.serverTimestamp()},
+        },
+        'created_at': FieldValue.serverTimestamp(),
+        'last_message_at': FieldValue.serverTimestamp(),
       });
-
-      await _supabase.from('chat_participants').insert([
-        {
-          'chat_id': chatId,
-          'user_id': userId,
-          'role': 'member',
-          'joined_at': DateTime.now().toIso8601String(),
-        },
-        {
-          'chat_id': chatId,
-          'user_id': otherUserId,
-          'role': 'member',
-          'joined_at': DateTime.now().toIso8601String(),
-        },
-      ]);
 
       await loadChats();
 
@@ -174,15 +149,22 @@ class ChatProvider extends ChangeNotifier {
 
   Future<void> markMessagesAsRead(String chatId) async {
     try {
-      final userId = _supabase.auth.currentUser?.id;
+      final userId = _auth.currentUser?.uid;
       if (userId == null) return;
 
-      await _supabase
-          .from('messages')
-          .update({'is_read': true})
-          .eq('chat_id', chatId)
-          .neq('sender_id', userId)
-          .eq('is_read', false);
+      final unreadSnapshot = await _firestore
+          .collection('chats')
+          .doc(chatId)
+          .collection('messages')
+          .where('is_read', isEqualTo: false)
+          .where('sender_id', isNotEqualTo: userId)
+          .get();
+
+      final batch = _firestore.batch();
+      for (final doc in unreadSnapshot.docs) {
+        batch.update(doc.reference, {'is_read': true});
+      }
+      await batch.commit();
 
       final index = _chats.indexWhere((chat) => chat['id'] == chatId);
       if (index >= 0) {
@@ -196,14 +178,16 @@ class ChatProvider extends ChangeNotifier {
 
   Future<void> deleteChat(String chatId) async {
     try {
-      final userId = _supabase.auth.currentUser?.id;
+      final userId = _auth.currentUser?.uid;
       if (userId == null) return;
 
-      await _supabase
-          .from('chat_participants')
-          .delete()
-          .eq('chat_id', chatId)
-          .eq('user_id', userId);
+      await _firestore
+          .collection('chats')
+          .doc(chatId)
+          .update({
+            'participants': FieldValue.arrayRemove([userId]),
+            'participants_data.$userId': FieldValue.delete(),
+          });
 
       await loadChats();
     } catch (e) {
@@ -213,14 +197,15 @@ class ChatProvider extends ChangeNotifier {
 
   Future<void> archiveChat(String chatId) async {
     try {
-      final userId = _supabase.auth.currentUser?.id;
+      final userId = _auth.currentUser?.uid;
       if (userId == null) return;
 
-      await _supabase
-          .from('chat_participants')
-          .update({'is_archived': true})
-          .eq('chat_id', chatId)
-          .eq('user_id', userId);
+      await _firestore
+          .collection('chats')
+          .doc(chatId)
+          .update({
+            'participants_data.$userId.is_archived': true,
+          });
 
       await loadChats();
     } catch (e) {
@@ -230,14 +215,15 @@ class ChatProvider extends ChangeNotifier {
 
   Future<void> unarchiveChat(String chatId) async {
     try {
-      final userId = _supabase.auth.currentUser?.id;
+      final userId = _auth.currentUser?.uid;
       if (userId == null) return;
 
-      await _supabase
-          .from('chat_participants')
-          .update({'is_archived': false})
-          .eq('chat_id', chatId)
-          .eq('user_id', userId);
+      await _firestore
+          .collection('chats')
+          .doc(chatId)
+          .update({
+            'participants_data.$userId.is_archived': false,
+          });
 
       await loadChats();
     } catch (e) {
@@ -257,7 +243,7 @@ class ChatProvider extends ChangeNotifier {
 
   @override
   void dispose() {
-    _chatsSubscription?.unsubscribe();
+    _chatsSubscription?.cancel();
     super.dispose();
   }
 }
