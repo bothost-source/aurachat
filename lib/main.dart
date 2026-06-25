@@ -7,7 +7,6 @@ import 'package:local_auth/local_auth.dart';
 import 'package:local_auth_android/local_auth_android.dart';
 import 'package:local_auth_ios/local_auth_ios.dart';
 
-import 'firebase_options.dart';
 import 'themes/app_theme.dart';
 import 'providers/auth_provider.dart' show AuraAuthProvider;
 import 'providers/chat_provider.dart';
@@ -59,9 +58,7 @@ import 'services/call_signaling_service.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  await Firebase.initializeApp();
 
   await NotificationService.init();
   await NotificationService.requestPermission();
@@ -104,7 +101,7 @@ class _AuraChatAppState extends State<AuraChatApp>
     WidgetsBinding.instance.addObserver(this);
     
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
       authProvider.listenToAuthChanges();
       
       final currentUser = FirebaseAuth.instance.currentUser;
@@ -144,7 +141,7 @@ class _AuraChatAppState extends State<AuraChatApp>
       }
     } else if (state == AppLifecycleState.resumed) {
       OnlineStatusService.setOnline();
-      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
       authProvider.refreshSession();
       
       if (_isLocked && _backgroundTime != null) {
@@ -231,7 +228,7 @@ class _AuraChatAppState extends State<AuraChatApp>
         ChangeNotifierProvider(create: (_) => BotProvider()),
         ChangeNotifierProvider(create: (_) => ModerationProvider()),
       ],
-      child: Consumer2<ThemeProvider, AuthProvider>(
+      child: Consumer2<ThemeProvider, AuraAuthProvider>(
         builder: (context, themeProvider, authProvider, child) {
           return MaterialApp(
             title: 'AURA',
