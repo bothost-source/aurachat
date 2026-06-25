@@ -39,8 +39,8 @@ jobs:
 
       - name: Fix minSdkVersion
         run: |
-          sed -i 's/flutter.minSdkVersion/21/g' android/app/build.gradle
-          sed -i 's/minSdkVersion 19/minSdkVersion 21/g' android/app/build.gradle
+          sed -i 's/flutter.minSdkVersion/23/g' android/app/build.gradle
+          sed -i 's/minSdkVersion 19/minSdkVersion 23/g' android/app/build.gradle
 
       - name: Fix namespace and applicationId
         run: |
