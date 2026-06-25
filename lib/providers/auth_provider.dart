@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/online_status_service.dart';
 
 class AuthProvider extends ChangeNotifier {
-  final _supabase = Supabase.instance.client;
+  final firebase_auth.FirebaseAuth _auth = firebase_auth.FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  User? _user;
+  firebase_auth.User? _user;
   bool _isLoading = true;
   bool _isAuthenticated = false;
   String? _error;
@@ -18,7 +20,7 @@ class AuthProvider extends ChangeNotifier {
   String? _userPhotoUrl;
   String? _mockUserId;
 
-  User? get user => _user;
+  firebase_auth.User? get user => _user;
   bool get isLoading => _isLoading;
   bool get isAuthenticated => _isAuthenticated;
   String? get error => _error;
@@ -30,7 +32,6 @@ class AuthProvider extends ChangeNotifier {
   String? get userPhotoUrl => _userPhotoUrl;
   String? get mockUserId => _mockUserId;
   
-  // ADDED: Setter for mockUserId
   set mockUserId(String? value) {
     _mockUserId = value;
     notifyListeners();
@@ -43,34 +44,13 @@ class AuthProvider extends ChangeNotifier {
   Future<void> _initAuth() async {
     _setLoading(true);
     try {
-      final session = _supabase.auth.currentSession;
+      _user = _auth.currentUser;
 
-      if (session != null) {
-        _user = session.user;
+      if (_user != null) {
         _isAuthenticated = true;
-
-        if (session.isExpired) {
-          try {
-            final response = await _supabase.auth.refreshSession();
-            if (response.session != null) {
-              _user = response.user;
-              _isAuthenticated = true;
-            } else {
-              _isAuthenticated = false;
-              _user = null;
-            }
-          } catch (e) {
-            _isAuthenticated = false;
-            _user = null;
-          }
-        }
-
-        if (_isAuthenticated) {
-          await _loadUserProfile();
-          await OnlineStatusService.setOnline();
-        }
+        await _loadUserProfile();
+        await OnlineStatusService.setOnline();
       } else {
-        // Check for mock user
         final prefs = await SharedPreferences.getInstance();
         _mockUserId = prefs.getString('mock_user_id');
         if (_mockUserId != null) {
@@ -92,28 +72,15 @@ class AuthProvider extends ChangeNotifier {
   }
 
   void listenToAuthChanges() {
-    _supabase.auth.onAuthStateChange.listen((data) {
-      final event = data.event;
-      final session = data.session;
-
-      switch (event) {
-        case AuthChangeEvent.signedIn:
-        case AuthChangeEvent.tokenRefreshed:
-        case AuthChangeEvent.initialSession:
-          _user = session?.user;
-          _isAuthenticated = session != null;
-          if (_isAuthenticated) {
-            _loadUserProfile();
-            OnlineStatusService.setOnline();
-          }
-          break;
-        case AuthChangeEvent.signedOut:
-        case AuthChangeEvent.userDeleted:
-          OnlineStatusService.setOffline();
-          _clearAuth();
-          break;
-        default:
-          break;
+    _auth.authStateChanges().listen((firebase_auth.User? user) {
+      if (user != null) {
+        _user = user;
+        _isAuthenticated = true;
+        _loadUserProfile();
+        OnlineStatusService.setOnline();
+      } else {
+        OnlineStatusService.setOffline();
+        _clearAuth();
       }
       notifyListeners();
     });
@@ -121,20 +88,9 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> refreshSession() async {
     try {
-      final session = _supabase.auth.currentSession;
-      if (session != null && session.isExpired) {
-        final response = await _supabase.auth.refreshSession();
-        _user = response.user;
-        _isAuthenticated = response.session != null;
-        if (_isAuthenticated) await _loadUserProfile();
-      } else if (session != null) {
-        _user = session.user;
-        _isAuthenticated = true;
-        await _loadUserProfile();
-      } else {
-        _isAuthenticated = false;
-        _user = null;
-      }
+      _user = _auth.currentUser;
+      _isAuthenticated = _user != null;
+      if (_isAuthenticated) await _loadUserProfile();
     } catch (e) {
       _isAuthenticated = false;
       _user = null;
@@ -145,16 +101,16 @@ class AuthProvider extends ChangeNotifier {
   Future<bool> signUpWithEmail(String email, String password, String phone) async {
     _setLoading(true);
     try {
-      final response = await _supabase.auth.signUp(
+      final cred = await _auth.createUserWithEmailAndPassword(
         email: email,
         password: password,
       );
       _phoneNumber = phone;
       _email = email;
-      _user = response.user;
-      _isAuthenticated = response.user != null;
+      _user = cred.user;
+      _isAuthenticated = cred.user != null;
       _setLoading(false);
-      return response.user != null;
+      return cred.user != null;
     } catch (e) {
       _error = e.toString();
       _setLoading(false);
@@ -165,11 +121,11 @@ class AuthProvider extends ChangeNotifier {
   Future<bool> signInWithEmail(String email, String password) async {
     _setLoading(true);
     try {
-      final response = await _supabase.auth.signInWithPassword(
+      final cred = await _auth.signInWithEmailAndPassword(
         email: email,
         password: password,
       );
-      _user = response.user;
+      _user = cred.user;
       _isAuthenticated = true;
       _email = email;
       await _loadUserProfile();
@@ -186,8 +142,20 @@ class AuthProvider extends ChangeNotifier {
   Future<bool> signInWithOtp(String phone) async {
     _setLoading(true);
     try {
-      await _supabase.auth.signInWithOtp(phone: phone);
-      _phoneNumber = phone;
+      await _auth.verifyPhoneNumber(
+        phoneNumber: phone,
+        verificationCompleted: (firebase_auth.PhoneAuthCredential credential) async {
+          await _auth.signInWithCredential(credential);
+        },
+        verificationFailed: (firebase_auth.FirebaseAuthException e) {
+          _error = e.message;
+        },
+        codeSent: (String verificationId, int? resendToken) {
+          _phoneNumber = phone;
+          _storeVerificationId(verificationId);
+        },
+        codeAutoRetrievalTimeout: (String verificationId) {},
+      );
       _setLoading(false);
       return true;
     } catch (e) {
@@ -197,21 +165,35 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  Future<void> _storeVerificationId(String verificationId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('verification_id', verificationId);
+  }
+
   Future<bool> verifyOtp(String phone, String token) async {
     _setLoading(true);
     try {
-      final response = await _supabase.auth.verifyOTP(
-        phone: phone,
-        token: token,
-        type: OtpType.sms,
+      final prefs = await SharedPreferences.getInstance();
+      final verificationId = prefs.getString('verification_id');
+      if (verificationId == null) {
+        _error = 'Verification ID not found';
+        _setLoading(false);
+        return false;
+      }
+
+      final credential = firebase_auth.PhoneAuthProvider.credential(
+        verificationId: verificationId,
+        smsCode: token,
       );
-      _user = response.user;
-      _isAuthenticated = response.user != null;
+
+      final cred = await _auth.signInWithCredential(credential);
+      _user = cred.user;
+      _isAuthenticated = cred.user != null;
       _phoneNumber = phone;
       await _loadUserProfile();
       await OnlineStatusService.setOnline();
       _setLoading(false);
-      return response.user != null;
+      return cred.user != null;
     } catch (e) {
       _error = e.toString();
       _setLoading(false);
@@ -220,22 +202,19 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<bool> _loadUserProfile() async {
-    final userId = _user?.id ?? _mockUserId;
+    final userId = _user?.uid ?? _mockUserId;
     if (userId == null) return false;
     try {
-      final response = await _supabase
-          .from('users')
-          .select()
-          .eq('id', userId)
-          .maybeSingle();
+      final doc = await _firestore.collection('users').doc(userId).get();
 
-      if (response != null) {
-        _userName = response['username'] as String?;
-        _displayName = response['display_name'] as String?;
-        _userBio = response['bio'] as String?;
-        _userPhotoUrl = response['avatar_url'] as String?;
-        _phoneNumber = response['phone'] as String? ?? _phoneNumber;
-        _email = response['email'] as String? ?? _email;
+      if (doc.exists) {
+        final data = doc.data()!;
+        _userName = data['username'] as String?;
+        _displayName = data['display_name'] as String?;
+        _userBio = data['bio'] as String?;
+        _userPhotoUrl = data['avatar_url'] as String?;
+        _phoneNumber = data['phone'] as String? ?? _phoneNumber;
+        _email = data['email'] as String? ?? _email;
         notifyListeners();
         return true;
       }
@@ -251,7 +230,6 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ADDED: Create mock user for local OTP flow
   Future<void> createMockUser() async {
     final prefs = await SharedPreferences.getInstance();
     _mockUserId = 'mock_${DateTime.now().millisecondsSinceEpoch}';
@@ -268,15 +246,14 @@ class AuthProvider extends ChangeNotifier {
   }) async {
     _setLoading(true);
     try {
-      // Allow mock users (no real Supabase user)
-      final userId = _user?.id ?? _mockUserId ?? 'mock_${DateTime.now().millisecondsSinceEpoch}';
+      final userId = _user?.uid ?? _mockUserId ?? 'mock_${DateTime.now().millisecondsSinceEpoch}';
 
       if (_user == null && _mockUserId == null) {
         _mockUserId = userId;
       }
 
       final now = DateTime.now().toIso8601String();
-      await _supabase.from('users').upsert({
+      await _firestore.collection('users').doc(userId).set({
         'id': userId,
         'phone': _phoneNumber,
         'email': _email,
@@ -286,7 +263,7 @@ class AuthProvider extends ChangeNotifier {
         'avatar_url': photoUrl,
         'created_at': now,
         'updated_at': now,
-      }, onConflict: 'id');
+      }, SetOptions(merge: true));
 
       _userName = username;
       _displayName = displayName ?? username;
@@ -294,7 +271,6 @@ class AuthProvider extends ChangeNotifier {
       _userPhotoUrl = photoUrl;
       _isAuthenticated = true;
 
-      // Save mock user data
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('mock_user_id', userId);
       await prefs.setString('mock_phone', _phoneNumber ?? '');
@@ -322,7 +298,7 @@ class AuthProvider extends ChangeNotifier {
   }) async {
     _setLoading(true);
     try {
-      final userId = _user?.id ?? _mockUserId;
+      final userId = _user?.uid ?? _mockUserId;
       if (userId == null) {
         _error = 'Not authenticated';
         _setLoading(false);
@@ -337,14 +313,13 @@ class AuthProvider extends ChangeNotifier {
       if (bio != null) updates['bio'] = bio;
       if (photoUrl != null) updates['avatar_url'] = photoUrl;
 
-      await _supabase.from('users').update(updates).eq('id', userId);
+      await _firestore.collection('users').doc(userId).update(updates);
 
       if (username != null) _userName = username;
       if (displayName != null) _displayName = displayName;
       if (bio != null) _userBio = bio;
       if (photoUrl != null) _userPhotoUrl = photoUrl;
 
-      // Update mock prefs too
       final prefs = await SharedPreferences.getInstance();
       if (username != null) await prefs.setString('mock_username', username);
       if (displayName != null) await prefs.setString('mock_display_name', displayName);
@@ -366,7 +341,7 @@ class AuthProvider extends ChangeNotifier {
     try {
       if (_user != null) {
         await OnlineStatusService.setOffline();
-        await _supabase.auth.signOut();
+        await _auth.signOut();
       }
       await _clearAuth();
     } catch (e) {
@@ -395,25 +370,41 @@ class AuthProvider extends ChangeNotifier {
   Future<bool> deleteAccount() async {
     _setLoading(true);
     try {
-      final userId = _user?.id ?? _mockUserId;
+      final userId = _user?.uid ?? _mockUserId;
       if (userId == null) {
         _error = 'Not authenticated';
         _setLoading(false);
         return false;
       }
 
-      await _supabase.from('messages').delete().eq('sender_id', userId);
-      await _supabase.from('chat_participants').delete().eq('user_id', userId);
-      await _supabase.from('user_settings').delete().eq('user_id', userId);
-      await _supabase.from('status_views').delete().eq('user_id', userId);
-      await _supabase.from('statuses').delete().eq('user_id', userId);
-      await _supabase.from('contacts').delete().eq('user_id', userId);
-      await _supabase.from('blocked_users').delete().eq('user_id', userId);
-      await _supabase.from('bots').delete().eq('creator_id', userId);
-      await _supabase.from('users').delete().eq('id', userId);
+      await _firestore.collection('messages').where('sender_id', isEqualTo: userId).get().then((snapshot) {
+        for (var doc in snapshot.docs) doc.reference.delete();
+      });
+      await _firestore.collection('chat_participants').where('user_id', isEqualTo: userId).get().then((snapshot) {
+        for (var doc in snapshot.docs) doc.reference.delete();
+      });
+      await _firestore.collection('user_settings').where('user_id', isEqualTo: userId).get().then((snapshot) {
+        for (var doc in snapshot.docs) doc.reference.delete();
+      });
+      await _firestore.collection('status_views').where('user_id', isEqualTo: userId).get().then((snapshot) {
+        for (var doc in snapshot.docs) doc.reference.delete();
+      });
+      await _firestore.collection('statuses').where('user_id', isEqualTo: userId).get().then((snapshot) {
+        for (var doc in snapshot.docs) doc.reference.delete();
+      });
+      await _firestore.collection('contacts').where('user_id', isEqualTo: userId).get().then((snapshot) {
+        for (var doc in snapshot.docs) doc.reference.delete();
+      });
+      await _firestore.collection('blocked_users').where('user_id', isEqualTo: userId).get().then((snapshot) {
+        for (var doc in snapshot.docs) doc.reference.delete();
+      });
+      await _firestore.collection('bots').where('creator_id', isEqualTo: userId).get().then((snapshot) {
+        for (var doc in snapshot.docs) doc.reference.delete();
+      });
+      await _firestore.collection('users').doc(userId).delete();
 
       if (_user != null) {
-        await _supabase.auth.signOut();
+        await _auth.signOut();
       }
       await _clearAuth();
       _setLoading(false);
