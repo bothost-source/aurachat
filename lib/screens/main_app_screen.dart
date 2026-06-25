@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../providers/auth_provider.dart';
+import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../providers/chat_provider.dart';
 import '../../screens/status/status_screen.dart';
 import '../../screens/calls/call_screen.dart';
