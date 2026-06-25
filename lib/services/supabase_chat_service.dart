@@ -1,17 +1,19 @@
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/chat_model.dart';
 import '../models/message_model.dart';
 
-class SupabaseChatService {
-  static final SupabaseChatService _instance = SupabaseChatService._internal();
-  factory SupabaseChatService() => _instance;
-  SupabaseChatService._internal();
+class FirebaseChatService {
+  static final FirebaseChatService _instance = FirebaseChatService._internal();
+  factory FirebaseChatService() => _instance;
+  FirebaseChatService._internal();
 
-  final _supabase = Supabase.instance.client;
+  final firebase_auth.FirebaseAuth _auth = firebase_auth.FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   String? _currentUserId;
 
   void initialize() {
-    _currentUserId = _supabase.auth.currentUser?.id;
+    _currentUserId = _auth.currentUser?.uid;
   }
 
   String? get currentUserId => _currentUserId;
@@ -21,31 +23,38 @@ class SupabaseChatService {
   // ==========================================================================
 
   Stream<List<ChatModel>> getUserChats() {
-    return _supabase
-        .from('chats')
-        .stream(primaryKey: ['id'])
-        .map((data) => data
-            .map((json) => ChatModel.fromJson(json as Map<String, dynamic>))
+    if (_currentUserId == null) return Stream.value([]);
+
+    return _firestore
+        .collection('chats')
+        .where('participants', arrayContains: _currentUserId)
+        .orderBy('last_message_at', descending: true)
+        .snapshots()
+        .map((snapshot) => snapshot.docs
+            .map((doc) => ChatModel.fromJson(doc.data()))
             .toList());
   }
 
   Stream<List<MessageModel>> getMessages(String chatId) {
-    return _supabase
-        .from('messages')
-        .stream(primaryKey: ['id'])
-        .eq('chat_id', chatId)
-        .map((data) => data
-            .map((json) => MessageModel.fromJson(json as Map<String, dynamic>))
+    return _firestore
+        .collection('chats')
+        .doc(chatId)
+        .collection('messages')
+        .orderBy('created_at', descending: true)
+        .snapshots()
+        .map((snapshot) => snapshot.docs
+            .map((doc) => MessageModel.fromJson(doc.data()))
             .toList());
   }
 
   Stream<List<String>> getTypingUsers(String chatId) {
-    return _supabase
-        .from('typing')
-        .stream(primaryKey: ['id'])
-        .eq('chat_id', chatId)
-        .map((data) => data
-            .map((d) => d['user_id'] as String)
+    return _firestore
+        .collection('chats')
+        .doc(chatId)
+        .collection('typing')
+        .snapshots()
+        .map((snapshot) => snapshot.docs
+            .map((doc) => doc.data()['user_id'] as String)
             .toList());
   }
 
@@ -58,19 +67,32 @@ class SupabaseChatService {
     required String content,
     required MessageType type,
   }) async {
-    await _supabase.from('messages').insert({
+    if (_currentUserId == null) return;
+
+    await _firestore
+        .collection('chats')
+        .doc(chatId)
+        .collection('messages')
+        .add({
       'chat_id': chatId,
       'sender_id': _currentUserId,
       'content': content,
       'type': type.name,
-      'created_at': DateTime.now().toIso8601String(),
+      'is_read': false,
+      'created_at': FieldValue.serverTimestamp(),
+    });
+
+    // Update chat last message
+    await _firestore.collection('chats').doc(chatId).update({
+      'last_message': content,
+      'last_message_at': FieldValue.serverTimestamp(),
     });
   }
 
   Future<void> markAsRead(String chatId) async {
-    await _supabase.from('chats').update({
+    await _firestore.collection('chats').doc(chatId).update({
       'unread_count': 0,
-    }).eq('id', chatId);
+    });
   }
 
   // ==========================================================================
@@ -82,13 +104,23 @@ class SupabaseChatService {
     if (userId == null) return;
 
     if (isTyping) {
-      await _supabase.from('typing').upsert({
+      await _firestore
+          .collection('chats')
+          .doc(chatId)
+          .collection('typing')
+          .doc(userId)
+          .set({
         'chat_id': chatId,
         'user_id': userId,
-        'timestamp': DateTime.now().toIso8601String(),
+        'timestamp': FieldValue.serverTimestamp(),
       });
     } else {
-      await _supabase.from('typing').delete().eq('user_id', userId);
+      await _firestore
+          .collection('chats')
+          .doc(chatId)
+          .collection('typing')
+          .doc(userId)
+          .delete();
     }
   }
 
@@ -100,14 +132,22 @@ class SupabaseChatService {
     final currentUser = _currentUserId;
     if (currentUser == null) throw Exception('User not authenticated');
 
-    final chatId = '\${currentUser}_\$otherUserId';
-    await _supabase.from('chats').insert({
+    final chatRef = _firestore.collection('chats').doc();
+    final chatId = chatRef.id;
+
+    await chatRef.set({
       'id': chatId,
       'name': 'Chat',
       'type': 'private',
       'participants': [currentUser, otherUserId],
-      'created_at': DateTime.now().toIso8601String(),
+      'participants_data': {
+        currentUser: {'role': 'member', 'joined_at': FieldValue.serverTimestamp()},
+        otherUserId: {'role': 'member', 'joined_at': FieldValue.serverTimestamp()},
+      },
+      'created_at': FieldValue.serverTimestamp(),
+      'last_message_at': FieldValue.serverTimestamp(),
     });
+
     return chatId;
   }
 
@@ -117,13 +157,28 @@ class SupabaseChatService {
     required List<String> memberIds,
     bool isPublic = true,
   }) async {
-    await _supabase.from('chats').insert({
+    final currentUser = _currentUserId;
+    if (currentUser == null) return;
+
+    final participants = [currentUser, ...memberIds];
+    final participantsData = <String, dynamic>{};
+
+    for (final id in participants) {
+      participantsData[id] = {
+        'role': id == currentUser ? 'admin' : 'member',
+        'joined_at': FieldValue.serverTimestamp(),
+      };
+    }
+
+    await _firestore.collection('chats').add({
       'name': name,
       'type': 'group',
       'description': description,
-      'participants': memberIds,
+      'participants': participants,
+      'participants_data': participantsData,
       'is_public': isPublic,
-      'created_at': DateTime.now().toIso8601String(),
+      'created_at': FieldValue.serverTimestamp(),
+      'last_message_at': FieldValue.serverTimestamp(),
     });
   }
 
@@ -132,12 +187,20 @@ class SupabaseChatService {
     String? description,
     bool isPublic = true,
   }) async {
-    await _supabase.from('chats').insert({
+    final currentUser = _currentUserId;
+    if (currentUser == null) return;
+
+    await _firestore.collection('chats').add({
       'name': name,
       'type': 'channel',
       'description': description,
+      'participants': [currentUser],
+      'participants_data': {
+        currentUser: {'role': 'admin', 'joined_at': FieldValue.serverTimestamp()},
+      },
       'is_public': isPublic,
-      'created_at': DateTime.now().toIso8601String(),
+      'created_at': FieldValue.serverTimestamp(),
+      'last_message_at': FieldValue.serverTimestamp(),
     });
   }
 
@@ -146,11 +209,13 @@ class SupabaseChatService {
   // ==========================================================================
 
   Future<List<Map<String, dynamic>>> searchUsers(String query) async {
-    final response = await _supabase
-        .from('users')
-        .select()
-        .ilike('username', '%\$query%');
-    return response;
+    final snapshot = await _firestore
+        .collection('users')
+        .where('username', isGreaterThanOrEqualTo: query)
+        .where('username', isLessThanOrEqualTo: '$query\uf8ff')
+        .get();
+
+    return snapshot.docs.map((doc) => doc.data()).toList();
   }
 
   // ==========================================================================
