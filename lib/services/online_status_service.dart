@@ -1,18 +1,19 @@
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class OnlineStatusService {
-  static final _supabase = Supabase.instance.client;
+  static final firebase_auth.FirebaseAuth _auth = firebase_auth.FirebaseAuth.instance;
+  static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   /// Call when user logs in or app comes to foreground
   static Future<void> setOnline() async {
-    final userId = _supabase.auth.currentUser?.id;
+    final userId = _auth.currentUser?.uid;
     if (userId == null) return;
 
     try {
-      await _supabase.from('online_status').upsert({
-        'user_id': userId,
+      await _firestore.collection('users').doc(userId).update({
         'is_online': true,
-        'last_seen': DateTime.now().toIso8601String(),
+        'last_seen': FieldValue.serverTimestamp(),
       });
     } catch (e) {
       print('setOnline error: $e');
@@ -21,14 +22,13 @@ class OnlineStatusService {
 
   /// Call when user logs out or app goes to background
   static Future<void> setOffline() async {
-    final userId = _supabase.auth.currentUser?.id;
+    final userId = _auth.currentUser?.uid;
     if (userId == null) return;
 
     try {
-      await _supabase.from('online_status').upsert({
-        'user_id': userId,
+      await _firestore.collection('users').doc(userId).update({
         'is_online': false,
-        'last_seen': DateTime.now().toIso8601String(),
+        'last_seen': FieldValue.serverTimestamp(),
       });
     } catch (e) {
       print('setOffline error: $e');
