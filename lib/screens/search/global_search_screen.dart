@@ -1,10 +1,11 @@
+import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../../providers/auth_provider.dart';
+import '../../providers/auth_provider.dart' show AuraAuthProvider;
 
 class GlobalSearchScreen extends StatefulWidget {
   const GlobalSearchScreen({super.key});
@@ -116,7 +117,7 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
 
     try {
       final firestore = FirebaseFirestore.instance;
-      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
       final currentUserId = authProvider.user?.uid ?? authProvider.mockUserId;
 
       final searchTerm = query.trim().toLowerCase();
@@ -163,7 +164,7 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
 
     try {
       final firestore = FirebaseFirestore.instance;
-      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
       final currentUserId = authProvider.user?.uid ?? authProvider.mockUserId;
 
       if (currentUserId == null) {
