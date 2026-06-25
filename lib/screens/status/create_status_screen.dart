@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:uuid/uuid.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:io';
 
 class CreateStatusScreen extends StatefulWidget {
@@ -61,8 +62,8 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final supabase = Supabase.instance.client;
-      final userId = supabase.auth.currentUser?.id;
+      final user = FirebaseAuth.instance.currentUser;
+      final userId = user?.uid;
 
       if (userId == null) {
         throw Exception('Not authenticated');
@@ -72,28 +73,25 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
 
       // Upload image if selected
       if (_selectedImage != null) {
-        final fileBytes = await _selectedImage!.readAsBytes();
-        final fileName = 'statuses/$userId/${const Uuid().v4()}.jpg';
+        final ref = FirebaseStorage.instance
+            .ref()
+            .child('statuses')
+            .child(userId)
+            .child('${DateTime.now().millisecondsSinceEpoch}.jpg');
 
-        await supabase.storage.from('statuses').uploadBinary(
-          fileName,
-          fileBytes,
-          fileOptions: const FileOptions(contentType: 'image/jpeg'),
-        );
-
-        mediaUrl = supabase.storage.from('statuses').getPublicUrl(fileName);
+        await ref.putFile(_selectedImage!);
+        mediaUrl = await ref.getDownloadURL();
       }
 
       // Create status (expires in 24 hours)
       final expiresAt = DateTime.now().add(const Duration(hours: 24));
 
-      await supabase.from('statuses').insert({
-        'id': const Uuid().v4(),
+      await FirebaseFirestore.instance.collection('statuses').add({
         'user_id': userId,
         'text': _textController.text.trim().isNotEmpty ? _textController.text.trim() : null,
         'media_url': mediaUrl,
-        'created_at': DateTime.now().toIso8601String(),
-        'expires_at': expiresAt.toIso8601String(),
+        'created_at': Timestamp.now(),
+        'expires_at': Timestamp.fromDate(expiresAt),
       });
 
       setState(() => _isLoading = false);
