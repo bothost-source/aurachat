@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import '../../providers/auth_provider.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import '../../providers/auth_provider.dart' show AuraAuthProvider;
 
 class AIChatbotScreen extends StatefulWidget {
   const AIChatbotScreen({super.key});
@@ -51,41 +50,39 @@ class _AIChatbotScreenState extends State<AIChatbotScreen> {
     _messageController.clear();
     _scrollToBottom();
 
-   try {
-  final response = await http.post(
-    Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent'),
-    headers: {'Content-Type': 'application/json'},
-    body: jsonEncode({
-      'contents': [{
-        'parts': [{'text': text}]
-      }]
-    }),
-  );
+    try {
+      final response = await http.post(
+        Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'contents': [{
+            'parts': [{'text': text}]
+          }]
+        }),
+      );
 
-  final data = jsonDecode(response.body);                          // ✅ Keep
-  final aiResponse = data['candidates']?[0]?['content']?['parts']?[0]?['text']
-      ?? 'Sorry, I could not process that.';                       // ✅ Keep
+      final data = jsonDecode(response.body);
+      final aiResponse = data['candidates']?[0]?['content']?['parts']?[0]?['text']
+          ?? 'Sorry, I could not process that.';
 
-  // ❌ DELETE: final data = response.data as Map<String, dynamic>;
-
-  setState(() {
-    _messages.add({
-      'role': 'assistant',
-      'content': aiResponse,                                       // ✅ Use aiResponse
-      'timestamp': DateTime.now(),
-    });
-    _isLoading = false;
-  });
-} catch (e) {
-  setState(() {
-    _messages.add({
-      'role': 'assistant',
-      'content': 'Error: Unable to reach AI service. Please try again later.',
-      'timestamp': DateTime.now(),
-    });
-    _isLoading = false;
-  });
-}
+      setState(() {
+        _messages.add({
+          'role': 'assistant',
+          'content': aiResponse,
+          'timestamp': DateTime.now(),
+        });
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _messages.add({
+          'role': 'assistant',
+          'content': 'Error: Unable to reach AI service. Please try again later.',
+          'timestamp': DateTime.now(),
+        });
+        _isLoading = false;
+      });
+    }
 
     _scrollToBottom();
   }
