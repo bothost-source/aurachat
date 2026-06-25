@@ -4,7 +4,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/online_status_service.dart';
 
-class AuthProvider extends ChangeNotifier {
+// RENAMED from AuthProvider to AuraAuthProvider
+class AuraAuthProvider extends ChangeNotifier {
   final firebase_auth.FirebaseAuth _auth = firebase_auth.FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
@@ -37,7 +38,7 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  AuthProvider() {
+  AuraAuthProvider() {
     _initAuth();
   }
 
