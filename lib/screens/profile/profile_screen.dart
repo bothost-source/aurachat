@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import '../../providers/auth_provider.dart';
+import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../providers/settings_provider.dart';
 
 class ProfileScreen extends StatefulWidget {
