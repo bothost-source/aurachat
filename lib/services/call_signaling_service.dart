@@ -1,54 +1,54 @@
 import 'dart:async';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:firebase_database/firebase_database.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class CallSignalingService {
-  static final _supabase = Supabase.instance.client;
-  static RealtimeChannel? _channel;
+  static DatabaseReference? _userSignalRef;
+  static StreamSubscription<DatabaseEvent>? _signalSubscription;
   static final _callStreamController = StreamController<CallSignal>.broadcast();
   static Stream<CallSignal> get onCallSignal => _callStreamController.stream;
 
   static void startListening(String userId) {
-    _channel = _supabase.channel('call_signals:$userId');
+    _userSignalRef = FirebaseDatabase.instance.ref('call_signals/$userId');
 
-    _channel!.onBroadcast(
-      event: 'incoming_call',
-      callback: (payload) {
-        _callStreamController.add(CallSignal(
-          type: CallSignalType.incoming,
-          callId: payload['call_id'],
-          callerId: payload['caller_id'],
-          callerName: payload['caller_name'],
-          callerAvatar: payload['caller_avatar'],
-          channelName: payload['channel_name'],
-          isVideoCall: payload['is_video_call'],
-          timestamp: DateTime.parse(payload['timestamp']),
-        ));
-      },
-    );
+    _signalSubscription = _userSignalRef!.onChildAdded.listen((event) {
+      final data = event.snapshot.value as Map<dynamic, dynamic>?;
+      if (data == null) return;
 
-    _channel!.onBroadcast(
-      event: 'call_answered',
-      callback: (payload) {
-        _callStreamController.add(CallSignal(
-          type: CallSignalType.answered,
-          callId: payload['call_id'],
-          accepted: payload['accepted'],
-          channelName: payload['channel_name'],
-        ));
-      },
-    );
+      final signalType = data['type'] as String?;
 
-    _channel!.onBroadcast(
-      event: 'call_ended',
-      callback: (payload) {
-        _callStreamController.add(CallSignal(
-          type: CallSignalType.ended,
-          callId: payload['call_id'],
-        ));
-      },
-    );
+      switch (signalType) {
+        case 'incoming_call':
+          _callStreamController.add(CallSignal(
+            type: CallSignalType.incoming,
+            callId: data['call_id'],
+            callerId: data['caller_id'],
+            callerName: data['caller_name'],
+            callerAvatar: data['caller_avatar'],
+            channelName: data['channel_name'],
+            isVideoCall: data['is_video_call'],
+            timestamp: DateTime.parse(data['timestamp']),
+          ));
+          break;
+        case 'call_answered':
+          _callStreamController.add(CallSignal(
+            type: CallSignalType.answered,
+            callId: data['call_id'],
+            accepted: data['accepted'],
+            channelName: data['channel_name'],
+          ));
+          break;
+        case 'call_ended':
+          _callStreamController.add(CallSignal(
+            type: CallSignalType.ended,
+            callId: data['call_id'],
+          ));
+          break;
+      }
 
-    _channel!.subscribe();
+      // Delete the signal after processing so it doesn't replay
+      event.snapshot.ref.remove();
+    });
   }
 
   static Future<void> sendCallInvitation({
@@ -60,18 +60,17 @@ class CallSignalingService {
     required String channelName,
     required bool isVideoCall,
   }) async {
-    await _supabase.channel('call_signals:$targetUserId').sendBroadcastMessage(
-      event: 'incoming_call',
-      payload: {
-        'call_id': callId,
-        'caller_id': callerId,
-        'caller_name': callerName,
-        'caller_avatar': callerAvatar,
-        'channel_name': channelName,
-        'is_video_call': isVideoCall,
-        'timestamp': DateTime.now().toIso8601String(),
-      },
-    );
+    final ref = FirebaseDatabase.instance.ref('call_signals/$targetUserId').push();
+    await ref.set({
+      'type': 'incoming_call',
+      'call_id': callId,
+      'caller_id': callerId,
+      'caller_name': callerName,
+      'caller_avatar': callerAvatar,
+      'channel_name': channelName,
+      'is_video_call': isVideoCall,
+      'timestamp': DateTime.now().toIso8601String(),
+    });
   }
 
   static Future<void> answerCall({
@@ -80,30 +79,28 @@ class CallSignalingService {
     required bool accepted,
     required String channelName,
   }) async {
-    await _supabase.channel('call_signals:$callerId').sendBroadcastMessage(
-      event: 'call_answered',
-      payload: {
-        'call_id': callId,
-        'accepted': accepted,
-        'channel_name': channelName,
-      },
-    );
+    final ref = FirebaseDatabase.instance.ref('call_signals/$callerId').push();
+    await ref.set({
+      'type': 'call_answered',
+      'call_id': callId,
+      'accepted': accepted,
+      'channel_name': channelName,
+    });
   }
 
   static Future<void> endCall({
     required String targetUserId,
     required String callId,
   }) async {
-    await _supabase.channel('call_signals:$targetUserId').sendBroadcastMessage(
-      event: 'call_ended',
-      payload: {
-        'call_id': callId,
-      },
-    );
+    final ref = FirebaseDatabase.instance.ref('call_signals/$targetUserId').push();
+    await ref.set({
+      'type': 'call_ended',
+      'call_id': callId,
+    });
   }
 
   static void dispose() {
-    _channel?.unsubscribe();
+    _signalSubscription?.cancel();
     _callStreamController.close();
   }
 }
