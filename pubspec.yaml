@@ -5,7 +5,7 @@ publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: '>=3.0.0 <4.0.0'
+  sdk: '>=3.4.0 <4.0.0'
 
 dependencies:
   flutter:
@@ -26,11 +26,31 @@ dependencies:
   cupertino_icons: ^1.0.8
   image_picker: ^1.1.2
   intl: ^0.18.1
+  google_fonts: ^6.2.1
+  cached_network_image: ^3.4.1
+  photo_view: ^0.15.0
+  share_plus: ^10.0.0
 
   # Auth & Security
   local_auth: ^2.2.0
   local_auth_android: ^1.0.0
   local_auth_ios: ^1.0.0
+
+  # Phone & Input
+  intl_phone_field: ^3.2.0
+
+  # Chat & Media
+  uuid: ^4.5.0
+  emoji_picker_flutter: ^3.1.0
+  file_picker: ^8.0.0
+  path_provider: ^2.1.0
+  open_filex: ^4.5.0
+  just_audio: ^0.9.0
+  dio: ^5.7.0
+
+  # Calls
+  agora_rtc_engine: ^6.3.0
+  permission_handler: ^11.3.0
 
   # Storage & Preferences
   shared_preferences: ^2.2.2
