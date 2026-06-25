@@ -2,7 +2,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../services/call_service.dart';
 import '../../services/call_signaling_service.dart';
 
@@ -101,7 +102,7 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
   // ═══════════════════════════════════════════════════════════
 
   Future<void> _loadChatUsers() async {
-    final currentUser = Supabase.instance.client.auth.currentUser;
+    final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) {
       setState(() => _loading = false);
       return;
@@ -109,20 +110,33 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
 
     try {
       // Get all messages where you are sender OR receiver
-      final messages = await Supabase.instance.client
-          .from('messages')
-          .select('sender_id, receiver_id')
-          .or('sender_id.eq.${currentUser.id},receiver_id.eq.${currentUser.id}')
-          .order('created_at', ascending: false);
+      final messages = await FirebaseFirestore.instance
+          .collection('messages')
+          .where('sender_id', isEqualTo: currentUser.uid)
+          .orderBy('created_at', descending: true)
+          .get();
 
-      // Extract unique user IDs you've chatted with
       final Set<String> chatUserIds = {};
-      for (final msg in messages) {
-        final senderId = msg['sender_id'] as String;
-        final receiverId = msg['receiver_id'] as String;
+      for (final msg in messages.docs) {
+        final data = msg.data();
+        final senderId = data['sender_id'] as String;
+        final receiverId = data['receiver_id'] as String;
 
-        if (senderId != currentUser.id) chatUserIds.add(senderId);
-        if (receiverId != currentUser.id) chatUserIds.add(receiverId);
+        if (senderId != currentUser.uid) chatUserIds.add(senderId);
+        if (receiverId != currentUser.uid) chatUserIds.add(receiverId);
+      }
+
+      // Also get messages where you're the receiver
+      final receivedMessages = await FirebaseFirestore.instance
+          .collection('messages')
+          .where('receiver_id', isEqualTo: currentUser.uid)
+          .orderBy('created_at', descending: true)
+          .get();
+
+      for (final msg in receivedMessages.docs) {
+        final data = msg.data();
+        final senderId = data['sender_id'] as String;
+        if (senderId != currentUser.uid) chatUserIds.add(senderId);
       }
 
       if (chatUserIds.isEmpty) {
@@ -131,13 +145,13 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
       }
 
       // Fetch their profiles
-      final profiles = await Supabase.instance.client
-          .from('profiles')
-          .select('id, username, avatar_url, status, bio, phone')
-          .inFilter('id', chatUserIds.toList());
+      final profiles = await FirebaseFirestore.instance
+          .collection('users')
+          .where(FieldPath.documentId, whereIn: chatUserIds.toList())
+          .get();
 
       setState(() {
-        _users = List<Map<String, dynamic>>.from(profiles);
+        _users = profiles.docs.map((doc) => {'id': doc.id, ...doc.data()}).toList();
         _loading = false;
       });
     } catch (e) {
@@ -316,22 +330,23 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _sendCallInvitation() async {
-    final currentUser = Supabase.instance.client.auth.currentUser;
+    final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) return;
 
     try {
-      final profile = await Supabase.instance.client
-          .from('profiles')
-          .select('username, avatar_url')
-          .eq('id', currentUser.id)
-          .single();
+      final profile = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(currentUser.uid)
+          .get();
+
+      final data = profile.data();
 
       await CallSignalingService.sendCallInvitation(
         targetUserId: widget.targetUserId!,
         callId: _callId!,
-        callerId: currentUser.id,
-        callerName: profile['username'] ?? 'Unknown',
-        callerAvatar: profile['avatar_url'],
+        callerId: currentUser.uid,
+        callerName: data?['username'] ?? 'Unknown',
+        callerAvatar: data?['avatar_url'],
         channelName: _channelName!,
         isVideoCall: widget.isVideoCall!,
       );
@@ -366,7 +381,7 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
 
   Future<void> _cancelCall() async {
     _timeoutTimer?.cancel();
-    final currentUser = Supabase.instance.client.auth.currentUser;
+    final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser != null && _callId != null) {
       await CallSignalingService.endCall(
         targetUserId: widget.targetUserId!,
