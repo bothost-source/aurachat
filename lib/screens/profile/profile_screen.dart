@@ -27,7 +27,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final authProvider = Provider.of<AuthProvider>(context);
+    final authProvider = Provider.of<AuraAuthProvider>(context);
     if (!_isEditing && !_isLoading) {
       _nameController.text = authProvider.userName ?? '';
       _bioController.text = authProvider.userBio ?? '';
@@ -35,7 +35,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   void _loadUserData() {
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
     _nameController.text = authProvider.userName ?? '';
     _bioController.text = authProvider.userBio ?? '';
   }
@@ -55,7 +55,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       setState(() => _isLoading = true);
 
       try {
-        final authProvider = Provider.of<AuthProvider>(context, listen: false);
+        final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
         final storage = FirebaseStorage.instance;
         final userId = authProvider.user?.uid ?? authProvider.mockUserId;
 
@@ -94,7 +94,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _saveProfile() async {
     setState(() => _isLoading = true);
 
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
     final success = await authProvider.updateProfile(
       username: _nameController.text.trim(),
       bio: _bioController.text.trim(),
@@ -119,7 +119,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<AuthProvider>(
+    return Consumer<AuraAuthProvider>(
       builder: (context, authProvider, child) {
         return Scaffold(
           backgroundColor: const Color(0xFF0A0A0F),
@@ -582,7 +582,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           TextButton(
             onPressed: () async {
               Navigator.pop(context);
-              final authProvider = Provider.of<AuthProvider>(context, listen: false);
+              final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
               await authProvider.signOut();
               if (context.mounted) {
                 Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
@@ -620,7 +620,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           TextButton(
             onPressed: () async {
               Navigator.pop(context);
-              final authProvider = Provider.of<AuthProvider>(context, listen: false);
+              final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
               final success = await authProvider.deleteAccount();
               if (context.mounted) {
                 if (success) {
