@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:permission_handler/permission_handler.dart' as permission_handler;
 
 class NotificationService {
   static final FlutterLocalNotificationsPlugin _notifications = 
@@ -44,16 +44,16 @@ class NotificationService {
   }
 
   static Future<void> requestPermission() async {
-    final status = await Permission.notification.request();
+    final status = await permission_handler.Permission.notification.request();
     debugPrint('Notification permission: $status');
     
     if (status.isPermanentlyDenied) {
-      await openAppSettings();
+      await permission_handler.openAppSettings();
     }
   }
 
   static Future<bool> checkPermission() async {
-    final status = await Permission.notification.status;
+    final status = await permission_handler.Permission.notification.status;
     return status.isGranted;
   }
 
