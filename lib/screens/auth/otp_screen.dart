@@ -4,7 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../services/online_status_service.dart';
-import '../../services/app_localizations.dart'; // ADD THIS
+import '../../services/app_localizations.dart';
 
 class OtpScreen extends StatefulWidget {
   final String phoneNumber;
@@ -68,7 +68,7 @@ class _OtpScreenState extends State<OtpScreen> {
     setState(() => _isLoading = false);
 
     if (enteredOtp == widget.expectedOtp) {
-      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
       authProvider.setMockPhone(widget.cleanPhoneNumber);
       await authProvider.createMockUser();
 
