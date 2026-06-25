@@ -9,7 +9,6 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  
 
   dio: ^5.4.0
   # Core
@@ -18,8 +17,12 @@ dependencies:
   # State Management
   provider: ^6.1.2
 
-  # Supabase Backend
-  supabase_flutter: ^2.5.0
+  # Firebase Backend
+  firebase_core: ^2.31.0
+  firebase_auth: ^4.19.5
+  cloud_firestore: ^4.17.3
+  firebase_storage: ^11.7.5
+  firebase_messaging: ^14.9.2
 
   # Local Storage & Security
   shared_preferences: ^2.2.2
@@ -27,8 +30,6 @@ dependencies:
 
   # Notifications
   flutter_local_notifications: ^16.3.2
-  firebase_core: ^2.31.0
-  firebase_messaging: ^14.9.2
 
   # Image & Media
   image_picker: ^1.1.1
@@ -37,8 +38,6 @@ dependencies:
 
   # Audio - Recording & Playback
   just_audio: ^0.9.38
-  # flutter_sound: ^9.4.6
-#  audio_waveforms: ^1.0.5
 
   # File Handling
   file_picker: ^8.0.5
