@@ -56,8 +56,8 @@ class _SplashScreenState extends State<SplashScreen>
 
     if (!mounted) return;
 
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
-
+    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+    
     while (authProvider.isLoading) {
       await Future.delayed(const Duration(milliseconds: 100));
       if (!mounted) return;
