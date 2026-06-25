@@ -9,7 +9,7 @@ import 'package:local_auth_ios/local_auth_ios.dart';
 
 import 'firebase_options.dart';
 import 'themes/app_theme.dart';
-import 'providers/auth_provider.dart';
+import 'providers/auth_provider.dart' show AuraAuthProvider;
 import 'providers/chat_provider.dart';
 import 'providers/theme_provider.dart';
 import 'providers/settings_provider.dart';
@@ -225,7 +225,7 @@ class _AuraChatAppState extends State<AuraChatApp>
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
-        ChangeNotifierProvider(create: (_) => AuthProvider()),
+        ChangeNotifierProvider(create: (_) => AuraAuthProvider()),
         ChangeNotifierProvider(create: (_) => ChatProvider()),
         ChangeNotifierProvider(create: (_) => SettingsProvider()),
         ChangeNotifierProvider(create: (_) => BotProvider()),
