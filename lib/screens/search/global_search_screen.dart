@@ -2,7 +2,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../providers/auth_provider.dart';
 
@@ -21,21 +21,21 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
   String? _error;
   List<String> _recentSearches = [];
   final String _recentSearchesKey = 'global_search_recent';
-  RealtimeChannel? _presenceChannel;
+  StreamSubscription? _onlineStatusSubscription;
   Map<String, bool> _onlineStatus = {};
 
   @override
   void initState() {
     super.initState();
     _loadRecentSearches();
-    _subscribeToPresence();
+    _subscribeToOnlineStatus();
   }
 
   @override
   void dispose() {
     _searchController.dispose();
     _searchFocusNode.dispose();
-    _presenceChannel?.unsubscribe();
+    _onlineStatusSubscription?.cancel();
     super.dispose();
   }
 
@@ -79,49 +79,21 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
 
   // ─── Real-time Online Status ───
 
-  void _subscribeToPresence() {
-    final supabase = Supabase.instance.client;
-    _presenceChannel = supabase.channel('online_users');
-
-    _presenceChannel!
-        .onPresenceSync((payload) {
-          final presenceState = _presenceChannel!.presenceState();
-          final onlineIds = <String>{};
-          for (final presence in presenceState) {
-            for (final user in presence.presences) {
-              final userId = user.payload['user_id'] as String?;
-              if (userId != null) onlineIds.add(userId);
-            }
-          }
+  void _subscribeToOnlineStatus() {
+    final firestore = FirebaseFirestore.instance;
+    _onlineStatusSubscription = firestore
+        .collection('users')
+        .snapshots()
+        .listen((snapshot) {
           if (mounted) {
             setState(() {
-              for (final id in onlineIds) {
-                _onlineStatus[id] = true;
-              }
-              // Mark others as offline if not in presence state
-              for (final user in _users) {
-                final uid = user['id'] as String?;
-                if (uid != null && !onlineIds.contains(uid)) {
-                  _onlineStatus[uid] = false;
-                }
+              for (final doc in snapshot.docs) {
+                final data = doc.data();
+                _onlineStatus[doc.id] = data['is_online'] ?? false;
               }
             });
           }
-        })
-        .subscribe((status, error) {
-          if (status == 'SUBSCRIBED') {
-            _trackPresence();
-          }
         });
-  }
-
-  void _trackPresence() {
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    // FIXED: Use mockUserId as fallback
-    final currentUserId = authProvider.user?.id ?? authProvider.mockUserId;
-    if (currentUserId == null) return;
-
-    _presenceChannel?.track({'user_id': currentUserId});
   }
 
   // ─── Search ───
@@ -143,28 +115,31 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
     });
 
     try {
-      final supabase = Supabase.instance.client;
+      final firestore = FirebaseFirestore.instance;
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      // FIXED: Use mockUserId as fallback
-      final currentUserId = authProvider.user?.id ?? authProvider.mockUserId;
+      final currentUserId = authProvider.user?.uid ?? authProvider.mockUserId;
 
-      final searchTerm = '%${query.trim()}%';
+      final searchTerm = query.trim().toLowerCase();
       debugPrint('Searching for: $searchTerm');
 
-      final response = await supabase
-          .from('users')
-          .select('id, username, display_name, avatar_url, bio, phone, created_at')
-          .ilike('username', searchTerm)
-          .limit(20);
+      // Firestore doesn't support full text search natively
+      // Using range query for prefix matching
+      final snapshot = await firestore
+          .collection('users')
+          .where('username', isGreaterThanOrEqualTo: searchTerm)
+          .where('username', isLessThanOrEqualTo: '$searchTerm\uf8ff')
+          .limit(20)
+          .get();
 
-      debugPrint('Search response: $response');
+      debugPrint('Search response: ${snapshot.docs.length} users found');
 
-      final filtered = List<Map<String, dynamic>>.from(response)
+      final filtered = snapshot.docs
+          .map((doc) => {
+                'id': doc.id,
+                ...doc.data(),
+              })
           .where((u) => u['id'] != currentUserId)
           .toList();
-
-      // Fetch online status for these users
-      await _fetchOnlineStatus(filtered);
 
       setState(() {
         _users = filtered;
@@ -181,49 +156,15 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
     }
   }
 
-  Future<void> _fetchOnlineStatus(List<Map<String, dynamic>> users) async {
-    final supabase = Supabase.instance.client;
-    final userIds = users.map((u) => u['id'] as String).toList();
-
-    if (userIds.isEmpty) return;
-
-    try {
-      // Query presence table or use a custom online_status table
-      final response = await supabase
-          .from('online_status')
-          .select('user_id, is_online')
-          .inFilter('user_id', userIds);
-
-      final onlineData = List<Map<String, dynamic>>.from(response);
-      final statusMap = <String, bool>{};
-      for (final row in onlineData) {
-        statusMap[row['user_id'] as String] = row['is_online'] as bool;
-      }
-
-      if (mounted) {
-        setState(() {
-          for (final user in users) {
-            final uid = user['id'] as String;
-            _onlineStatus[uid] = statusMap[uid] ?? false;
-          }
-        });
-      }
-    } catch (e) {
-      // Fallback: assume all offline if table doesn't exist
-      debugPrint('Online status fetch error: $e');
-    }
-  }
-
   // ─── Chat ───
 
   Future<void> _startChat(Map<String, dynamic> user) async {
     setState(() => _isLoading = true);
 
     try {
-      final supabase = Supabase.instance.client;
+      final firestore = FirebaseFirestore.instance;
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      // FIXED: Use mockUserId as fallback
-      final currentUserId = authProvider.user?.id ?? authProvider.mockUserId;
+      final currentUserId = authProvider.user?.uid ?? authProvider.mockUserId;
 
       if (currentUserId == null) {
         throw Exception('Not authenticated');
@@ -232,67 +173,57 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
       final targetUserId = user['id'] as String;
 
       // Check if a direct chat already exists
-      final existingChats = await supabase
-          .from('chat_participants')
-          .select('chat_id')
-          .eq('user_id', currentUserId);
+      final chatSnapshot = await firestore
+          .collection('chats')
+          .where('type', isEqualTo: 'direct')
+          .where('participants', arrayContains: currentUserId)
+          .get();
 
-      final currentUserChatIds = List<Map<String, dynamic>>.from(existingChats)
-          .map((c) => c['chat_id'] as String)
-          .toList();
-
-      if (currentUserChatIds.isNotEmpty) {
-        final mutualChat = await supabase
-            .from('chat_participants')
-            .select('chat_id, chats!inner(type)')
-            .eq('user_id', targetUserId)
-            .inFilter('chat_id', currentUserChatIds)
-            .eq('chats.type', 'direct')
-            .maybeSingle();
-
-        if (mutualChat != null) {
-          if (mounted) {
-            Navigator.pushNamed(
-              context,
-              '/chat',
-              arguments: {
-                'chatId': mutualChat['chat_id'],
-                'chatName': user['username'] ?? 'Chat',
-                'chatAvatar': user['avatar_url'],
-                'isGroup': false,
-              },
-            );
-          }
-          setState(() => _isLoading = false);
-          return;
+      String? existingChatId;
+      for (final doc in chatSnapshot.docs) {
+        final data = doc.data();
+        final participants = data['participants'] as List<dynamic>;
+        if (participants.contains(targetUserId)) {
+          existingChatId = doc.id;
+          break;
         }
       }
 
-      // Create new direct chat
-      final chatId = DateTime.now().millisecondsSinceEpoch.toString();
+      if (existingChatId != null) {
+        if (mounted) {
+          Navigator.pushNamed(
+            context,
+            '/chat',
+            arguments: {
+              'chatId': existingChatId,
+              'chatName': user['username'] ?? 'Chat',
+              'chatAvatar': user['avatar_url'],
+              'isGroup': false,
+            },
+          );
+        }
+        setState(() => _isLoading = false);
+        return;
+      }
 
-      await supabase.from('chats').insert({
+      // Create new direct chat
+      final chatRef = firestore.collection('chats').doc();
+      final chatId = chatRef.id;
+
+      await chatRef.set({
         'id': chatId,
         'name': null,
         'type': 'direct',
+        'participants': [currentUserId, targetUserId],
+        'participants_data': {
+          currentUserId: {'role': 'member', 'joined_at': FieldValue.serverTimestamp()},
+          targetUserId: {'role': 'member', 'joined_at': FieldValue.serverTimestamp()},
+        },
         'created_by': currentUserId,
-        'created_at': DateTime.now().toIso8601String(),
+        'created_at': FieldValue.serverTimestamp(),
+        'updated_at': FieldValue.serverTimestamp(),
+        'last_message_at': FieldValue.serverTimestamp(),
       });
-
-      await supabase.from('chat_participants').insert([
-        {
-          'chat_id': chatId,
-          'user_id': currentUserId,
-          'role': 'member',
-          'joined_at': DateTime.now().toIso8601String(),
-        },
-        {
-          'chat_id': chatId,
-          'user_id': targetUserId,
-          'role': 'member',
-          'joined_at': DateTime.now().toIso8601String(),
-        },
-      ]);
 
       if (mounted) {
         Navigator.pushNamed(
