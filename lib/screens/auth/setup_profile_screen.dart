@@ -2,7 +2,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../services/app_localizations.dart';
 
@@ -168,20 +169,16 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
     if (_profileImage == null) return null;
 
     try {
-      final supabase = Supabase.instance.client;
-      final fileBytes = await _profileImage!.readAsBytes();
-      final fileName = '$userId/${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final ref = FirebaseStorage.instance
+          .ref()
+          .child('profiles')
+          .child('$userId/${DateTime.now().millisecondsSinceEpoch}.jpg');
 
-      await supabase.storage.from('profiles').uploadBinary(
-        fileName,
-        fileBytes,
-        fileOptions: const FileOptions(contentType: 'image/jpeg'),
-      );
-
-      return supabase.storage.from('profiles').getPublicUrl(fileName);
+      await ref.putFile(_profileImage!);
+      final url = await ref.getDownloadURL();
+      return url;
     } catch (e) {
       debugPrint('Error uploading profile image: $e');
-      // Show error to user instead of silently failing
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -196,13 +193,12 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
 
   Future<bool> _isUsernameTaken(String username) async {
     try {
-      final supabase = Supabase.instance.client;
-      final response = await supabase
-          .from('users')
-          .select('id')
-          .eq('username', username)
-          .maybeSingle();
-      return response != null;
+      final query = await FirebaseFirestore.instance
+          .collection('users')
+          .where('username', isEqualTo: username)
+          .limit(1)
+          .get();
+      return query.docs.isNotEmpty;
     } catch (e) {
       debugPrint('Username check error: $e');
       rethrow;
@@ -222,8 +218,8 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
     setState(() => _isLoading = true);
 
     try {
-      final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      final userId = authProvider.user?.id ?? authProvider.mockUserId;
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+      final userId = authProvider.user?.uid ?? authProvider.mockUserId;
 
       if (userId == null) {
         throw Exception('Not authenticated. Please log in again.');
@@ -242,7 +238,6 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
       String? photoUrl;
       if (_profileImage != null) {
         photoUrl = await _uploadProfileImage(userId);
-        // If upload failed and user selected an image, stop here
         if (photoUrl == null) {
           setState(() => _isLoading = false);
           _showError('Profile image upload failed. Please try again.');
