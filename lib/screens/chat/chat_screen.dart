@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
@@ -16,7 +17,6 @@ import 'package:intl/intl.dart';
 import 'dart:io';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../providers/chat_provider.dart';
-import 'package:dio/dio.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -206,9 +206,8 @@ class _ChatScreenState extends State<ChatScreen> {
     String? fileSize,
   }) async {
     try {
-      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
       final firestore = FirebaseFirestore.instance;
-      // FIXED: Use uid instead of id for Firebase
       final userId = authProvider.user?.uid ?? authProvider.mockUserId;
 
       if (userId == null || _chatId == null) return;
@@ -503,9 +502,8 @@ class _ChatScreenState extends State<ChatScreen> {
     String? fileSize,
   }) async {
     try {
-      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
       final storage = FirebaseStorage.instance;
-      // FIXED: Use uid instead of id for Firebase
       final userId = authProvider.user?.uid ?? authProvider.mockUserId;
 
       if (userId == null) return;
@@ -589,8 +587,12 @@ class _ChatScreenState extends State<ChatScreen> {
       final ext = fileName?.split('.').last ?? 'file';
       final localPath = '${dir.path}/${const Uuid().v4()}.$ext';
 
-      final dio = Dio();
-      await dio.download(url, localPath);
+      // Use http package instead of dio for download
+      final client = HttpClient();
+      final request = await client.getUrl(Uri.parse(url));
+      final response = await request.close();
+      final file = File(localPath);
+      await response.pipe(file.openWrite());
 
       await OpenFilex.open(localPath);
     } catch (e) {
@@ -630,8 +632,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final authProvider = Provider.of<AuthProvider>(context);
-    // FIXED: Use uid instead of id for Firebase
+    final authProvider = Provider.of<AuraAuthProvider>(context);
     final currentUserId = authProvider.user?.uid ?? authProvider.mockUserId;
 
     return Scaffold(
@@ -747,7 +748,6 @@ class _ChatScreenState extends State<ChatScreen> {
                         itemCount: _messages.length,
                         itemBuilder: (context, index) {
                           final message = _messages[index];
-                          // FIXED: Use uid instead of id for Firebase
                           final isMe = message['sender_id'] == currentUserId;
                           final showAvatar = !isMe && (index == 0 ||
                               _messages[index - 1]['sender_id'] != message['sender_id']);
@@ -932,7 +932,7 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-    Widget _buildMessageBubble(
+  Widget _buildMessageBubble(
     BuildContext context, {
     required Map<String, dynamic> message,
     required bool isMe,
