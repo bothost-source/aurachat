@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -37,8 +38,8 @@ class _StatusScreenState extends State<StatusScreen> {
     final picked = await picker.pickImage(source: ImageSource.gallery, maxWidth: 1080);
     if (picked == null) return;
 
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    final userId = authProvider.user?.id ?? authProvider.mockUserId;
+    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+    final userId = authProvider.user?.uid ?? authProvider.mockUserId;
     if (userId == null) return;
 
     setState(() => _isLoading = true);
@@ -57,8 +58,8 @@ class _StatusScreenState extends State<StatusScreen> {
     final picked = await picker.pickVideo(source: ImageSource.gallery);
     if (picked == null) return;
 
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    final userId = authProvider.user?.id ?? authProvider.mockUserId;
+    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+    final userId = authProvider.user?.uid ?? authProvider.mockUserId;
     if (userId == null) return;
 
     setState(() => _isLoading = true);
@@ -101,8 +102,8 @@ class _StatusScreenState extends State<StatusScreen> {
             onPressed: () async {
               if (controller.text.trim().isEmpty) return;
               
-              final authProvider = Provider.of<AuthProvider>(context, listen: false);
-              final userId = authProvider.user?.id ?? authProvider.mockUserId;
+              final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+              final userId = authProvider.user?.uid ?? authProvider.mockUserId;
               if (userId == null) return;
 
               Navigator.pop(context);
@@ -166,8 +167,8 @@ class _StatusScreenState extends State<StatusScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final authProvider = Provider.of<AuthProvider>(context);
-    final userId = authProvider.user?.id ?? authProvider.mockUserId;
+    final authProvider = Provider.of<AuraAuthProvider>(context);
+    final userId = authProvider.user?.uid ?? authProvider.mockUserId;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0F),
@@ -365,7 +366,7 @@ class _StatusScreenState extends State<StatusScreen> {
     final mediaUrl = status['media_url'];
     final caption = status['caption'] ?? '';
     final type = status['type'] ?? 'image';
-    final createdAt = DateTime.parse(status['created_at']);
+    final createdAt = (status['created_at'] as Timestamp).toDate();
     final timeAgo = _getTimeAgo(createdAt);
 
     return Container(
