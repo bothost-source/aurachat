@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:uuid/uuid.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/chat_provider.dart';
@@ -41,25 +42,21 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final supabase = Supabase.instance.client;
+      final storage = FirebaseStorage.instance;
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      // FIXED: Use mockUserId as fallback
-      final userId = authProvider.user?.id ?? authProvider.mockUserId;
+      final userId = authProvider.user?.uid ?? authProvider.mockUserId;
 
       if (userId == null) {
         throw Exception('Not authenticated');
       }
 
       final fileBytes = await pickedFile.readAsBytes();
-      final fileName = '$userId/${const Uuid().v4()}.jpg';
+      final fileName = 'groups/$userId/${const Uuid().v4()}.jpg';
 
-      await supabase.storage.from('groups').uploadBinary(
-        fileName,
-        fileBytes,
-        fileOptions: const FileOptions(contentType: 'image/jpeg'),
-      );
+      final ref = storage.ref().child(fileName);
+      await ref.putData(fileBytes);
 
-      final url = supabase.storage.from('groups').getPublicUrl(fileName);
+      final url = await ref.getDownloadURL();
       setState(() => _groupPhotoUrl = url);
     } catch (e) {
       debugPrint('Photo upload failed: $e');
@@ -83,18 +80,19 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
     }
 
     try {
-      final supabase = Supabase.instance.client;
+      final firestore = FirebaseFirestore.instance;
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      // FIXED: Use mockUserId as fallback
-      final currentUserId = authProvider.user?.id ?? authProvider.mockUserId;
+      final currentUserId = authProvider.user?.uid ?? authProvider.mockUserId;
 
-      final response = await supabase
-          .from('users')
-          .select('id, username, avatar_url, phone')
-          .ilike('username', '%$query%')
-          .limit(20);
+      final snapshot = await firestore
+          .collection('users')
+          .where('username', isGreaterThanOrEqualTo: query)
+          .where('username', isLessThanOrEqualTo: '$query\uf8ff')
+          .limit(20)
+          .get();
 
-      final filtered = List<Map<String, dynamic>>.from(response)
+      final filtered = snapshot.docs
+          .map((doc) => doc.data())
           .where((u) => u['id'] != currentUserId)
           .toList();
 
@@ -128,45 +126,37 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
     try {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       final chatProvider = Provider.of<ChatProvider>(context, listen: false);
-      final supabase = Supabase.instance.client;
-      // FIXED: Use mockUserId as fallback
-      final userId = authProvider.user?.id ?? authProvider.mockUserId;
+      final firestore = FirebaseFirestore.instance;
+      final userId = authProvider.user?.uid ?? authProvider.mockUserId;
 
       if (userId == null) {
         throw Exception('Not authenticated');
       }
 
-      final groupId = const Uuid().v4();
-      final now = DateTime.now().toIso8601String();
+      final participants = [userId, ..._selectedMembers.map((m) => m['id'] as String)];
+      final participantsData = <String, dynamic>{};
 
-      await supabase.from('chats').insert({
-        'id': groupId,
+      for (final id in participants) {
+        participantsData[id] = {
+          'role': id == userId ? 'admin' : 'member',
+          'joined_at': FieldValue.serverTimestamp(),
+        };
+      }
+
+      await firestore.collection('chats').add({
         'name': _nameController.text.trim(),
-        'description': _descriptionController.text.trim().isNotEmpty 
-            ? _descriptionController.text.trim() 
+        'description': _descriptionController.text.trim().isNotEmpty
+            ? _descriptionController.text.trim()
             : null,
         'avatar_url': _groupPhotoUrl,
         'type': _isChannel ? 'channel' : 'group',
         'created_by': userId,
-        'created_at': now,
-        'updated_at': now,
+        'participants': participants,
+        'participants_data': participantsData,
+        'created_at': FieldValue.serverTimestamp(),
+        'updated_at': FieldValue.serverTimestamp(),
+        'last_message_at': FieldValue.serverTimestamp(),
       });
-
-      await supabase.from('chat_participants').insert({
-        'chat_id': groupId,
-        'user_id': userId,
-        'role': 'admin',
-        'joined_at': now,
-      });
-
-      for (final member in _selectedMembers) {
-        await supabase.from('chat_participants').insert({
-          'chat_id': groupId,
-          'user_id': member['id'],
-          'role': 'member',
-          'joined_at': now,
-        });
-      }
 
       await chatProvider.loadChats();
 
