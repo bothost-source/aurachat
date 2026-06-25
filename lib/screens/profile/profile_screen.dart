@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/settings_provider.dart';
 
@@ -56,21 +56,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       try {
         final authProvider = Provider.of<AuthProvider>(context, listen: false);
-        final supabase = Supabase.instance.client;
-        final userId = authProvider.user?.id;
+        final storage = FirebaseStorage.instance;
+        final userId = authProvider.user?.uid ?? authProvider.mockUserId;
 
         if (userId == null) return;
 
         final fileBytes = await pickedFile.readAsBytes();
         final fileName = 'avatars/$userId/${DateTime.now().millisecondsSinceEpoch}.jpg';
 
-        await supabase.storage.from('profiles').uploadBinary(
-          fileName,
-          fileBytes,
-          fileOptions: const FileOptions(contentType: 'image/jpeg'),
-        );
+        final ref = storage.ref().child(fileName);
+        await ref.putData(fileBytes);
 
-        final imageUrl = supabase.storage.from('profiles').getPublicUrl(fileName);
+        final imageUrl = await ref.getDownloadURL();
 
         await authProvider.updateProfile(photoUrl: imageUrl);
 
@@ -439,7 +436,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       _buildDangerTile(
                         icon: Icons.delete_outline,
                         title: 'Delete Account',
-                        subtitle: 'Permanently delete your account and data',
+                        subtitle: 'Permanently delete your account and all your data',
                         onTap: () => _showDeleteAccountDialog(context),
                       ),
 
