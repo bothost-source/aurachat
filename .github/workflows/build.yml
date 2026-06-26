@@ -29,30 +29,45 @@ jobs:
           flutter-version: '3.22.0'
           channel: 'stable'
 
-      - name: Decode google-services.json
-        run: |
-          echo "${{ secrets.GOOGLE_SERVICES_JSON }}" | base64 -d > android/app/google-services.json
+      # ✅ REMOVED: Decode step - file is already in repo!
 
-      - name: Create Android project
+      # ✅ FIX: Don't run flutter create if android exists
+      - name: Ensure Android directory exists
         run: |
-          flutter create . --platforms=android
+          if [ ! -d "android" ]; then
+            flutter create . --platforms=android
+          fi
 
-      - name: Fix minSdkVersion
+      # ✅ FIX: Add google-services plugin to android/app/build.gradle
+      - name: Add Firebase plugin
+        run: |
+          if ! grep -q "com.google.gms.google-services" android/app/build.gradle; then
+            sed -i 's/apply plugin: "com.android.application"/apply plugin: "com.android.application"\napply plugin: "com.google.gms.google-services"/' android/app/build.gradle
+          fi
+
+      # ✅ FIX: Add google-services classpath to android/build.gradle
+      - name: Add Firebase classpath
+        run: |
+          if ! grep -q "com.google.gms:google-services" android/build.gradle; then
+            sed -i "/classpath 'com.android.tools.build:gradle'/a\\        classpath 'com.google.gms:google-services:4.3.15'" android/build.gradle
+          fi
+
+      # ✅ FIX: Match package name to google-services.json (com.example.aurachat)
+      - name: Fix namespace and applicationId
         run: |
           sed -i 's/flutter.minSdkVersion/23/g' android/app/build.gradle
           sed -i 's/minSdkVersion 19/minSdkVersion 23/g' android/app/build.gradle
+          # Keep com.example.aurachat to match google-services.json
+          sed -i 's/namespace = "com.bothost.aurachat"/namespace = "com.example.aurachat"/g' android/app/build.gradle
+          sed -i 's/applicationId "com.bothost.aurachat"/applicationId "com.example.aurachat"/g' android/app/build.gradle
+          sed -i 's/applicationId = "com.bothost.aurachat"/applicationId = "com.example.aurachat"/g' android/app/build.gradle
 
-      - name: Fix namespace and applicationId
-        run: |
-          sed -i 's/namespace = "com.example.aurachat"/namespace = "com.bothost.aurachat"/g' android/app/build.gradle
-          sed -i 's/applicationId "com.example.aurachat"/applicationId "com.bothost.aurachat"/g' android/app/build.gradle
-          sed -i 's/applicationId = "com.example.aurachat"/applicationId = "com.bothost.aurachat"/g' android/app/build.gradle
-
+      # ✅ FIX: Setup MainActivity with correct package
       - name: Setup MainActivity for biometric
         run: |
-          mkdir -p android/app/src/main/kotlin/com/bothost/aurachat
-          cat > android/app/src/main/kotlin/com/bothost/aurachat/MainActivity.kt << 'EOF'
-          package com.bothost.aurachat
+          mkdir -p android/app/src/main/kotlin/com/example/aurachat
+          cat > android/app/src/main/kotlin/com/example/aurachat/MainActivity.kt << 'EOF'
+          package com.example.aurachat
 
           import io.flutter.embedding.android.FlutterFragmentActivity
 
@@ -68,6 +83,10 @@ jobs:
 
       - name: Get dependencies
         run: flutter pub get
+
+      # ✅ ADD: Generate app icons BEFORE build
+      - name: Generate app icons
+        run: flutter pub run flutter_launcher_icons
 
       - name: Build APK
         run: |
@@ -104,7 +123,9 @@ jobs:
       - name: Create Web project and Build
         run: |
           flutter config --enable-web
-          flutter create . --platforms=web
+          if [ ! -d "web" ]; then
+            flutter create . --platforms=web
+          fi
 
       - name: Get dependencies
         run: flutter pub get
