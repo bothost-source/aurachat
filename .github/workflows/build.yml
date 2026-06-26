@@ -29,69 +29,38 @@ jobs:
           flutter-version: '3.22.0'
           channel: 'stable'
 
-      - name: Ensure Android project exists
+      - name: Create Android project
         run: |
-          if [ ! -d "android" ]; then
-            flutter create . --platforms=android --org com.example
-          fi
-          ls -la android/app/
-
-      - name: Verify Firebase config exists
-        run: |
-          if [ -f "android/app/google-services.json" ]; then
-            echo "✅ google-services.json found"
-          else
-            echo "❌ google-services.json MISSING - Firebase will fail!"
-            exit 1
-          fi
+          cp android/app/google-services.json /tmp/google-services.json
+          rm -rf android
+          flutter create . --platforms=android --org com.example
+          mkdir -p android/app
+          cp /tmp/google-services.json android/app/
 
       - name: Add Firebase plugin
         run: |
-          if [ -f "android/app/build.gradle" ]; then
-            if ! grep -q "com.google.gms.google-services" android/app/build.gradle; then
-              sed -i 's/apply plugin: "com.android.application"/apply plugin: "com.android.application"\napply plugin: "com.google.gms.google-services"/' android/app/build.gradle
-            fi
-          else
-            echo "ERROR: android/app/build.gradle not found!"
-            exit 1
-          fi
+          sed -i 's/apply plugin: "com.android.application"/apply plugin: "com.android.application"\napply plugin: "com.google.gms.google-services"/' android/app/build.gradle
 
       - name: Add Firebase classpath
         run: |
-          if [ -f "android/build.gradle" ]; then
-            if ! grep -q "com.google.gms:google-services" android/build.gradle; then
-              sed -i "/classpath 'com.android.tools.build:gradle'/a\\        classpath 'com.google.gms:google-services:4.3.15'" android/build.gradle
-            fi
-          fi
+          sed -i "/classpath 'com.android.tools.build:gradle'/a\\        classpath 'com.google.gms:google-services:4.3.15'" android/build.gradle
 
       - name: Fix minSdkVersion
         run: |
           sed -i 's/flutter.minSdkVersion/23/g' android/app/build.gradle
-          sed -i 's/minSdkVersion 19/minSdkVersion 23/g' android/app/build.gradle
 
-      - name: Fix namespace and applicationId
-        run: |
-          sed -i 's/namespace = "com.bothost.aurachat"/namespace = "com.example.aurachat"/g' android/app/build.gradle
-          sed -i 's/applicationId "com.bothost.aurachat"/applicationId "com.example.aurachat"/g' android/app/build.gradle
-          sed -i 's/applicationId = "com.bothost.aurachat"/applicationId = "com.example.aurachat"/g' android/app/build.gradle
-
-      - name: Setup MainActivity for biometric
+      - name: Setup MainActivity
         run: |
           mkdir -p android/app/src/main/kotlin/com/example/aurachat
           cat > android/app/src/main/kotlin/com/example/aurachat/MainActivity.kt << 'EOF'
           package com.example.aurachat
-
           import io.flutter.embedding.android.FlutterFragmentActivity
-
-          class MainActivity: FlutterFragmentActivity() {
-          }
+          class MainActivity: FlutterFragmentActivity() {}
           EOF
 
       - name: Create asset directories
         run: |
-          mkdir -p assets/images
-          mkdir -p assets/emojis
-          mkdir -p assets/audio
+          mkdir -p assets/images assets/emojis assets/audio
 
       - name: Get dependencies
         run: flutter pub get
@@ -100,8 +69,7 @@ jobs:
         run: flutter pub run flutter_launcher_icons
 
       - name: Build APK
-        run: |
-          flutter build apk --release
+        run: flutter build apk --release
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -131,18 +99,10 @@ jobs:
           flutter-version: '3.22.0'
           channel: 'stable'
 
-      - name: Create Web project and Build
+      - name: Build Web
         run: |
           flutter config --enable-web
-          if [ ! -d "web" ]; then
-            flutter create . --platforms=web
-          fi
-
-      - name: Get dependencies
-        run: flutter pub get
-
-      - name: Build Web
-        run: flutter build web --release
+          flutter build web --release
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
