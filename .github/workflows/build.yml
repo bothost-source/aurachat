@@ -29,12 +29,22 @@ jobs:
           flutter-version: '3.22.0'
           channel: 'stable'
 
-      - name: Create Android project
+      - name: Ensure Android project exists
         run: |
-          rm -rf android
-          flutter create . --platforms=android --org com.example
+          if [ ! -d "android" ]; then
+            flutter create . --platforms=android --org com.example
+          fi
           ls -la android/app/
           cat android/app/build.gradle
+
+      - name: Verify Firebase config exists
+        run: |
+          if [ -f "android/app/google-services.json" ]; then
+            echo "✅ google-services.json found"
+          else
+            echo "❌ google-services.json MISSING - Firebase will fail!"
+            exit 1
+          fi
 
       - name: Add Firebase plugin
         run: |
