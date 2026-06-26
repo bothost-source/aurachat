@@ -52,19 +52,30 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   Future<void> _checkAuthAndNavigate() async {
+    // Wait for splash animation (3 seconds)
     await Future.delayed(const Duration(seconds: 3));
 
     if (!mounted) return;
 
     final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
-    
-    while (authProvider.isLoading) {
+
+    // ⏱️ MAX 5 SECOND TIMEOUT — never hang forever!
+    int attempts = 0;
+    while (authProvider.isLoading && attempts < 50) {
       await Future.delayed(const Duration(milliseconds: 100));
       if (!mounted) return;
+      attempts++;
     }
 
+    if (!mounted) return;
     if (_hasNavigated) return;
     _hasNavigated = true;
+
+    // If still loading after timeout, force to login
+    if (authProvider.isLoading) {
+      Navigator.pushReplacementNamed(context, '/login');
+      return;
+    }
 
     if (!mounted) return;
 
