@@ -35,7 +35,6 @@ jobs:
             flutter create . --platforms=android --org com.example
           fi
           ls -la android/app/
-          cat android/app/build.gradle
 
       - name: Verify Firebase config exists
         run: |
