@@ -1,6 +1,7 @@
 {
   "project_info": {
     "project_number": "539789121540",
+    "firebase_url": "https://aurachat-85f54-default-rtdb.firebaseio.com",
     "project_id": "aurachat-85f54",
     "storage_bucket": "aurachat-85f54.firebasestorage.app"
   },
@@ -26,5 +27,4 @@
     }
   ],
   "configuration_version": "1"
-
-      }
+}
