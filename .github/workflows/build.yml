@@ -31,11 +31,28 @@ jobs:
 
       - name: Create Android project
         run: |
+          echo "=== SAVING google-services.json ==="
           cp android/app/google-services.json /tmp/google-services.json
+          echo "Saved to /tmp/google-services.json"
+          
+          echo "=== DELETING android folder ==="
           rm -rf android
+          
+          echo "=== RECREATING Android project ==="
           flutter create . --platforms=android --org com.example
+          
+          echo "=== RESTORING google-services.json ==="
           mkdir -p android/app
           cp /tmp/google-services.json android/app/
+          
+          echo "=== VERIFYING google-services.json EXISTS ==="
+          if [ -f "android/app/google-services.json" ]; then
+            echo "✅ SUCCESS: google-services.json is present!"
+            ls -la android/app/google-services.json
+          else
+            echo "❌ FAILURE: google-services.json is MISSING!"
+            exit 1
+          fi
 
       - name: Add Firebase plugin
         run: |
