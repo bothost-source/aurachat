@@ -31,36 +31,20 @@ jobs:
 
       - name: Create Android project
         run: |
-          echo "=== SAVING google-services.json ==="
           cp android/app/google-services.json /tmp/google-services.json
-          echo "Saved to /tmp/google-services.json"
-          
-          echo "=== DELETING android folder ==="
           rm -rf android
-          
-          echo "=== RECREATING Android project ==="
           flutter create . --platforms=android --org com.example
-          
-          echo "=== RESTORING google-services.json ==="
           mkdir -p android/app
           cp /tmp/google-services.json android/app/
-          
-          echo "=== VERIFYING google-services.json EXISTS ==="
-          if [ -f "android/app/google-services.json" ]; then
-            echo "✅ SUCCESS: google-services.json is present!"
-            ls -la android/app/google-services.json
-          else
-            echo "❌ FAILURE: google-services.json is MISSING!"
-            exit 1
-          fi
+          ls -la android/app/google-services.json
 
-      - name: Add Firebase plugin
+      - name: Add Firebase plugin to app build.gradle
         run: |
-          sed -i 's/apply plugin: "com.android.application"/apply plugin: "com.android.application"\napply plugin: "com.google.gms.google-services"/' android/app/build.gradle
+          sed -i 's/id "dev.flutter.flutter-gradle-plugin"/id "dev.flutter.flutter-gradle-plugin"\n    id "com.google.gms.google-services"/' android/app/build.gradle
 
-      - name: Add Firebase classpath
+      - name: Add Firebase plugin to settings.gradle
         run: |
-          sed -i "/classpath 'com.android.tools.build:gradle'/a\\        classpath 'com.google.gms:google-services:4.3.15'" android/build.gradle
+          sed -i 's/id "org.jetbrains.kotlin.android" version "1.8.22" apply false/id "org.jetbrains.kotlin.android" version "1.8.22" apply false\n    id "com.google.gms.google-services" version "4.3.15" apply false/' android/settings.gradle
 
       - name: Fix minSdkVersion
         run: |
@@ -86,7 +70,8 @@ jobs:
         run: flutter pub run flutter_launcher_icons
 
       - name: Build APK
-        run: flutter build apk --release
+        run: |
+          flutter build apk --release
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
