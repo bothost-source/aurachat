@@ -56,30 +56,144 @@ import 'services/call_service.dart';
 import 'services/call_signaling_service.dart';
 
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  // Catch ALL Flutter errors
+  FlutterError.onError = (FlutterErrorDetails details) {
+    FlutterError.presentError(details);
+  };
 
-  await Firebase.initializeApp();
+  String? startupError;
+  String? startupStack;
 
-  await NotificationService.init();
-  await NotificationService.requestPermission();
-  ConnectivityService().initialize();
-  CallService.initialize('8a2cea909f994b0d9e61146e99710277');
+  try {
+    WidgetsFlutterBinding.ensureInitialized();
 
-  await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.portraitDown,
-  ]);
+    await Firebase.initializeApp();
 
-  SystemChrome.setSystemUIOverlayStyle(
-    const SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.light,
-      systemNavigationBarColor: Color(0xFF0A0A0A),
-      systemNavigationBarIconBrightness: Brightness.light,
-    ),
-  );
+    await NotificationService.init();
+    await NotificationService.requestPermission();
+    ConnectivityService().initialize();
+    CallService.initialize('8a2cea909f994b0d9e61146e99710277');
 
-  runApp(const AuraChatApp());
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]);
+
+    SystemChrome.setSystemUIOverlayStyle(
+      const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+        systemNavigationBarColor: Color(0xFF0A0A0A),
+        systemNavigationBarIconBrightness: Brightness.light,
+      ),
+    );
+
+    runApp(const AuraChatApp());
+    return;
+
+  } catch (e, stack) {
+    startupError = e.toString();
+    startupStack = stack.toString();
+  }
+
+  // If we get here, something failed - show error screen
+  runApp(ErrorApp(error: startupError ?? 'Unknown error', stack: startupStack));
+}
+
+class ErrorApp extends StatelessWidget {
+  final String error;
+  final String? stack;
+
+  const ErrorApp({super.key, required this.error, this.stack});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      home: Scaffold(
+        backgroundColor: const Color(0xFF0A0A0A),
+        body: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.error_outline, color: Colors.red, size: 64),
+                const SizedBox(height: 24),
+                const Text(
+                  'AURA Chat Error',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'The app failed to start. Please screenshot this and send it for help.',
+                  style: TextStyle(color: Colors.white70, fontSize: 14),
+                ),
+                const SizedBox(height: 32),
+                const Text(
+                  'ERROR:',
+                  style: TextStyle(
+                    color: Colors.redAccent,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.red.withOpacity(0.3)),
+                  ),
+                  child: Text(
+                    error,
+                    style: const TextStyle(
+                      color: Colors.redAccent,
+                      fontSize: 14,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
+                if (stack != null) ...[
+                  const SizedBox(height: 24),
+                  const Text(
+                    'STACK TRACE:',
+                    style: TextStyle(
+                      color: Colors.white54,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.05),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      stack!,
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 10,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class AuraChatApp extends StatefulWidget {
