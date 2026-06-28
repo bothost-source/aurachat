@@ -40,7 +40,7 @@ jobs:
 
       - name: Add Firebase plugin to app build.gradle
         run: |
-          sed -i 's/id "dev.flutter.flutter-gradle-plugin"/id "dev.flutter.flutter-gradle-plugin"\n    id "com.google.gms.google-services"/' android/app/build.gradle
+          sed -i 's/id "dev.flutter.flutter-gradle-plugin"/id "dev.flutter.flutter-gradle-plugin"\n    id "com.google.gms.google-services" version "4.3.15"/' android/app/build.gradle
 
       - name: Add Firebase plugin to settings.gradle
         run: |
@@ -111,3 +111,4 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./build/web
+
