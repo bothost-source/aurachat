@@ -38,6 +38,16 @@ jobs:
           cp /tmp/google-services.json android/app/
           ls -la android/app/google-services.json
 
+      - name: Create Cloudinary config
+        run: |
+          cat > lib/services/cloudinary_config.dart << 'EOF'
+          class CloudinaryConfig {
+            static const String cloudName = '${{ secrets.CLOUDINARY_CLOUD_NAME }}';
+            static const String apiKey = '${{ secrets.CLOUDINARY_API_KEY }}';
+            static const String apiSecret = '${{ secrets.CLOUDINARY_API_SECRET }}';
+          }
+          EOF
+
       - name: Add Firebase plugin to app build.gradle
         run: |
           sed -i 's/id "dev.flutter.flutter-gradle-plugin"/id "dev.flutter.flutter-gradle-plugin"\n    id "com.google.gms.google-services" version "4.3.15"/' android/app/build.gradle
@@ -111,4 +121,3 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./build/web
-
