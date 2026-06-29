@@ -6,6 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:uuid/uuid.dart';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../providers/chat_provider.dart';
+import '../../services/cloudinary_service.dart';
 
 class CreateGroupScreen extends StatefulWidget {
   const CreateGroupScreen({super.key});
@@ -33,45 +34,49 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
     super.dispose();
   }
 
-  Future<void> _pickGroupPhoto() async {
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+  
 
-    if (pickedFile == null) return;
+Future<void> _pickGroupPhoto() async {
+  final picker = ImagePicker();
+  final pickedFile = await picker.pickImage(source: ImageSource.gallery);
 
-    setState(() => _isLoading = true);
+  if (pickedFile == null) return;
 
-    try {
-      final storage = FirebaseStorage.instance;
-      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
-      final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+  setState(() => _isLoading = true);
 
-      if (userId == null) {
-        throw Exception('Not authenticated');
-      }
+  try {
+    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+    final userId = authProvider.user?.uid ?? authProvider.mockUserId;
 
-      final fileBytes = await pickedFile.readAsBytes();
-      final fileName = 'groups/$userId/${const Uuid().v4()}.jpg';
-
-      final ref = storage.ref().child(fileName);
-      await ref.putData(fileBytes);
-
-      final url = await ref.getDownloadURL();
-      setState(() => _groupPhotoUrl = url);
-    } catch (e) {
-      debugPrint('Photo upload failed: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Photo upload failed: $e. Continuing without photo.'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-      }
-    } finally {
-      setState(() => _isLoading = false);
+    if (userId == null) {
+      throw Exception('Not authenticated');
     }
+
+    // Upload to Cloudinary instead of Firebase Storage
+    final imageUrl = await CloudinaryService.uploadImage(
+      File(pickedFile.path),
+      'aurachat/groups/$userId'
+    );
+
+    if (imageUrl == null) {
+      throw Exception('Upload failed');
+    }
+
+    setState(() => _groupPhotoUrl = imageUrl);
+  } catch (e) {
+    debugPrint('Photo upload failed: $e');
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Photo upload failed: $e. Continuing without photo.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+    }
+  } finally {
+    setState(() => _isLoading = false);
   }
+}
 
   Future<void> _searchUsers(String query) async {
     if (query.isEmpty) {
