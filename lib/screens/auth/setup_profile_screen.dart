@@ -6,6 +6,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../services/app_localizations.dart';
+import '../../services/cloudinary_service.dart';
 
 class SetupProfileScreen extends StatefulWidget {
   const SetupProfileScreen({super.key});
@@ -165,31 +166,45 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
     );
   }
 
-  Future<String?> _uploadProfileImage(String userId) async {
-    if (_profileImage == null) return null;
+  
 
-    try {
-      final ref = FirebaseStorage.instance
-          .ref()
-          .child('profiles')
-          .child('$userId/${DateTime.now().millisecondsSinceEpoch}.jpg');
+Future<String?> _uploadProfileImage(String userId) async {
+  if (_profileImage == null) return null;
 
-      await ref.putFile(_profileImage!);
-      final url = await ref.getDownloadURL();
-      return url;
-    } catch (e) {
-      debugPrint('Error uploading profile image: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to upload image: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-      return null;
+  try {
+    // Upload to Cloudinary instead of Firebase Storage
+    final imageUrl = await CloudinaryService.uploadImage(
+      _profileImage!,
+      'aurachat/profiles/$userId'
+    );
+    
+    if (imageUrl == null) {
+      throw Exception('Failed to upload image');
     }
+    
+    // Save URL to Firestore
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(userId)
+        .update({
+          'avatar_url': imageUrl,
+          'updated_at': FieldValue.serverTimestamp(),
+        });
+    
+    return imageUrl;
+  } catch (e) {
+    debugPrint('Error uploading profile image: $e');
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to upload image: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+    return null;
   }
+}
 
   Future<bool> _isUsernameTaken(String username) async {
     try {
@@ -590,3 +605,4 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
     );
   }
 }
+
