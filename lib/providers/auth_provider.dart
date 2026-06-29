@@ -209,11 +209,12 @@ class AuraAuthProvider extends ChangeNotifier {
       final doc = await _firestore.collection('users').doc(userId).get();
 
       if (doc.exists) {
-        final data = doc.data()!;
-        _userName = data['username'] as String?;
+      final data = doc.data()!;
+       _userName = data['username'] as String?;
         _displayName = data['display_name'] as String?;
         _userBio = data['bio'] as String?;
-        _userPhotoUrl = data['avatar_url'] as String?;
+        // Check for base64 avatar first, then regular URL
+        _userPhotoUrl = data['avatar_base64'] as String? ?? data['avatar_url'] as String?;
         _phoneNumber = data['phone'] as String? ?? _phoneNumber;
         _email = data['email'] as String? ?? _email;
         notifyListeners();
