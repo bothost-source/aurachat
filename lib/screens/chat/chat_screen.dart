@@ -17,6 +17,7 @@ import 'package:intl/intl.dart';
 import 'dart:io';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../providers/chat_provider.dart';
+import '../../services/cloudinary_service.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -496,58 +497,55 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _uploadAndSendMedia({
-    required File file,
-    required String type,
-    String? fileName,
-    String? fileSize,
-  }) async {
-    try {
-      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
-      final storage = FirebaseStorage.instance;
-      final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+  required File file,
+  required String type,
+  String? fileName,
+  String? fileSize,
+}) async {
+  try {
+    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+    final userId = authProvider.user?.uid ?? authProvider.mockUserId;
 
-      if (userId == null) return;
+    if (userId == null || _chatId == null) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Row(
-            children: [
-              SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-              SizedBox(width: 12),
-              Text('Uploading...'),
-            ],
-          ),
-          duration: Duration(seconds: 30),
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Row(
+          children: [
+            SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+            SizedBox(width: 12),
+            Text('Uploading...'),
+          ],
         ),
-      );
+        duration: Duration(seconds: 30),
+      ),
+    );
 
-      final ext = file.path.split('.').last;
-      final uploadName = 'chat_media/$_chatId/${const Uuid().v4()}.$ext';
+    // Upload to Cloudinary instead of Firebase Storage
+    final mediaUrl = await CloudinaryService.uploadImage(
+      file,
+      'aurachat/chats/$_chatId'
+    );
 
-      final ref = storage.ref().child(uploadName);
-      await ref.putFile(file);
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
 
-      final mediaUrl = await ref.getDownloadURL();
-
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-
-      await _sendMessage(
-        type: type,
-        content: fileName ?? 'Media',
-        mediaUrl: mediaUrl,
-        fileName: fileName,
-        fileSize: fileSize,
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Upload failed: $e')),
-      );
+    if (mediaUrl == null) {
+      throw Exception('Upload failed');
     }
+
+    await _sendMessage(
+      type: type,
+      content: fileName ?? 'Image',
+      mediaUrl: mediaUrl,
+      fileName: fileName,
+      fileSize: fileSize,
+    );
+  } catch (e) {
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Upload failed: $e')),
+    );
+  }
   }
 
   Future<void> _playAudio(String messageId, String audioUrl) async {
