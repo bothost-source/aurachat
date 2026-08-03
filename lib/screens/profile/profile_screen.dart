@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
-import '../../providers/settings_provider.dart';
+import '../../utils/verified_badge.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -121,17 +121,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget build(BuildContext context) {
     return Consumer<AuraAuthProvider>(
       builder: (context, authProvider, child) {
+        final phone = authProvider.phoneNumber ?? '';
+        final userVerified = isVerified(phone);
+
         return Scaffold(
           backgroundColor: const Color(0xFF0A0A0F),
           body: CustomScrollView(
             slivers: [
               // Gradient app bar with profile
               SliverAppBar(
-                expandedHeight: 280,
+                expandedHeight: 300,
                 floating: false,
                 pinned: true,
                 elevation: 0,
                 backgroundColor: const Color(0xFF0A0A0F),
+                leading: IconButton(
+                  icon: const Icon(Icons.arrow_back, color: Colors.white70),
+                  onPressed: () => Navigator.pop(context),
+                ),
                 flexibleSpace: FlexibleSpaceBar(
                   background: Container(
                     decoration: BoxDecoration(
@@ -145,49 +152,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ],
                       ),
                     ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const SizedBox(height: 40),
-                        // Profile photo with glow
-                        Stack(
-                          children: [
-                            Container(
-                              width: 100,
-                              height: 100,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: const Color(0xFF8B5CF6).withOpacity(0.4),
-                                    blurRadius: 30,
-                                    spreadRadius: 5,
-                                  ),
-                                ],
+                    child: SafeArea(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const SizedBox(height: 20),
+                          // Profile photo with glow — camera icon ALWAYS visible
+                          Stack(
+                            children: [
+                              Container(
+                                width: 100,
+                                height: 100,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: const Color(0xFF8B5CF6).withOpacity(0.4),
+                                      blurRadius: 30,
+                                      spreadRadius: 5,
+                                    ),
+                                  ],
+                                ),
+                                child: _buildAvatar(authProvider.userPhotoUrl),
                               ),
-                              child: CircleAvatar(
-                                radius: 50,
-                                backgroundColor: const Color(0xFF1a103c),
-                                backgroundImage: authProvider.userPhotoUrl != null &&
-                                        authProvider.userPhotoUrl!.isNotEmpty
-                                    ? NetworkImage(authProvider.userPhotoUrl!)
-                                    : null,
-                                child: authProvider.userPhotoUrl == null ||
-                                        authProvider.userPhotoUrl!.isEmpty
-                                    ? const Icon(
-                                        Icons.person,
-                                        size: 50,
-                                        color: Colors.white54,
-                                      )
-                                    : null,
-                              ),
-                            ),
-                            if (_isEditing)
+                              // Camera icon — always visible, not just in edit mode
                               Positioned(
                                 bottom: 0,
                                 right: 0,
                                 child: GestureDetector(
-                                  onTap: _pickImage,
+                                  onTap: _isLoading ? null : _pickImage,
                                   child: Container(
                                     padding: const EdgeInsets.all(8),
                                     decoration: BoxDecoration(
@@ -202,36 +195,82 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                         ),
                                       ],
                                     ),
-                                    child: const Icon(
-                                      Icons.camera_alt,
-                                      color: Colors.white,
-                                      size: 18,
-                                    ),
+                                    child: _isLoading
+                                        ? const SizedBox(
+                                            width: 18,
+                                            height: 18,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: Colors.white,
+                                            ),
+                                          )
+                                        : const Icon(
+                                            Icons.camera_alt,
+                                            color: Colors.white,
+                                            size: 18,
+                                          ),
                                   ),
                                 ),
                               ),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          authProvider.userName?.isNotEmpty == true
-                              ? authProvider.userName!
-                              : 'Your Name',
-                          style: const TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
+                            ],
                           ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          authProvider.phoneNumber ?? '',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.white.withOpacity(0.5),
+                          const SizedBox(height: 16),
+                          // Name with verified badge
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 32),
+                            child: VerifiedUsername(
+                              username: authProvider.userName?.isNotEmpty == true
+                                  ? authProvider.userName!
+                                  : 'Your Name',
+                              phoneNumber: phone,
+                              style: const TextStyle(
+                                fontSize: 24,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white,
+                              ),
+                              badgeSize: 18,
+                              spacing: 8,
+                            ),
                           ),
-                        ),
-                      ],
+                          const SizedBox(height: 4),
+                          Text(
+                            phone,
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.white.withOpacity(0.5),
+                            ),
+                          ),
+                          if (userVerified)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF1DA1F2).withOpacity(0.15),
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(
+                                    color: const Color(0xFF1DA1F2).withOpacity(0.3),
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const VerifiedBadge(size: 12, showTooltip: false),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      'Verified Account',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: const Color(0xFF1DA1F2).withOpacity(0.9),
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -455,6 +494,69 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         );
       },
+    );
+  }
+
+  /// NULL-SAFE avatar builder — no more object-not-found errors
+  Widget _buildAvatar(String? photoUrl) {
+    // If no photo URL, show default avatar with gradient
+    if (photoUrl == null || photoUrl.isEmpty) {
+      return Container(
+        decoration: const BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: LinearGradient(
+            colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
+          ),
+        ),
+        child: const Center(
+          child: Icon(
+            Icons.person,
+            size: 50,
+            color: Colors.white54,
+          ),
+        ),
+      );
+    }
+
+    // Try to load the image, fallback to default on error
+    return ClipOval(
+      child: Image.network(
+        photoUrl,
+        width: 100,
+        height: 100,
+        fit: BoxFit.cover,
+        loadingBuilder: (context, child, loadingProgress) {
+          if (loadingProgress == null) return child;
+          return Container(
+            color: const Color(0xFF1a103c),
+            child: const Center(
+              child: CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation(Color(0xFF8B5CF6)),
+                strokeWidth: 2,
+              ),
+            ),
+          );
+        },
+        errorBuilder: (context, error, stackTrace) {
+          // On error (object-not-found, broken URL, etc.), show default
+          debugPrint('Avatar load error: $error');
+          return Container(
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
+              ),
+            ),
+            child: const Center(
+              child: Icon(
+                Icons.person,
+                size: 50,
+                color: Colors.white54,
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 
