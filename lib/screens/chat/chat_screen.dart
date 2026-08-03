@@ -18,6 +18,7 @@ import 'dart:io';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../providers/chat_provider.dart';
 import '../../services/cloudinary_service.dart';
+import '../../utils/verified_badge.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -45,6 +46,7 @@ class _ChatScreenState extends State<ChatScreen> {
   String? _chatName;
   String? _chatAvatar;
   bool _isGroup = false;
+  String? _creatorPhone; // For verified badge on group/channel
 
   @override
   void didChangeDependencies() {
@@ -61,6 +63,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (_chatId != null && _messages.isEmpty && _isLoading) {
       _loadMessages();
       _subscribeToMessages();
+      _loadChatInfo(); // Load creator phone for verified badge
     }
   }
 
@@ -72,6 +75,27 @@ class _ChatScreenState extends State<ChatScreen> {
     _audioPlayer.dispose();
     _messageSubscription?.cancel();
     super.dispose();
+  }
+
+  /// Load chat creator info for verified badge
+  Future<void> _loadChatInfo() async {
+    if (_chatId == null) return;
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('chats')
+          .doc(_chatId)
+          .get();
+      if (doc.exists) {
+        final data = doc.data() as Map<String, dynamic>;
+        if (mounted) {
+          setState(() {
+            _creatorPhone = data['created_by_phone'] as String?;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Load chat info error: $e');
+    }
   }
 
   Future<void> _loadMessages() async {
@@ -103,6 +127,7 @@ class _ChatScreenState extends State<ChatScreen> {
               'username': userData['username'],
               'avatar_url': userData['avatar_url'],
               'bio': userData['bio'],
+              'phone_number': userData['phone'], // Add phone for verification check
             };
           }
         }
@@ -136,7 +161,7 @@ class _ChatScreenState extends State<ChatScreen> {
         .collection('messages')
         .orderBy('created_at', descending: false)
         .snapshots()
-        .listen((snapshot) {
+        .listen((snapshot) async {
           for (final change in snapshot.docChanges) {
             final doc = change.doc;
             final data = doc.data()!;
@@ -145,6 +170,21 @@ class _ChatScreenState extends State<ChatScreen> {
             if (change.type == DocumentChangeType.added) {
               final exists = _messages.any((m) => m['id'] == messageId);
               if (!exists) {
+                // Fetch sender info for new messages
+                final senderId = data['sender_id'] as String?;
+                if (senderId != null) {
+                  final userDoc = await firestore.collection('users').doc(senderId).get();
+                  if (userDoc.exists) {
+                    final userData = userDoc.data()!;
+                    data['users'] = {
+                      'username': userData['username'],
+                      'avatar_url': userData['avatar_url'],
+                      'bio': userData['bio'],
+                      'phone_number': userData['phone'],
+                    };
+                  }
+                }
+
                 setState(() {
                   _messages.add({
                     'id': messageId,
@@ -497,55 +537,55 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _uploadAndSendMedia({
-  required File file,
-  required String type,
-  String? fileName,
-  String? fileSize,
-}) async {
-  try {
-    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
-    final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+    required File file,
+    required String type,
+    String? fileName,
+    String? fileSize,
+  }) async {
+    try {
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+      final userId = authProvider.user?.uid ?? authProvider.mockUserId;
 
-    if (userId == null || _chatId == null) return;
+      if (userId == null || _chatId == null) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Row(
-          children: [
-            SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
-            SizedBox(width: 12),
-            Text('Uploading...'),
-          ],
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+              SizedBox(width: 12),
+              Text('Uploading...'),
+            ],
+          ),
+          duration: Duration(seconds: 30),
         ),
-        duration: Duration(seconds: 30),
-      ),
-    );
+      );
 
-    // Upload to Cloudinary instead of Firebase Storage
-    final mediaUrl = await CloudinaryService.uploadImage(
-      file,
-      'aurachat/chats/$_chatId'
-    );
+      // Upload to Cloudinary instead of Firebase Storage
+      final mediaUrl = await CloudinaryService.uploadImage(
+        file,
+        'aurachat/chats/$_chatId'
+      );
 
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
 
-    if (mediaUrl == null) {
-      throw Exception('Upload failed');
+      if (mediaUrl == null) {
+        throw Exception('Upload failed');
+      }
+
+      await _sendMessage(
+        type: type,
+        content: fileName ?? 'Image',
+        mediaUrl: mediaUrl,
+        fileName: fileName,
+        fileSize: fileSize,
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Upload failed: $e')),
+      );
     }
-
-    await _sendMessage(
-      type: type,
-      content: fileName ?? 'Image',
-      mediaUrl: mediaUrl,
-      fileName: fileName,
-      fileSize: fileSize,
-    );
-  } catch (e) {
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Upload failed: $e')),
-    );
-  }
   }
 
   Future<void> _playAudio(String messageId, String audioUrl) async {
@@ -585,7 +625,7 @@ class _ChatScreenState extends State<ChatScreen> {
       final ext = fileName?.split('.').last ?? 'file';
       final localPath = '${dir.path}/${const Uuid().v4()}.$ext';
 
-      // Use http package instead of dio for download
+      // Use http client for download
       final client = HttpClient();
       final request = await client.getUrl(Uri.parse(url));
       final response = await request.close();
@@ -645,6 +685,7 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         title: Row(
           children: [
+            // Chat avatar — NULL-SAFE
             Container(
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
@@ -655,33 +696,24 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                 ],
               ),
-              child: CircleAvatar(
-                radius: 20,
-                backgroundColor: const Color(0xFF1a103c),
-                backgroundImage: _chatAvatar != null
-                    ? NetworkImage(_chatAvatar!)
-                    : null,
-                child: _chatAvatar == null
-                    ? Icon(
-                        _isGroup ? Icons.group : Icons.person,
-                        size: 20,
-                        color: const Color(0xFF8B5CF6),
-                      )
-                    : null,
-              ),
+              child: _buildChatAvatar(_chatAvatar),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    _chatName ?? 'Chat',
+                  // Chat name with verified badge for groups/channels
+                  VerifiedUsername(
+                    username: _chatName ?? 'Chat',
+                    phoneNumber: _isGroup ? _creatorPhone : null,
                     style: const TextStyle(
                       fontSize: 16,
                       color: Colors.white,
                       fontWeight: FontWeight.w600,
                     ),
+                    badgeSize: 14,
+                    spacing: 6,
                     overflow: TextOverflow.ellipsis,
                   ),
                   Text(
@@ -930,6 +962,68 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  /// NULL-SAFE chat avatar builder
+  Widget _buildChatAvatar(String? avatarUrl) {
+    if (avatarUrl == null || avatarUrl.isEmpty) {
+      return CircleAvatar(
+        radius: 20,
+        backgroundColor: const Color(0xFF1a103c),
+        child: Icon(
+          _isGroup ? Icons.group : Icons.person,
+          size: 20,
+          color: const Color(0xFF8B5CF6),
+        ),
+      );
+    }
+
+    return CircleAvatar(
+      radius: 20,
+      backgroundColor: const Color(0xFF1a103c),
+      backgroundImage: NetworkImage(avatarUrl),
+      onBackgroundImageError: (_, __) {},
+      child: null,
+    );
+  }
+
+  /// NULL-SAFE message avatar builder
+  Widget _buildMessageAvatar(String? avatarUrl, String? username) {
+    if (avatarUrl == null || avatarUrl.isEmpty) {
+      return Container(
+        width: 32,
+        height: 32,
+        decoration: const BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: LinearGradient(
+            colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
+          ),
+        ),
+        child: Center(
+          child: Text(
+            (username ?? 'U')[0].toUpperCase(),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      width: 32,
+      height: 32,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        image: DecorationImage(
+          image: NetworkImage(avatarUrl),
+          fit: BoxFit.cover,
+          onError: (_, __) {},
+        ),
+      ),
+    );
+  }
+
   Widget _buildMessageBubble(
     BuildContext context, {
     required Map<String, dynamic> message,
@@ -943,6 +1037,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final user = message['users'];
     final isEdited = message['is_edited'] == true;
     final senderId = message['sender_id'] as String?;
+    final senderPhone = user?['phone_number'] as String?;
 
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -970,34 +1065,7 @@ class _ChatScreenState extends State<ChatScreen> {
                           },
                         )
                     : null,
-                child: Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: user?['avatar_url'] == null
-                        ? const LinearGradient(
-                            colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
-                          )
-                        : null,
-                    image: user?['avatar_url'] != null
-                        ? DecorationImage(
-                            image: NetworkImage(user['avatar_url']),
-                            fit: BoxFit.cover,
-                          )
-                        : null,
-                  ),
-                  child: user?['avatar_url'] == null
-                      ? Text(
-                          (user?['username'] ?? 'U')[0].toUpperCase(),
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        )
-                      : null,
-                ),
+                child: _buildMessageAvatar(user?['avatar_url'], user?['username']),
               ),
             if (!isMe && !showAvatar)
               const SizedBox(width: 32),
@@ -1028,7 +1096,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Show sender name in group chats (tappable)
+                    // Show sender name in group chats (tappable) with verified badge
                     if (_isGroup && !isMe && showAvatar)
                       GestureDetector(
                         onTap: senderId != null
@@ -1045,13 +1113,16 @@ class _ChatScreenState extends State<ChatScreen> {
                             : null,
                         child: Padding(
                           padding: const EdgeInsets.only(bottom: 4),
-                          child: Text(
-                            user?['username'] ?? 'Unknown',
+                          child: VerifiedUsername(
+                            username: user?['username'] ?? 'Unknown',
+                            phoneNumber: senderPhone,
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
                               color: const Color(0xFF8B5CF6).withOpacity(0.9),
                             ),
+                            badgeSize: 12,
+                            spacing: 4,
                           ),
                         ),
                       ),
