@@ -5,11 +5,12 @@ import 'package:provider/provider.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
+import '../../utils/verified_badge.dart';
 
 // Language support
 class AppLocalizations {
   static String currentLanguage = 'en';
-  
+
   static final Map<String, Map<String, String>> _translations = {
     'en': {
       'settings': 'Settings',
@@ -158,8 +159,8 @@ class AppLocalizations {
   };
 
   static String get(String key) {
-    return _translations[currentLanguage]?[key] ?? 
-           _translations['en']?[key] ?? 
+    return _translations[currentLanguage]?[key] ??
+           _translations['en']?[key] ??
            key;
   }
 
@@ -235,7 +236,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(AppLocalizations.get('avatar') + ' updated!'),
+            content: Text('${AppLocalizations.get('avatar')} updated!'),
             backgroundColor: const Color(0xFF8B5CF6),
           ),
         );
@@ -291,12 +292,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   width: 32,
                   height: 32,
                   decoration: BoxDecoration(
-                    color: isSelected 
+                    color: isSelected
                         ? const Color(0xFF8B5CF6).withOpacity(0.3)
                         : Colors.white.withOpacity(0.05),
                     shape: BoxShape.circle,
                   ),
-                  child: isSelected 
+                  child: isSelected
                       ? const Icon(Icons.check, color: Color(0xFF8B5CF6), size: 16)
                       : null,
                 ),
@@ -369,6 +370,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final displayName = authProvider.displayName ?? username;
     final phone = authProvider.phoneNumber ?? '';
     final avatar = authProvider.userPhotoUrl;
+    final userVerified = isVerified(phone);
 
     final currentLang = AppLocalizations.supportedLanguages.firstWhere(
       (l) => l['code'] == AppLocalizations.currentLanguage,
@@ -417,7 +419,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       children: [
                         Row(
                           children: [
-                            // Avatar with tap to change
+                            // Avatar with tap to change — NULL-SAFE
                             GestureDetector(
                               onTap: _isUploading ? null : _pickNewProfileImage,
                               child: Stack(
@@ -427,12 +429,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     height: 70,
                                     decoration: BoxDecoration(
                                       shape: BoxShape.circle,
-                                      gradient: avatar == null && _newProfileImage == null
-                                          ? const LinearGradient(
-                                              colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
-                                            )
-                                          : null,
-                                      image: _getAvatarImage(avatar, _newProfileImage),
                                       boxShadow: [
                                         BoxShadow(
                                           color: const Color(0xFF8B5CF6).withOpacity(0.3),
@@ -441,9 +437,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                         ),
                                       ],
                                     ),
-                                    child: avatar == null && _newProfileImage == null
-                                        ? const Icon(Icons.person, color: Colors.white70, size: 32)
-                                        : null,
+                                    child: _buildAvatar(avatar, _newProfileImage),
                                   ),
                                   // Edit icon
                                   Positioned(
@@ -475,19 +469,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               ),
                             ),
                             const SizedBox(width: 16),
-                            // Name and phone
+                            // Name and phone — with verified badge
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  Text(
-                                    displayName,
+                                  VerifiedUsername(
+                                    username: displayName,
+                                    phoneNumber: phone,
                                     style: const TextStyle(
                                       color: Colors.white,
                                       fontSize: 20,
                                       fontWeight: FontWeight.w700,
                                     ),
+                                    badgeSize: 16,
+                                    spacing: 6,
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
@@ -505,6 +502,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                       fontSize: 13,
                                     ),
                                   ),
+                                  if (userVerified)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 4),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF1DA1F2).withOpacity(0.15),
+                                          borderRadius: BorderRadius.circular(12),
+                                          border: Border.all(
+                                            color: const Color(0xFF1DA1F2).withOpacity(0.3),
+                                          ),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const VerifiedBadge(size: 10, showTooltip: false),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              'Verified',
+                                              style: TextStyle(
+                                                fontSize: 10,
+                                                color: const Color(0xFF1DA1F2).withOpacity(0.9),
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
                                 ],
                               ),
                             ),
@@ -610,7 +636,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
 
                 const SizedBox(height: 32),
-                
+
                 // Log Out Button
                 Container(
                   decoration: BoxDecoration(
@@ -641,7 +667,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
 
                 const SizedBox(height: 24),
-                
+
                 // App version
                 Center(
                   child: Text(
@@ -661,20 +687,70 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  DecorationImage? _getAvatarImage(String? avatarUrl, File? localFile) {
+  /// NULL-SAFE avatar builder for settings header
+  Widget _buildAvatar(String? avatarUrl, File? localFile) {
+    // Local file takes priority (newly picked image)
     if (localFile != null) {
-      return DecorationImage(
-        image: FileImage(localFile),
-        fit: BoxFit.cover,
+      return ClipOval(
+        child: Image.file(
+          localFile,
+          width: 70,
+          height: 70,
+          fit: BoxFit.cover,
+        ),
       );
     }
-    if (avatarUrl != null) {
-      return DecorationImage(
-        image: NetworkImage(avatarUrl),
-        fit: BoxFit.cover,
+
+    // If no URL, show default gradient avatar
+    if (avatarUrl == null || avatarUrl.isEmpty) {
+      return Container(
+        decoration: const BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: LinearGradient(
+            colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
+          ),
+        ),
+        child: const Center(
+          child: Icon(Icons.person, color: Colors.white70, size: 32),
+        ),
       );
     }
-    return null;
+
+    // Try to load network image with error handling
+    return ClipOval(
+      child: Image.network(
+        avatarUrl,
+        width: 70,
+        height: 70,
+        fit: BoxFit.cover,
+        loadingBuilder: (context, child, loadingProgress) {
+          if (loadingProgress == null) return child;
+          return Container(
+            color: const Color(0xFF1a103c),
+            child: const Center(
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation(Color(0xFF8B5CF6)),
+              ),
+            ),
+          );
+        },
+        errorBuilder: (context, error, stackTrace) {
+          debugPrint('Settings avatar error: $error');
+          return Container(
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
+              ),
+            ),
+            child: const Center(
+              child: Icon(Icons.person, color: Colors.white70, size: 32),
+            ),
+          );
+        },
+      ),
+    );
   }
 
   Widget _buildSectionTitle(String title) {
