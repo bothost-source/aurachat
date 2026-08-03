@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../providers/chat_provider.dart';
 import '../../services/cloudinary_service.dart';
+import '../../utils/verified_badge.dart';
 
 class CreateGroupScreen extends StatefulWidget {
   const CreateGroupScreen({super.key});
@@ -34,49 +35,47 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
     super.dispose();
   }
 
-  
+  Future<void> _pickGroupPhoto() async {
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
 
-Future<void> _pickGroupPhoto() async {
-  final picker = ImagePicker();
-  final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+    if (pickedFile == null) return;
 
-  if (pickedFile == null) return;
+    setState(() => _isLoading = true);
 
-  setState(() => _isLoading = true);
+    try {
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+      final userId = authProvider.user?.uid ?? authProvider.mockUserId;
 
-  try {
-    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
-    final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+      if (userId == null) {
+        throw Exception('Not authenticated');
+      }
 
-    if (userId == null) {
-      throw Exception('Not authenticated');
-    }
-
-    // Upload to Cloudinary instead of Firebase Storage
-    final imageUrl = await CloudinaryService.uploadImage(
-      File(pickedFile.path),
-      'aurachat/groups/$userId'
-    );
-
-    if (imageUrl == null) {
-      throw Exception('Upload failed');
-    }
-
-    setState(() => _groupPhotoUrl = imageUrl);
-  } catch (e) {
-    debugPrint('Photo upload failed: $e');
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Photo upload failed: $e. Continuing without photo.'),
-          backgroundColor: Colors.orange,
-        ),
+      // Upload to Cloudinary instead of Firebase Storage
+      final imageUrl = await CloudinaryService.uploadImage(
+        File(pickedFile.path),
+        'aurachat/groups/$userId'
       );
+
+      if (imageUrl == null) {
+        throw Exception('Upload failed');
+      }
+
+      setState(() => _groupPhotoUrl = imageUrl);
+    } catch (e) {
+      debugPrint('Photo upload failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Photo upload failed: $e. Continuing without photo.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    } finally {
+      setState(() => _isLoading = false);
     }
-  } finally {
-    setState(() => _isLoading = false);
   }
-}
 
   Future<void> _searchUsers(String query) async {
     if (query.isEmpty) {
@@ -136,6 +135,7 @@ Future<void> _pickGroupPhoto() async {
       final chatProvider = Provider.of<ChatProvider>(context, listen: false);
       final firestore = FirebaseFirestore.instance;
       final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+      final phoneNumber = authProvider.phoneNumber ?? '';
 
       if (userId == null) {
         throw Exception('Not authenticated');
@@ -159,6 +159,7 @@ Future<void> _pickGroupPhoto() async {
         'avatar_url': _groupPhotoUrl,
         'type': _isChannel ? 'channel' : 'group',
         'created_by': userId,
+        'created_by_phone': phoneNumber, // ← FOR VERIFIED BADGE
         'participants': participants,
         'participants_data': participantsData,
         'created_at': FieldValue.serverTimestamp(),
@@ -226,20 +227,7 @@ Future<void> _pickGroupPhoto() async {
                   onTap: _pickGroupPhoto,
                   child: Stack(
                     children: [
-                      CircleAvatar(
-                        radius: 50,
-                        backgroundColor: Theme.of(context).primaryColor.withOpacity(0.2),
-                        backgroundImage: _groupPhotoUrl != null
-                            ? NetworkImage(_groupPhotoUrl!)
-                            : null,
-                        child: _groupPhotoUrl == null
-                            ? Icon(
-                                _isChannel ? Icons.campaign : Icons.group,
-                                size: 50,
-                                color: Theme.of(context).primaryColor,
-                              )
-                            : null,
-                      ),
+                      _buildGroupAvatar(),
                       Positioned(
                         bottom: 0,
                         right: 0,
@@ -313,18 +301,7 @@ Future<void> _pickGroupPhoto() async {
                       children: [
                         Stack(
                           children: [
-                            CircleAvatar(
-                              radius: 28,
-                              backgroundImage: member['avatar_url'] != null
-                                  ? NetworkImage(member['avatar_url'])
-                                  : null,
-                              child: member['avatar_url'] == null
-                                  ? Text(
-                                      (member['username'] ?? 'U')[0].toUpperCase(),
-                                      style: const TextStyle(fontSize: 20),
-                                    )
-                                  : null,
-                            ),
+                            _buildMemberAvatar(member['avatar_url'], member['username']),
                             Positioned(
                               top: 0,
                               right: 0,
@@ -412,14 +389,7 @@ Future<void> _pickGroupPhoto() async {
                       final isSelected = _selectedMembers.any((m) => m['id'] == user['id']);
 
                       return ListTile(
-                        leading: CircleAvatar(
-                          backgroundImage: user['avatar_url'] != null
-                              ? NetworkImage(user['avatar_url'])
-                              : null,
-                          child: user['avatar_url'] == null
-                              ? Text((user['username'] ?? 'U')[0].toUpperCase())
-                              : null,
-                        ),
+                        leading: _buildMemberAvatar(user['avatar_url'], user['username']),
                         title: Text(user['username'] ?? 'Unknown'),
                         subtitle: Text(user['phone'] ?? ''),
                         trailing: isSelected
@@ -431,6 +401,48 @@ Future<void> _pickGroupPhoto() async {
                   ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// NULL-SAFE group avatar builder
+  Widget _buildGroupAvatar() {
+    if (_groupPhotoUrl != null && _groupPhotoUrl!.isNotEmpty) {
+      return CircleAvatar(
+        radius: 50,
+        backgroundColor: Theme.of(context).primaryColor.withOpacity(0.2),
+        backgroundImage: NetworkImage(_groupPhotoUrl!),
+        onBackgroundImageError: (_, __) {},
+      );
+    }
+
+    return CircleAvatar(
+      radius: 50,
+      backgroundColor: Theme.of(context).primaryColor.withOpacity(0.2),
+      child: Icon(
+        _isChannel ? Icons.campaign : Icons.group,
+        size: 50,
+        color: Theme.of(context).primaryColor,
+      ),
+    );
+  }
+
+  /// NULL-SAFE member avatar builder
+  Widget _buildMemberAvatar(String? avatarUrl, String? username) {
+    if (avatarUrl != null && avatarUrl.isNotEmpty) {
+      return CircleAvatar(
+        radius: 28,
+        backgroundImage: NetworkImage(avatarUrl),
+        onBackgroundImageError: (_, __) {},
+      );
+    }
+
+    return CircleAvatar(
+      radius: 28,
+      backgroundColor: Theme.of(context).primaryColor.withOpacity(0.2),
+      child: Text(
+        (username ?? 'U')[0].toUpperCase(),
+        style: const TextStyle(fontSize: 20),
       ),
     );
   }
