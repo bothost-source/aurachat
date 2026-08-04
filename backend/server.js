@@ -13,7 +13,7 @@ const authRoutes = require('./src/routes/auth');
 const chatRoutes = require('./src/routes/chat');
 const botRoutes = require('./src/routes/bot');
 const moderationRoutes = require('./src/routes/moderation');
-const userRoutes = require('./src/routes/user');
+const userRoutes = require('./src/routes/users');
 const { errorHandler } = require('./src/middleware/errorHandler');
 const { requestLogger } = require('./src/middleware/logger');
 
