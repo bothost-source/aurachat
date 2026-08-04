@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:local_auth_android/local_auth_android.dart';
 import 'package:local_auth_ios/local_auth_ios.dart';
@@ -39,6 +40,7 @@ import 'screens/status/status_screen.dart';
 import 'screens/status/create_status_screen.dart';
 import 'screens/moderation/report_screen.dart';
 import 'screens/moderation/appeal_screen.dart';
+import 'screens/moderation/ban_guard.dart';
 import 'screens/ai/ai_chatbot_screen.dart';
 import 'screens/ai/ai_studio_screen.dart';
 import 'screens/channel/channel_screen.dart';
@@ -56,7 +58,6 @@ import 'services/call_service.dart';
 import 'services/call_signaling_service.dart';
 
 void main() async {
-  // Catch ALL Flutter errors
   FlutterError.onError = (FlutterErrorDetails details) {
     FlutterError.presentError(details);
   };
@@ -66,9 +67,7 @@ void main() async {
 
   try {
     WidgetsFlutterBinding.ensureInitialized();
-
     await Firebase.initializeApp();
-
     await NotificationService.init();
     await NotificationService.requestPermission();
     ConnectivityService().initialize();
@@ -96,7 +95,6 @@ void main() async {
     startupStack = stack.toString();
   }
 
-  // If we get here, something failed - show error screen
   runApp(ErrorApp(error: startupError ?? 'Unknown error', stack: startupStack));
 }
 
@@ -352,9 +350,74 @@ class _AuraChatAppState extends State<AuraChatApp>
             themeMode: themeProvider.themeMode,
             initialRoute: '/',
             builder: (context, child) {
+              // 🔒 LOCK SCREEN (existing) - takes priority
               if (_isLocked) {
                 return _buildLockScreen();
               }
+
+              // 🔥 REAL-TIME BAN CHECK - continuously listens to Firestore
+              final currentUser = FirebaseAuth.instance.currentUser;
+              if (currentUser != null) {
+                return StreamBuilder<DocumentSnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection('users')
+                      .doc(currentUser.uid)
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    // Loading state
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Scaffold(
+                        backgroundColor: Color(0xFF0A0A0F),
+                        body: Center(
+                          child: CircularProgressIndicator(color: Color(0xFF8B5CF6)),
+                        ),
+                      );
+                    }
+
+                    // Check ban status from Firestore
+                    final userData = snapshot.data?.data() as Map<String, dynamic>?;
+                    final isBanned = userData?['is_banned'] == true;
+                    final bannedUntil = userData?['banned_until'] as Timestamp?;
+
+                    // Auto-unban if temporary ban expired
+                    if (isBanned && bannedUntil != null) {
+                      final banExpiry = bannedUntil.toDate();
+                      if (DateTime.now().isAfter(banExpiry)) {
+                        // Ban expired - auto unban in background
+                        FirebaseFirestore.instance
+                            .collection('users')
+                            .doc(currentUser.uid)
+                            .update({
+                          'is_banned': false,
+                          'banned_until': null,
+                          'ban_reason': null,
+                          'ban_report_id': null,
+                          'ban_level': null,
+                        });
+                        // Show normal app while update processes
+                        return child!;
+                      }
+                    }
+
+                    // 🚫 BANNED - show banned screen permanently
+                    if (isBanned) {
+                      final banStatus = {
+                        'is_banned': true,
+                        'banned_until': bannedUntil?.toDate(),
+                        'ban_reason': userData?['ban_reason'],
+                        'ban_level': userData?['ban_level'],
+                        'ban_report_id': userData?['ban_report_id'],
+                      };
+                      return BannedScreen(banStatus: banStatus);
+                    }
+
+                    // ✅ NOT BANNED - show normal app
+                    return child!;
+                  },
+                );
+              }
+
+              // Not authenticated - show normal flow
               return child!;
             },
             routes: {
