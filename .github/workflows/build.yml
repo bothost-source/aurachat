@@ -73,7 +73,7 @@ jobs:
           }
           EOF
 
-      - name: Create API config from secrets
+      - name: Create API config with Gemini key
         run: |
           cat > lib/services/api_config.dart << 'EOF'
           class ApiConfig {
@@ -145,7 +145,7 @@ jobs:
           flutter-version: '3.22.0'
           channel: 'stable'
 
-      - name: Create API config from secrets
+      - name: Create API config with Gemini key
         run: |
           cat > lib/services/api_config.dart << 'EOF'
           class ApiConfig {
