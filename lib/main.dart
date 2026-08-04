@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:local_auth_android/local_auth_android.dart';
@@ -52,10 +53,20 @@ import 'screens/invite/invite_friends_screen.dart';
 import 'screens/saved/saved_messages_screen.dart';
 import 'screens/archive/archived_chats_screen.dart';
 import 'services/notification_service.dart';
+import 'services/push_notification_service.dart';
 import 'services/connectivity.dart';
 import 'services/online_status_service.dart';
 import 'services/call_service.dart';
 import 'services/call_signaling_service.dart';
+
+// ============================================================================
+// BACKGROUND MESSAGE HANDLER — Must be top-level function
+// ============================================================================
+@pragma('vm:entry-point')
+Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp();
+  print('Background message: ${message.messageId}');
+}
 
 void main() async {
   FlutterError.onError = (FlutterErrorDetails details) {
@@ -68,9 +79,19 @@ void main() async {
   try {
     WidgetsFlutterBinding.ensureInitialized();
     await Firebase.initializeApp();
+
+    // Register background message handler BEFORE any other Firebase calls
+    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+
+    // Initialize local notifications (OTP)
     await NotificationService.init();
     await NotificationService.requestPermission();
-    ConnectivityService().initialize();
+
+    // Initialize push notifications (FCM for chat)
+    final pushService = PushNotificationService();
+    await pushService.initialize();
+
+    await ConnectivityService().initialize();
     CallService.initialize('8a2cea909f994b0d9e61146e99710277');
 
     await SystemChrome.setPreferredOrientations([
@@ -350,12 +371,12 @@ class _AuraChatAppState extends State<AuraChatApp>
             themeMode: themeProvider.themeMode,
             initialRoute: '/',
             builder: (context, child) {
-              // 🔒 LOCK SCREEN (existing) - takes priority
+              // LOCK SCREEN (existing) - takes priority
               if (_isLocked) {
                 return _buildLockScreen();
               }
 
-              // 🔥 REAL-TIME BAN CHECK - continuously listens to Firestore
+              // REAL-TIME BAN CHECK - continuously listens to Firestore
               final currentUser = FirebaseAuth.instance.currentUser;
               if (currentUser != null) {
                 return StreamBuilder<DocumentSnapshot>(
@@ -399,7 +420,7 @@ class _AuraChatAppState extends State<AuraChatApp>
                       }
                     }
 
-                    // 🚫 BANNED - show banned screen permanently
+                    // BANNED - show banned screen permanently
                     if (isBanned) {
                       final banStatus = {
                         'is_banned': true,
@@ -411,7 +432,7 @@ class _AuraChatAppState extends State<AuraChatApp>
                       return BannedScreen(banStatus: banStatus);
                     }
 
-                    // ✅ NOT BANNED - show normal app
+                    // NOT BANNED - show normal app
                     return child!;
                   },
                 );
