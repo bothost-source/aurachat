@@ -151,27 +151,36 @@ class SettingsProvider extends ChangeNotifier {
   }
 
   Future<void> _saveToFirebase() async {
-    try {
-      final user = _auth.currentUser;
-      if (user == null) return;
+  try {
+    final user = _auth.currentUser;
+    if (user == null) return;
 
-      await _firestore.collection('user_settings').doc(user.uid).set({
-        'user_id': user.uid,
-        'two_step_verification': _twoStepVerification,
-        'phone_number_visible': _phoneNumberVisible,
-        'last_seen_visible': _lastSeenVisible,
-        'profile_photo_visible': _profilePhotoVisible,
-        'forwarded_messages': _forwardedMessages,
-        'add_to_groups': _addToGroups,
-        'voice_video_calls_visible': _voiceVideoCallsVisible,
-        'find_by_phone': _findByPhone,
-        'find_by_username': _findByUsername,
-        'updated_at': Timestamp.now(),
-      }, SetOptions(merge: true));
-    } catch (e) {
-      debugPrint('Save to Firebase error: $e');
-    }
+    await _firestore.collection('user_settings').doc(user.uid).set({
+      'user_id': user.uid,
+      // Security
+      'two_step_verification': _twoStepVerification,
+      // Privacy
+      'phone_number_visible': _phoneNumberVisible,
+      'last_seen_visible': _lastSeenVisible,
+      'profile_photo_visible': _profilePhotoVisible,
+      'forwarded_messages': _forwardedMessages,
+      'add_to_groups': _addToGroups,
+      'voice_video_calls_visible': _voiceVideoCallsVisible,
+      'find_by_phone': _findByPhone,
+      'find_by_username': _findByUsername,
+      // Data Storage (NEW - add if you want)
+      'auto_download_media': _autoDownloadMedia,
+      'auto_download_documents': _autoDownloadDocuments,
+      'save_to_gallery': _saveToGallery,
+      // Theme & Language (NEW - add if you want)
+      'theme_mode': _themeMode == ThemeMode.light ? 'light' : _themeMode == ThemeMode.system ? 'system' : 'dark',
+      'language': _language,
+      'updated_at': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  } catch (e) {
+    debugPrint('Save to Firebase error: $e');
   }
+}
 
   // Security Setters
   Future<void> setTwoStepVerification(bool value) async {
