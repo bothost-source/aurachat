@@ -13,7 +13,7 @@ import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../services/cloudinary_service.dart';
 import '../../services/ai_moderation_service.dart';
 import '../../utils/verified_badge.dart';
-import '../group/group_info_screen.dart';
+import '../groups/group_info_screen.dart';
 
 class ChannelChatScreen extends StatefulWidget {
   final String channelId;
