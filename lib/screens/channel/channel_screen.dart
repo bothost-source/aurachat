@@ -3,9 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:uuid/uuid.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:intl/intl.dart';
@@ -13,7 +11,7 @@ import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../services/cloudinary_service.dart';
 import '../../services/ai_moderation_service.dart';
 import '../../utils/verified_badge.dart';
-import '../groups/group_info_screen.dart';
+import 'channel_info_screen.dart';
 
 class ChannelChatScreen extends StatefulWidget {
   final String channelId;
@@ -329,10 +327,9 @@ class _ChannelChatScreenState extends State<ChannelChatScreen> {
             onPressed: () => Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (_) => GroupInfoScreen(
+                builder: (_) => ChannelInfoScreen(
                   chatId: widget.channelId,
                   chatName: widget.channelName,
-                  isChannel: true,
                 ),
               ),
             ),
