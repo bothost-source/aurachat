@@ -2,9 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_slidable/flutter_slidable.dart';
 import 'package:timeago/timeago.dart' as timeago;
-import '../../providers/auth_provider.dart';
+import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../providers/chat_provider.dart';
+import '../../utils/verified_badge.dart';
 import 'chat_screen.dart';
+import '../channel/channel_screen.dart';
+import '../channel/channel_info_screen.dart';
+import '../groups/group_info_screen.dart';
 
 class ChatListScreen extends StatelessWidget {
   const ChatListScreen({super.key});
@@ -12,7 +16,7 @@ class ChatListScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final chatProvider = Provider.of<ChatProvider>(context);
-    final authProvider = Provider.of<AuthProvider>(context);
+    final authProvider = Provider.of<AuraAuthProvider>(context);
 
     if (chatProvider.isLoading) {
       return const Center(child: CircularProgressIndicator());
@@ -51,11 +55,20 @@ class ChatListScreen extends StatelessWidget {
       itemCount: chats.length,
       itemBuilder: (context, index) {
         final chat = chats[index];
+        final chatType = chat['type'] as String? ?? 'direct';
         final unreadCount = chat['unread_count'] ?? 0;
         final lastMessage = chat['last_message'];
         final lastMessageAt = chat['last_message_at'] != null
-            ? DateTime.parse(chat['last_message_at'])
+            ? (chat['last_message_at'] is DateTime 
+                ? chat['last_message_at'] as DateTime
+                : DateTime.tryParse(chat['last_message_at'].toString()))
             : null;
+        final memberCount = chat['participants_count'] ?? 0;
+        final createdByPhone = chat['created_by_phone'] as String?;
+        final role = chat['role'] as String? ?? 'member';
+        final isGroup = chatType == 'group';
+        final isChannel = chatType == 'channel';
+        final isGroupOrChannel = isGroup || isChannel;
 
         return Slidable(
           key: ValueKey(chat['id']),
@@ -81,20 +94,8 @@ class ChatListScreen extends StatelessWidget {
           child: ListTile(
             leading: Stack(
               children: [
-                CircleAvatar(
-                  radius: 28,
-                  backgroundImage: chat['avatar_url'] != null
-                      ? NetworkImage(chat['avatar_url'])
-                      : null,
-                  child: chat['avatar_url'] == null
-                      ? Icon(
-                          chat['type'] == 'group' || chat['type'] == 'channel'
-                              ? Icons.group
-                              : Icons.person,
-                        )
-                      : null,
-                ),
-                if (chat['type'] == 'group' || chat['type'] == 'channel')
+                _buildAvatar(chat),
+                if (isGroupOrChannel)
                   Positioned(
                     bottom: 0,
                     right: 0,
@@ -103,10 +104,11 @@ class ChatListScreen extends StatelessWidget {
                       decoration: BoxDecoration(
                         color: Theme.of(context).primaryColor,
                         shape: BoxShape.circle,
+                        border: Border.all(color: const Color(0xFF0A0A0F), width: 1.5),
                       ),
                       child: Icon(
-                        chat['type'] == 'channel' ? Icons.campaign : Icons.group,
-                        size: 12,
+                        isChannel ? Icons.campaign : Icons.group,
+                        size: 10,
                         color: Colors.white,
                       ),
                     ),
@@ -116,13 +118,25 @@ class ChatListScreen extends StatelessWidget {
             title: Row(
               children: [
                 Expanded(
-                  child: Text(
-                    chat['name'] ?? 'Unknown',
-                    style: TextStyle(
-                      fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.normal,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  child: isGroupOrChannel
+                    ? VerifiedUsername(
+                        username: chat['name'] ?? 'Unknown',
+                        phoneNumber: createdByPhone,
+                        style: TextStyle(
+                          fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.w600,
+                          fontSize: 15,
+                        ),
+                        badgeSize: 14,
+                        spacing: 6,
+                        overflow: TextOverflow.ellipsis,
+                      )
+                    : Text(
+                        chat['name'] ?? 'Unknown',
+                        style: TextStyle(
+                          fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.normal,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                 ),
                 if (lastMessageAt != null)
                   Text(
@@ -138,6 +152,41 @@ class ChatListScreen extends StatelessWidget {
             ),
             subtitle: Row(
               children: [
+                if (isGroupOrChannel) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                    margin: const EdgeInsets.only(right: 6),
+                    decoration: BoxDecoration(
+                      color: isChannel 
+                          ? Colors.orange.withOpacity(0.2) 
+                          : Theme.of(context).primaryColor.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      isChannel ? 'CHANNEL' : 'GROUP',
+                      style: TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                        color: isChannel ? Colors.orange : Theme.of(context).primaryColor,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '$memberCount',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey.withOpacity(0.7),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(
+                    Icons.people,
+                    size: 12,
+                    color: Colors.grey.withOpacity(0.5),
+                  ),
+                  const SizedBox(width: 6),
+                ],
                 Expanded(
                   child: Text(
                     lastMessage ?? 'No messages yet',
@@ -169,21 +218,84 @@ class ChatListScreen extends StatelessWidget {
             ),
             onTap: () {
               chatProvider.markMessagesAsRead(chat['id']);
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => ChatScreen(
-                    chatId: chat['id'],
-                    chatName: chat['name'],
-                    chatAvatar: chat['avatar_url'],
-                    isGroup: chat['type'] == 'group' || chat['type'] == 'channel',
+              if (isChannel) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ChannelChatScreen(
+                      channelId: chat['id'],
+                      channelName: chat['name'] ?? 'Channel',
+                    ),
                   ),
-                ),
-              );
+                );
+              } else {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ChatScreen(
+                      chatId: chat['id'],
+                      chatName: chat['name'],
+                      chatAvatar: chat['avatar_url'],
+                      isGroup: isGroup,
+                    ),
+                  ),
+                );
+              }
             },
+            onLongPress: isGroupOrChannel
+              ? () {
+                  if (isChannel) {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => ChannelInfoScreen(
+                          chatId: chat['id'],
+                          chatName: chat['name'] ?? 'Unknown',
+                          chatAvatar: chat['avatar_url'],
+                        ),
+                      ),
+                    );
+                  } else {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => GroupInfoScreen(
+                          chatId: chat['id'],
+                          chatName: chat['name'] ?? 'Unknown',
+                          chatAvatar: chat['avatar_url'],
+                          isChannel: false,
+                        ),
+                      ),
+                    );
+                  }
+                }
+              : null,
           ),
         );
       },
+    );
+  }
+
+  Widget _buildAvatar(Map<String, dynamic> chat) {
+    final avatarUrl = chat['avatar_url'] as String?;
+    final chatType = chat['type'] as String? ?? 'direct';
+    final isGroupOrChannel = chatType == 'group' || chatType == 'channel';
+
+    if (avatarUrl != null && avatarUrl.isNotEmpty) {
+      return CircleAvatar(
+        radius: 28,
+        backgroundImage: NetworkImage(avatarUrl),
+        onBackgroundImageError: (_, __) {},
+      );
+    }
+
+    return CircleAvatar(
+      radius: 28,
+      backgroundColor: Theme.of(context).primaryColor.withOpacity(0.2),
+      child: Icon(
+        isGroupOrChannel ? Icons.group : Icons.person,
+        color: Theme.of(context).primaryColor,
+      ),
     );
   }
 
