@@ -21,6 +21,7 @@ dependencies:
   cloudinary: ^1.2.0
   # State Management
   provider: ^6.1.2
+  google_generative_ai: ^0.4.0
 
   # UI & System
   cupertino_icons: ^1.0.8
