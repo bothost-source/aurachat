@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "express": "^4.19.2",
+    "express-validator": "^7.2.0",
     "socket.io": "^4.7.5",
     "mongoose": "^8.4.0",
     "redis": "^4.6.14",
