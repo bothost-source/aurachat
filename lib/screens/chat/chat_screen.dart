@@ -293,59 +293,60 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _sendMessage({
-    required String type,
-    required String content,
-    String? mediaUrl,
-    String? fileName,
-    String? fileSize,
-  }) async {
-    try {
-      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
-      final firestore = FirebaseFirestore.instance;
-      final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+  required String type,
+  required String content,
+  String? mediaUrl,
+  String? fileName,
+  String? fileSize,
+}) async {
+  try {
+    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+    final firestore = FirebaseFirestore.instance;
+    final userId = authProvider.user?.uid ?? authProvider.mockUserId;
 
-      if (userId == null || _chatId == null) return;
+    if (userId == null || _chatId == null) return;
 
-      final messageId = const Uuid().v4();
+    final messageId = const Uuid().v4();
 
-      final message = {
-        'id': messageId,
-        'chat_id': _chatId!,
-        'sender_id': userId,
-        'type': type,
-        'content': content,
-        'media_url': mediaUrl,
-        'file_name': fileName,
-        'file_size': fileSize,
-        'reply_to': _replyingTo,
-        'created_at': FieldValue.serverTimestamp(),
-        'is_read': false,
-        'is_edited': false,
-      };
+    final message = {
+      'id': messageId,
+      'chat_id': _chatId!,
+      'sender_id': userId,
+      'type': type,
+      'content': content,
+      'media_url': mediaUrl,
+      'file_name': fileName,
+      'file_size': fileSize,
+      'reply_to': _replyingTo,
+      'created_at': FieldValue.serverTimestamp(),
+      'is_read': false,
+      'is_edited': false,
+      'sent_to_fcm': false, // ← NEW: flag for Cloud Function to pick up
+    };
 
-      await firestore
-          .collection('chats')
-          .doc(_chatId!)
-          .collection('messages')
-          .doc(messageId)
-          .set(message);
+    await firestore
+        .collection('chats')
+        .doc(_chatId!)
+        .collection('messages')
+        .doc(messageId)
+        .set(message);
 
-      await firestore.collection('chats').doc(_chatId!).update({
-        'last_message': content,
-        'last_message_at': FieldValue.serverTimestamp(),
-      });
+    await firestore.collection('chats').doc(_chatId!).update({
+      'last_message': content,
+      'last_message_at': FieldValue.serverTimestamp(),
+    });
 
-      setState(() => _replyingTo = null);
-      _scrollToBottom();
-    } catch (e) {
-      debugPrint('Send message error: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to send: $e')),
-        );
-      }
+    setState(() => _replyingTo = null);
+    _scrollToBottom();
+  } catch (e) {
+    debugPrint('Send message error: $e');
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to send: $e')),
+      );
     }
   }
+}
 
   void _showPermissionDenied() {
     ScaffoldMessenger.of(context).showSnackBar(
