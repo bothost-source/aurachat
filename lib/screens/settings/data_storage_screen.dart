@@ -10,27 +10,28 @@ class DataStorageScreen extends StatelessWidget {
     final settingsProvider = Provider.of<SettingsProvider>(context);
 
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: const Color(0xFF0A0A0F), // Purple theme dark background
       appBar: AppBar(
-        title: const Text('Storage and Data'),
-        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
+        title: const Text('Storage and Data', style: TextStyle(color: Colors.white)),
+        backgroundColor: const Color(0xFF0A0A0F), // Purple theme dark background
         elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.white70),
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           _buildSectionHeader(context, 'Media Auto-Download'),
 
-          SwitchListTile(
-            title: const Text('Photos'),
-            subtitle: const Text('Auto-download photos'),
+          _buildSwitchTile(
+            title: 'Photos',
+            subtitle: 'Auto-download photos',
             value: settingsProvider.autoDownloadMedia,
             onChanged: (value) => settingsProvider.setAutoDownloadMedia(value),
           ),
 
-          SwitchListTile(
-            title: const Text('Documents'),
-            subtitle: const Text('Auto-download documents'),
+          _buildSwitchTile(
+            title: 'Documents',
+            subtitle: 'Auto-download documents',
             value: settingsProvider.autoDownloadDocuments,
             onChanged: (value) => settingsProvider.setAutoDownloadDocuments(value),
           ),
@@ -39,11 +40,10 @@ class DataStorageScreen extends StatelessWidget {
 
           _buildSectionHeader(context, 'Storage Usage'),
 
-          ListTile(
-            leading: const Icon(Icons.folder),
-            title: const Text('Manage Storage'),
-            subtitle: const Text('View and free up space'),
-            trailing: const Icon(Icons.chevron_right),
+          _buildListTile(
+            icon: Icons.folder,
+            title: 'Manage Storage',
+            subtitle: 'View and free up space',
             onTap: () {},
           ),
 
@@ -51,9 +51,9 @@ class DataStorageScreen extends StatelessWidget {
 
           _buildSectionHeader(context, 'Gallery'),
 
-          SwitchListTile(
-            title: const Text('Save to Gallery'),
-            subtitle: const Text('Save media to device gallery'),
+          _buildSwitchTile(
+            title: 'Save to Gallery',
+            subtitle: 'Save media to device gallery',
             value: settingsProvider.saveToGallery,
             onChanged: (value) => settingsProvider.setSaveToGallery(value),
           ),
@@ -67,11 +67,59 @@ class DataStorageScreen extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 8),
       child: Text(
         title,
-        style: TextStyle(
+        style: const TextStyle(
           fontSize: 14,
           fontWeight: FontWeight.w600,
-          color: Theme.of(context).primaryColor,
+          color: Color(0xFF8B5CF6), // Purple accent
+          letterSpacing: 1,
         ),
+      ),
+    );
+  }
+
+  Widget _buildSwitchTile({
+    required String title,
+    required String subtitle,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.03),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withOpacity(0.06)),
+      ),
+      child: SwitchListTile(
+        title: Text(title, style: const TextStyle(color: Colors.white)),
+        subtitle: Text(subtitle, style: TextStyle(color: Colors.white.withOpacity(0.5))),
+        value: value,
+        onChanged: onChanged,
+        activeColor: const Color(0xFF8B5CF6), // Purple accent
+        inactiveTrackColor: Colors.white.withOpacity(0.1),
+      ),
+    );
+  }
+
+  Widget _buildListTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.03),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withOpacity(0.06)),
+      ),
+      child: ListTile(
+        leading: Icon(icon, color: const Color(0xFF8B5CF6)), // Purple accent
+        title: Text(title, style: const TextStyle(color: Colors.white)),
+        subtitle: Text(subtitle, style: TextStyle(color: Colors.white.withOpacity(0.5))),
+        trailing: const Icon(Icons.chevron_right, color: Colors.white54),
+        onTap: onTap,
       ),
     );
   }
