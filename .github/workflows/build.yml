@@ -73,6 +73,14 @@ jobs:
           }
           EOF
 
+      - name: Create API config from secrets
+        run: |
+          cat > lib/services/api_config.dart << 'EOF'
+          class ApiConfig {
+            static const String geminiApiKey = '${{ secrets.GEMINI_API_KEY }}';
+          }
+          EOF
+
       - name: Add Firebase plugin to app build.gradle
         run: |
           sed -i 's/id "dev.flutter.flutter-gradle-plugin"/id "dev.flutter.flutter-gradle-plugin"\n    id "com.google.gms.google-services" version "4.3.15"/' android/app/build.gradle
@@ -136,6 +144,14 @@ jobs:
         with:
           flutter-version: '3.22.0'
           channel: 'stable'
+
+      - name: Create API config from secrets
+        run: |
+          cat > lib/services/api_config.dart << 'EOF'
+          class ApiConfig {
+            static const String geminiApiKey = '${{ secrets.GEMINI_API_KEY }}';
+          }
+          EOF
 
       - name: Build Web
         run: |
