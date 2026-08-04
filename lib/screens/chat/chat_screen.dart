@@ -313,6 +313,7 @@ class _ChatScreenState extends State<ChatScreen> {
       'chat_id': _chatId!,
       'sender_id': userId,
       'type': type,
+      'chat_type': _isGroup ? 'group' : 'direct',
       'content': content,
       'media_url': mediaUrl,
       'file_name': fileName,
