@@ -8,11 +8,11 @@ import 'api_config.dart';
 class AIModerationService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  /// API key from GitHub Secrets (injected at build time)
+  /// API key from build-time config
   static const String _apiKey = ApiConfig.geminiApiKey;
 
   /// Rate limit: minimum seconds between processing reports from same reporter
-  static const int _rateLimitSeconds = 3600; // 1 hour
+  static const int _rateLimitSeconds = 3600;
 
   /// Analyze a reported message using AI
   static Future<Map<String, dynamic>> analyzeReport({
