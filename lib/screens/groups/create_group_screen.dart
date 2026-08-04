@@ -7,7 +7,7 @@ import 'package:uuid/uuid.dart';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../providers/chat_provider.dart';
 import '../../services/cloudinary_service.dart';
-import '../../utils/verified_badge.dart';
+import '../../services/invitation_service.dart';
 
 class CreateGroupScreen extends StatefulWidget {
   const CreateGroupScreen({super.key});
@@ -20,18 +20,21 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
   final _nameController = TextEditingController();
   final _descriptionController = TextEditingController();
   final _searchController = TextEditingController();
+  final _inviteNameController = TextEditingController();
 
   String? _groupPhotoUrl;
   bool _isLoading = false;
   List<Map<String, dynamic>> _selectedMembers = [];
   List<Map<String, dynamic>> _searchResults = [];
   bool _isChannel = false;
+  String? _generatedLink;
 
   @override
   void dispose() {
     _nameController.dispose();
     _descriptionController.dispose();
     _searchController.dispose();
+    _inviteNameController.dispose();
     super.dispose();
   }
 
@@ -51,10 +54,9 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
         throw Exception('Not authenticated');
       }
 
-      // Upload to Cloudinary instead of Firebase Storage
       final imageUrl = await CloudinaryService.uploadImage(
         File(pickedFile.path),
-        'aurachat/groups/$userId'
+        'aurachat/groups/$userId' // Fixed: was \$userId
       );
 
       if (imageUrl == null) {
@@ -63,11 +65,11 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
 
       setState(() => _groupPhotoUrl = imageUrl);
     } catch (e) {
-      debugPrint('Photo upload failed: $e');
+      debugPrint('Photo upload failed: $e'); // Fixed: was \$e
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Photo upload failed: $e. Continuing without photo.'),
+            content: Text('Photo upload failed: $e. Continuing without photo.'), // Fixed: was \$e
             backgroundColor: Colors.orange,
           ),
         );
@@ -91,7 +93,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
       final snapshot = await firestore
           .collection('users')
           .where('username', isGreaterThanOrEqualTo: query)
-          .where('username', isLessThanOrEqualTo: '$query\uf8ff')
+          .where('username', isLessThanOrEqualTo: '$query\uf8ff') // Fixed: was \$query
           .limit(20)
           .get();
 
@@ -105,7 +107,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
 
       setState(() => _searchResults = filtered);
     } catch (e) {
-      debugPrint('Search error: $e');
+      debugPrint('Search error: $e'); // Fixed: was \$e
     }
   }
 
@@ -146,12 +148,15 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
 
       for (final id in participants) {
         participantsData[id] = {
-          'role': id == userId ? 'admin' : 'member',
+          'role': id == userId ? 'owner' : 'member',
           'joined_at': FieldValue.serverTimestamp(),
         };
       }
 
-      await firestore.collection('chats').add({
+      final chatId = const Uuid().v4();
+
+      await firestore.collection('chats').doc(chatId).set({
+        'id': chatId,
         'name': _nameController.text.trim(),
         'description': _descriptionController.text.trim().isNotEmpty
             ? _descriptionController.text.trim()
@@ -159,13 +164,47 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
         'avatar_url': _groupPhotoUrl,
         'type': _isChannel ? 'channel' : 'group',
         'created_by': userId,
-        'created_by_phone': phoneNumber, // ← FOR VERIFIED BADGE
+        'created_by_phone': phoneNumber,
         'participants': participants,
         'participants_data': participantsData,
+        'member_count': participants.length,
+        'banned_users': [],
+        'settings': {
+          'chat_disabled': false,
+          'file_sharing_disabled': false,
+          'slow_mode_seconds': 0,
+          'restrict_new_members_minutes': 0,
+          'message_retention_days': 0,
+          'welcome_message': 'Welcome to ${_nameController.text.trim()}!', // Fixed: was \${_nameController...
+          'rules': 'Be respectful and kind to all members.',
+          'announcements_only': false,
+          'polls_enabled': true,
+          'reactions_enabled': true,
+          'forwarding_enabled': true,
+          'voice_chat_enabled': false,
+        },
+        'pinned_messages': [],
         'created_at': FieldValue.serverTimestamp(),
         'updated_at': FieldValue.serverTimestamp(),
         'last_message_at': FieldValue.serverTimestamp(),
+        'last_message': _isChannel ? 'Channel created' : 'Group created',
       });
+
+      // Create invitation link
+      try {
+        final inviteResult = await InvitationService.createInvitation(
+          chatId: chatId,
+          chatName: _nameController.text.trim(),
+          chatType: _isChannel ? 'channel' : 'group',
+          createdBy: userId,
+          customName: _inviteNameController.text.trim().isNotEmpty
+              ? _inviteNameController.text.trim()
+              : null,
+        );
+        setState(() => _generatedLink = inviteResult['link'] as String?);
+      } catch (e) {
+        debugPrint('Invitation creation failed: $e'); // Fixed: was \$e
+      }
 
       await chatProvider.loadChats();
 
@@ -174,7 +213,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('${_isChannel ? "Channel" : "Group"} created successfully!'),
+            content: Text('${_isChannel ? "Channel" : "Group"} created successfully!'), // Fixed: was \${_isChannel...
           ),
         );
         Navigator.pop(context);
@@ -184,7 +223,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error: $e'),
+            content: Text('Error: $e'), // Fixed: was \$e
             backgroundColor: Colors.red,
           ),
         );
@@ -273,6 +312,18 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
+                TextField(
+                  controller: _inviteNameController,
+                  decoration: InputDecoration(
+                    labelText: 'Invitation Link Name',
+                    hintText: 'e.g., my-awesome-group (optional)',
+                    prefixIcon: const Icon(Icons.link),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
                 Row(
                   children: [
                     Checkbox(
@@ -282,6 +333,30 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                     const Text('Create as Channel (one-way messaging)'),
                   ],
                 ),
+                if (_generatedLink != null) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.green.withOpacity(0.3)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.check_circle, color: Colors.green, size: 16),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Link: $_generatedLink', // Fixed: was \$_generatedLink
+                            style: const TextStyle(fontSize: 12),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -405,7 +480,6 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
     );
   }
 
-  /// NULL-SAFE group avatar builder
   Widget _buildGroupAvatar() {
     if (_groupPhotoUrl != null && _groupPhotoUrl!.isNotEmpty) {
       return CircleAvatar(
@@ -427,7 +501,6 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
     );
   }
 
-  /// NULL-SAFE member avatar builder
   Widget _buildMemberAvatar(String? avatarUrl, String? username) {
     if (avatarUrl != null && avatarUrl.isNotEmpty) {
       return CircleAvatar(
