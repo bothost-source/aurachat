@@ -2,13 +2,14 @@ import 'dart:convert';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'api_config.dart';
 
 /// AI-powered moderation service using Google Gemini (Free tier)
 class AIModerationService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  /// Your Gemini API key - get free key from https://aistudio.google.com/app/apikey
-  static const String _apiKey = 'AQ.Ab8RN6LT1_2BfExP6hH8o0eXFEKR1wZSJ0xoJosOXQPDAa13Tw';
+  /// API key from GitHub Secrets (injected at build time)
+  static const String _apiKey = ApiConfig.geminiApiKey;
 
   /// Rate limit: minimum seconds between processing reports from same reporter
   static const int _rateLimitSeconds = 3600; // 1 hour
