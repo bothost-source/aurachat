@@ -44,7 +44,7 @@ import 'screens/moderation/appeal_screen.dart';
 import 'screens/moderation/ban_guard.dart';
 import 'screens/ai/ai_chatbot_screen.dart';
 import 'screens/ai/ai_studio_screen.dart';
-import 'screens/channel/channel_screen.dart';
+import 'screens/channel/channel_chat_screen.dart';
 import 'screens/calls/call_screen.dart';
 import 'screens/search/global_search_screen.dart';
 import 'screens/contacts/contacts_screen.dart';
@@ -91,7 +91,8 @@ void main() async {
     final pushService = PushNotificationService();
     await pushService.initialize();
 
-    await ConnectivityService().initialize();
+    // FIX #1: Removed await since initialize() returns void
+    ConnectivityService().initialize();
     CallService.initialize('8a2cea909f994b0d9e61146e99710277');
 
     await SystemChrome.setPreferredOrientations([
@@ -148,7 +149,7 @@ class ErrorApp extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  'The app failed to start. Please screenshot this and send it for help.',
+                  'The app failed to start. Please screenshot this and send it to support email for help.',
                   style: TextStyle(color: Colors.white70, fontSize: 14),
                 ),
                 const SizedBox(height: 32),
@@ -233,15 +234,15 @@ class _AuraChatAppState extends State<AuraChatApp>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
       authProvider.listenToAuthChanges();
-      
+
       final currentUser = FirebaseAuth.instance.currentUser;
       if (currentUser != null) {
         CallSignalingService.startListening(currentUser.uid);
-        
+
         CallSignalingService.onCallSignal.listen((signal) {
           if (signal.type == CallSignalType.incoming && mounted) {
             Navigator.of(context).push(
@@ -266,10 +267,10 @@ class _AuraChatAppState extends State<AuraChatApp>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
-    
+
     if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
       _backgroundTime = DateTime.now();
-      
+
       if (settingsProvider.biometricLock || settingsProvider.appPasscode) {
         setState(() => _isLocked = true);
       }
@@ -277,11 +278,11 @@ class _AuraChatAppState extends State<AuraChatApp>
       OnlineStatusService.setOnline();
       final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
       authProvider.refreshSession();
-      
+
       if (_isLocked && _backgroundTime != null) {
         final elapsed = DateTime.now().difference(_backgroundTime!);
         final timeoutMinutes = settingsProvider.autoLockTimeout;
-        
+
         if (elapsed.inMinutes >= timeoutMinutes) {
           _showLockScreen();
         } else {
@@ -293,7 +294,7 @@ class _AuraChatAppState extends State<AuraChatApp>
 
   Future<void> _showLockScreen() async {
     final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
-    
+
     if (settingsProvider.biometricLock) {
       final localAuth = LocalAuthentication();
       try {
@@ -326,7 +327,7 @@ class _AuraChatAppState extends State<AuraChatApp>
             useErrorDialogs: true,
           ),
         );
-        
+
         if (didAuth) {
           setState(() => _isLocked = false);
           return;
@@ -335,7 +336,7 @@ class _AuraChatAppState extends State<AuraChatApp>
         debugPrint('Biometric auth failed: $e');
       }
     }
-    
+
     if (settingsProvider.appPasscode && mounted) {
       final result = await showDialog<bool>(
         context: context,
@@ -344,7 +345,7 @@ class _AuraChatAppState extends State<AuraChatApp>
           correctPasscode: settingsProvider.passcode,
         ),
       );
-      
+
       if (result == true) {
         setState(() => _isLocked = false);
       }
@@ -377,7 +378,7 @@ class _AuraChatAppState extends State<AuraChatApp>
                 _lockChecked = true;
                 final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
                 final currentUser = FirebaseAuth.instance.currentUser;
-                
+
                 if (currentUser != null && (settingsProvider.biometricLock || settingsProvider.appPasscode)) {
                   WidgetsBinding.instance.addPostFrameCallback((_) {
                     setState(() => _isLocked = true);
@@ -476,7 +477,14 @@ class _AuraChatAppState extends State<AuraChatApp>
               '/appeal': (context) => const AppealScreen(),
               '/ai_chatbot': (context) => const AIChatbotScreen(),
               '/ai_studio': (context) => const AIStudioScreen(),
-              '/channel': (context) => const ChannelScreen(),
+              // FIX #2: No hardcoded channels — args come from user-created channels
+              '/channel': (context) {
+                final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+                return ChannelChatScreen(
+                  channelId: args?['channelId'] as String? ?? '',
+                  channelName: args?['channelName'] as String? ?? 'Channel',
+                );
+              },
               '/calls': (context) => const CallScreen.pick(),
               '/global_search': (context) => const GlobalSearchScreen(),
               '/contacts': (context) => const ContactsScreen(),
