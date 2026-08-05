@@ -39,7 +39,10 @@ dependencies:
 
   # Phone & Input
   intl_phone_field: ^3.2.0
-
+  
+  # http request
+  http: ^1.2.0
+  
   # Chat & Media
   uuid: ^4.5.0
   emoji_picker_flutter: ^3.1.0
