@@ -44,7 +44,7 @@ import 'screens/moderation/appeal_screen.dart';
 import 'screens/moderation/ban_guard.dart';
 import 'screens/ai/ai_chatbot_screen.dart';
 import 'screens/ai/ai_studio_screen.dart';
-import 'screens/channel/channel_chat_screen.dart';
+import 'screens/channel/channel_screen.dart';
 import 'screens/calls/call_screen.dart';
 import 'screens/search/global_search_screen.dart';
 import 'screens/contacts/contacts_screen.dart';
