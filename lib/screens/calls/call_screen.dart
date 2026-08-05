@@ -1,15 +1,13 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:http/http.dart' as http;
 import '../../services/call_service.dart';
 import '../../services/call_signaling_service.dart';
-
-// ============================================================
-// CALL SCREEN — Only shows users you've chatted with
-// ============================================================
 
 class CallScreen extends StatefulWidget {
   final String? targetUserId;
@@ -19,9 +17,8 @@ class CallScreen extends StatefulWidget {
   final CallSignal? incomingSignal;
   final String? channelName;
 
-  const CallScreen.pick({
-    super.key,
-  })  : targetUserId = null,
+  const CallScreen.pick({super.key})
+      : targetUserId = null,
         targetUserName = null,
         targetUserAvatar = null,
         isVideoCall = null,
@@ -60,23 +57,25 @@ class CallScreen extends StatefulWidget {
 }
 
 class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
-  // ─── State ───
   CallState _callState = CallState.list;
   List<Map<String, dynamic>> _users = [];
   bool _loading = true;
 
-  // Outgoing/Incoming
   String? _callId;
   String? _channelName;
   Timer? _timeoutTimer;
 
-  // Active call (Agora)
   RtcEngine? _engine;
   bool _localUserJoined = false;
   int? _remoteUid;
   bool _initialized = false;
   bool _muted = false;
   bool _cameraOff = false;
+  bool _speakerOn = false;
+
+  // Call duration
+  Timer? _durationTimer;
+  int _callDurationSeconds = 0;
 
   @override
   void initState() {
@@ -98,7 +97,7 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
   }
 
   // ═══════════════════════════════════════════════════════════
-  // ONLY LOAD USERS YOU'VE CHATTED WITH
+  // CALL LIST
   // ═══════════════════════════════════════════════════════════
 
   Future<void> _loadChatUsers() async {
@@ -109,7 +108,6 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
     }
 
     try {
-      // Get all messages where you are sender OR receiver
       final messages = await FirebaseFirestore.instance
           .collection('messages')
           .where('sender_id', isEqualTo: currentUser.uid)
@@ -121,12 +119,10 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
         final data = msg.data();
         final senderId = data['sender_id'] as String;
         final receiverId = data['receiver_id'] as String;
-
         if (senderId != currentUser.uid) chatUserIds.add(senderId);
         if (receiverId != currentUser.uid) chatUserIds.add(receiverId);
       }
 
-      // Also get messages where you're the receiver
       final receivedMessages = await FirebaseFirestore.instance
           .collection('messages')
           .where('receiver_id', isEqualTo: currentUser.uid)
@@ -134,8 +130,7 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
           .get();
 
       for (final msg in receivedMessages.docs) {
-        final data = msg.data();
-        final senderId = data['sender_id'] as String;
+        final senderId = msg.data()['sender_id'] as String;
         if (senderId != currentUser.uid) chatUserIds.add(senderId);
       }
 
@@ -144,7 +139,6 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
         return;
       }
 
-      // Fetch their profiles
       final profiles = await FirebaseFirestore.instance
           .collection('users')
           .where(FieldPath.documentId, whereIn: chatUserIds.toList())
@@ -197,43 +191,21 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               image: user['avatar_url'] != null
-                  ? DecorationImage(
-                      image: NetworkImage(user['avatar_url']),
-                      fit: BoxFit.cover,
-                    )
+                  ? DecorationImage(image: NetworkImage(user['avatar_url']), fit: BoxFit.cover)
                   : null,
               color: const Color(0xFF8B5CF6),
             ),
             child: user['avatar_url'] == null
-                ? Center(
-                    child: Text(
-                      (user['username'] ?? '?')[0].toUpperCase(),
-                      style: const TextStyle(fontSize: 40, color: Colors.white),
-                    ),
-                  )
+                ? Center(child: Text((user['username'] ?? '?')[0].toUpperCase(),
+                    style: const TextStyle(fontSize: 40, color: Colors.white)))
                 : null,
           ),
           const SizedBox(height: 16),
-          Text(
-            user['username'] ?? 'Unknown',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
+          Text(user['username'] ?? 'Unknown',
+              style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
           const SizedBox(height: 12),
-          Text(
-            user['bio'] ?? 'No bio available',
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.white54, fontSize: 14),
-          ),
-          const SizedBox(height: 8),
-          if (user['phone'] != null)
-            Text(
-              user['phone'],
-              style: const TextStyle(color: Colors.white38, fontSize: 14),
-            ),
+          Text(user['bio'] ?? 'No bio available',
+              textAlign: TextAlign.center, style: const TextStyle(color: Colors.white54, fontSize: 14)),
           const SizedBox(height: 24),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -242,20 +214,14 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
                 icon: Icons.videocam,
                 color: const Color(0xFF8B5CF6),
                 label: 'Video',
-                onTap: () {
-                  Navigator.pop(context);
-                  _startCall(user, true);
-                },
+                onTap: () { Navigator.pop(context); _startCall(user, true); },
               ),
               const SizedBox(width: 24),
               _buildActionButton(
                 icon: Icons.call,
                 color: Colors.green,
                 label: 'Voice',
-                onTap: () {
-                  Navigator.pop(context);
-                  _startCall(user, false);
-                },
+                onTap: () { Navigator.pop(context); _startCall(user, false); },
               ),
               const SizedBox(width: 24),
               _buildActionButton(
@@ -290,11 +256,7 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
         children: [
           Container(
             padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.2),
-              shape: BoxShape.circle,
-              border: Border.all(color: color),
-            ),
+            decoration: BoxDecoration(color: color.withOpacity(0.2), shape: BoxShape.circle, border: Border.all(color: color)),
             child: Icon(icon, color: color, size: 28),
           ),
           const SizedBox(height: 8),
@@ -334,11 +296,7 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
     if (currentUser == null) return;
 
     try {
-      final profile = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(currentUser.uid)
-          .get();
-
+      final profile = await FirebaseFirestore.instance.collection('users').doc(currentUser.uid).get();
       final data = profile.data();
 
       await CallSignalingService.sendCallInvitation(
@@ -383,22 +341,14 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
     _timeoutTimer?.cancel();
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser != null && _callId != null) {
-      await CallSignalingService.endCall(
-        targetUserId: widget.targetUserId!,
-        callId: _callId!,
-      );
+      await CallSignalingService.endCall(targetUserId: widget.targetUserId!, callId: _callId!);
     }
   }
 
   void _goBackToList(String message) {
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const CallScreen.pick()),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const CallScreen.pick()));
     }
   }
 
@@ -408,9 +358,7 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
 
   void _startIncomingCallTimer() {
     _timeoutTimer = Timer(const Duration(seconds: 30), () {
-      if (mounted && _callState == CallState.incoming) {
-        _declineCall();
-      }
+      if (mounted && _callState == CallState.incoming) _declineCall();
     });
   }
 
@@ -461,6 +409,20 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
   Future<void> _initAgora() async {
     await [Permission.microphone, Permission.camera].request();
 
+    // Get token from backend
+    String token = '';
+    try {
+      final response = await http.get(
+        Uri.parse('https://aurachat-backend-5utu.onrender.com/api/moderation/agora-token?channelName=${widget.channelName}'),
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        token = data['token'] ?? '';
+      }
+    } catch (e) {
+      debugPrint('Token fetch error: $e');
+    }
+
     _engine = widget.isVideoCall!
         ? await CallService.createVideoClient(widget.channelName!)
         : await CallService.createVoiceClient(widget.channelName!);
@@ -471,6 +433,7 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
       },
       onUserJoined: (connection, remoteUid, elapsed) {
         setState(() => _remoteUid = remoteUid);
+        _startDurationTimer(); // Start timer when connected
       },
       onUserOffline: (connection, remoteUid, reason) {
         setState(() => _remoteUid = null);
@@ -481,13 +444,25 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
     ));
 
     await _engine!.joinChannel(
-      token: '',
+      token: token,
       channelId: widget.channelName!,
       uid: 0,
       options: const ChannelMediaOptions(),
     );
 
     setState(() => _initialized = true);
+  }
+
+  void _startDurationTimer() {
+    _durationTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() => _callDurationSeconds++);
+    });
+  }
+
+  String _formatDuration(int seconds) {
+    final mins = seconds ~/ 60;
+    final secs = seconds % 60;
+    return '${mins.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
   }
 
   void _toggleMute() {
@@ -502,7 +477,30 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
     setState(() {});
   }
 
+  void _toggleSpeaker() {
+    _speakerOn = !_speakerOn;
+    CallService.setSpeakerphone(_engine!, _speakerOn);
+    setState(() {});
+  }
+
+  Future<void> _saveCallLog() async {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null || widget.targetUserId == null) return;
+
+    await FirebaseFirestore.instance.collection('call_logs').add({
+      'caller_id': currentUser.uid,
+      'receiver_id': widget.targetUserId,
+      'call_type': widget.isVideoCall! ? 'video' : 'voice',
+      'duration_seconds': _callDurationSeconds,
+      'status': _callDurationSeconds > 0 ? 'connected' : 'missed',
+      'created_at': FieldValue.serverTimestamp(),
+    });
+  }
+
   Future<void> _endCall() async {
+    _durationTimer?.cancel();
+    await _saveCallLog();
+    
     await CallSignalingService.endCall(
       targetUserId: widget.targetUserId!,
       callId: widget.channelName!,
@@ -520,6 +518,7 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _timeoutTimer?.cancel();
+    _durationTimer?.cancel();
     _engine?.leaveChannel();
     _engine?.release();
     super.dispose();
@@ -554,11 +553,7 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
   // ─── Call List UI ───
   Widget _buildCallList() {
     if (_loading) {
-      return const Center(
-        child: CircularProgressIndicator(
-          valueColor: AlwaysStoppedAnimation(Color(0xFF8B5CF6)),
-        ),
-      );
+      return const Center(child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation(Color(0xFF8B5CF6))));
     }
 
     if (_users.isEmpty) {
@@ -568,20 +563,9 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
           children: [
             const Icon(Icons.chat_bubble_outline, size: 64, color: Colors.white24),
             const SizedBox(height: 16),
-            const Text(
-              'No contacts yet',
-              style: TextStyle(
-                color: Colors.white54,
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
+            const Text('No contacts yet', style: TextStyle(color: Colors.white54, fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
-            const Text(
-              'Start a chat first to call someone',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white38, fontSize: 14),
-            ),
+            const Text('Start a chat first to call someone', textAlign: TextAlign.center, style: TextStyle(color: Colors.white38, fontSize: 14)),
             const SizedBox(height: 24),
             ElevatedButton(
               onPressed: () => Navigator.pushNamed(context, '/contacts'),
@@ -589,9 +573,7 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
                 backgroundColor: const Color(0xFF8B5CF6),
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(24),
-                ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
               ),
               child: const Text('Find People to Chat'),
             ),
@@ -607,29 +589,15 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
             padding: const EdgeInsets.all(16),
             child: Row(
               children: [
-                IconButton(
-                  icon: const Icon(Icons.arrow_back, color: Colors.white),
-                  onPressed: () => Navigator.pop(context),
-                ),
-                const Expanded(
-                  child: Text(
-                    'New Call',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
+                IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.pop(context)),
+                const Expanded(child: Text('New Call', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold))),
               ],
             ),
           ),
           Expanded(
             child: ListView.builder(
               itemCount: _users.length,
-              itemBuilder: (context, index) {
-                return _buildUserTile(_users[index]);
-              },
+              itemBuilder: (context, index) => _buildUserTile(_users[index]),
             ),
           ),
         ],
@@ -639,7 +607,6 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
 
   Widget _buildUserTile(Map<String, dynamic> user) {
     final bool isOnline = user['status'] == 'online';
-
     return InkWell(
       onTap: () => _viewProfile(user),
       child: Padding(
@@ -649,45 +616,21 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
             Stack(
               children: [
                 Container(
-                  width: 56,
-                  height: 56,
+                  width: 56, height: 56,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    image: user['avatar_url'] != null
-                        ? DecorationImage(
-                            image: NetworkImage(user['avatar_url']),
-                            fit: BoxFit.cover,
-                          )
-                        : null,
+                    image: user['avatar_url'] != null ? DecorationImage(image: NetworkImage(user['avatar_url']), fit: BoxFit.cover) : null,
                     color: const Color(0xFF8B5CF6),
                   ),
                   child: user['avatar_url'] == null
-                      ? Center(
-                          child: Text(
-                            (user['username'] ?? '?')[0].toUpperCase(),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        )
+                      ? Center(child: Text((user['username'] ?? '?')[0].toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)))
                       : null,
                 ),
                 Positioned(
-                  right: 2,
-                  bottom: 2,
+                  right: 2, bottom: 2,
                   child: Container(
-                    width: 14,
-                    height: 14,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: isOnline ? Colors.green : Colors.grey,
-                      border: Border.all(
-                        color: const Color(0xFF0A0A0F),
-                        width: 2,
-                      ),
-                    ),
+                    width: 14, height: 14,
+                    decoration: BoxDecoration(shape: BoxShape.circle, color: isOnline ? Colors.green : Colors.grey, border: Border.all(color: const Color(0xFF0A0A0F), width: 2)),
                   ),
                 ),
               ],
@@ -697,36 +640,17 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    user['username'] ?? 'Unknown',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
+                  Text(user['username'] ?? 'Unknown', style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 4),
-                  Text(
-                    isOnline ? 'Online' : 'Offline',
-                    style: TextStyle(
-                      color: isOnline ? Colors.green : Colors.grey,
-                      fontSize: 13,
-                    ),
-                  ),
+                  Text(isOnline ? 'Online' : 'Offline', style: TextStyle(color: isOnline ? Colors.green : Colors.grey, fontSize: 13)),
                 ],
               ),
             ),
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                IconButton(
-                  icon: const Icon(Icons.videocam, color: Color(0xFF8B5CF6)),
-                  onPressed: () => _startCall(user, true),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.call, color: Colors.green),
-                  onPressed: () => _startCall(user, false),
-                ),
+                IconButton(icon: const Icon(Icons.videocam, color: Color(0xFF8B5CF6)), onPressed: () => _startCall(user, true)),
+                IconButton(icon: const Icon(Icons.call, color: Colors.green), onPressed: () => _startCall(user, false)),
               ],
             ),
           ],
@@ -742,70 +666,33 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Container(
-            width: 120,
-            height: 120,
+            width: 120, height: 120,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              image: widget.targetUserAvatar != null
-                  ? DecorationImage(
-                      image: NetworkImage(widget.targetUserAvatar!),
-                      fit: BoxFit.cover,
-                    )
-                  : null,
+              image: widget.targetUserAvatar != null ? DecorationImage(image: NetworkImage(widget.targetUserAvatar!), fit: BoxFit.cover) : null,
               color: const Color(0xFF8B5CF6),
             ),
             child: widget.targetUserAvatar == null
-                ? Center(
-                    child: Text(
-                      (widget.targetUserName ?? '?')[0].toUpperCase(),
-                      style: const TextStyle(fontSize: 48, color: Colors.white),
-                    ),
-                  )
+                ? Center(child: Text((widget.targetUserName ?? '?')[0].toUpperCase(), style: const TextStyle(fontSize: 48, color: Colors.white)))
                 : null,
           ),
           const SizedBox(height: 24),
-          Text(
-            widget.targetUserName ?? 'Unknown',
-            style: const TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-          ),
+          Text(widget.targetUserName ?? 'Unknown', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
           const SizedBox(height: 12),
-          Text(
-            widget.isVideoCall == true ? 'Video calling...' : 'Voice calling...',
-            style: const TextStyle(color: Colors.white54, fontSize: 16),
-          ),
+          Text(widget.isVideoCall == true ? 'Video calling...' : 'Voice calling...', style: const TextStyle(color: Colors.white54, fontSize: 16)),
           const SizedBox(height: 48),
           TweenAnimationBuilder(
             tween: Tween(begin: 0.0, end: 1.0),
             duration: const Duration(seconds: 1),
-            builder: (context, value, child) {
-              return Container(
-                width: 80 + (value * 40),
-                height: 80 + (value * 40),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: const Color(0xFF8B5CF6).withOpacity(0.3 * (1 - value)),
-                ),
-              );
-            },
+            builder: (context, value, child) => Container(
+              width: 80 + (value * 40), height: 80 + (value * 40),
+              decoration: BoxDecoration(shape: BoxShape.circle, color: const Color(0xFF8B5CF6).withOpacity(0.3 * (1 - value))),
+            ),
           ),
           const SizedBox(height: 48),
           GestureDetector(
-            onTap: () {
-              _cancelCall();
-              _goBackToList('Call cancelled');
-            },
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: const BoxDecoration(
-                color: Colors.red,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.call_end, color: Colors.white, size: 32),
-            ),
+            onTap: () { _cancelCall(); _goBackToList('Call cancelled'); },
+            child: Container(padding: const EdgeInsets.all(16), decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle), child: const Icon(Icons.call_end, color: Colors.white, size: 32)),
           ),
           const SizedBox(height: 12),
           const Text('Cancel', style: TextStyle(color: Colors.white54)),
@@ -822,57 +709,28 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Container(
-            width: 120,
-            height: 120,
+            width: 120, height: 120,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              image: signal.callerAvatar != null
-                  ? DecorationImage(
-                      image: NetworkImage(signal.callerAvatar!),
-                      fit: BoxFit.cover,
-                    )
-                  : null,
+              image: signal.callerAvatar != null ? DecorationImage(image: NetworkImage(signal.callerAvatar!), fit: BoxFit.cover) : null,
               color: const Color(0xFF8B5CF6),
             ),
             child: signal.callerAvatar == null
-                ? Center(
-                    child: Text(
-                      (signal.callerName ?? '?')[0].toUpperCase(),
-                      style: const TextStyle(fontSize: 48, color: Colors.white),
-                    ),
-                  )
+                ? Center(child: Text((signal.callerName ?? '?')[0].toUpperCase(), style: const TextStyle(fontSize: 48, color: Colors.white)))
                 : null,
           ),
           const SizedBox(height: 24),
-          Text(
-            signal.callerName ?? 'Unknown',
-            style: const TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-          ),
+          Text(signal.callerName ?? 'Unknown', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
           const SizedBox(height: 12),
-          Text(
-            signal.isVideoCall == true
-                ? 'Incoming video call...'
-                : 'Incoming voice call...',
-            style: const TextStyle(color: Colors.white54, fontSize: 16),
-          ),
+          Text(signal.isVideoCall == true ? 'Incoming video call...' : 'Incoming voice call...', style: const TextStyle(color: Colors.white54, fontSize: 16)),
           const SizedBox(height: 48),
           TweenAnimationBuilder(
             tween: Tween(begin: 0.0, end: 1.0),
             duration: const Duration(seconds: 1),
-            builder: (context, value, child) {
-              return Container(
-                width: 80 + (value * 40),
-                height: 80 + (value * 40),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: const Color(0xFF8B5CF6).withOpacity(0.3 * (1 - value)),
-                ),
-              );
-            },
+            builder: (context, value, child) => Container(
+              width: 80 + (value * 40), height: 80 + (value * 40),
+              decoration: BoxDecoration(shape: BoxShape.circle, color: const Color(0xFF8B5CF6).withOpacity(0.3 * (1 - value))),
+            ),
           ),
           const SizedBox(height: 48),
           Row(
@@ -882,14 +740,7 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
                 children: [
                   GestureDetector(
                     onTap: _declineCall,
-                    child: Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: const BoxDecoration(
-                        color: Colors.red,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.call_end, color: Colors.white, size: 32),
-                    ),
+                    child: Container(padding: const EdgeInsets.all(16), decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle), child: const Icon(Icons.call_end, color: Colors.white, size: 32)),
                   ),
                   const SizedBox(height: 8),
                   const Text('Decline', style: TextStyle(color: Colors.white54)),
@@ -900,18 +751,7 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
                 children: [
                   GestureDetector(
                     onTap: _acceptCall,
-                    child: Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: const BoxDecoration(
-                        color: Colors.green,
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        signal.isVideoCall == true ? Icons.videocam : Icons.call,
-                        color: Colors.white,
-                        size: 32,
-                      ),
-                    ),
+                    child: Container(padding: const EdgeInsets.all(16), decoration: const BoxDecoration(color: Colors.green, shape: BoxShape.circle), child: Icon(signal.isVideoCall == true ? Icons.videocam : Icons.call, color: Colors.white, size: 32)),
                   ),
                   const SizedBox(height: 8),
                   const Text('Accept', style: TextStyle(color: Colors.white54)),
@@ -928,11 +768,7 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
   Widget _buildActiveCall() {
     return SafeArea(
       child: !_initialized
-          ? const Center(
-              child: CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation(Color(0xFF8B5CF6)),
-              ),
-            )
+          ? const Center(child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation(Color(0xFF8B5CF6))))
           : Stack(
               children: [
                 widget.isVideoCall!
@@ -944,44 +780,21 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
                               connection: RtcConnection(channelId: widget.channelName!),
                             ),
                           )
-                        : const Center(
-                            child: Text(
-                              'Waiting for remote user...',
-                              style: TextStyle(color: Colors.white),
-                            ),
-                          ))
+                        : const Center(child: Text('Waiting for remote user...', style: TextStyle(color: Colors.white))))
                     : Center(
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             Container(
-                              width: 120,
-                              height: 120,
-                              decoration: const BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: Color(0xFF8B5CF6),
-                              ),
-                              child: Center(
-                                child: Text(
-                                  (widget.targetUserName ?? '?')[0].toUpperCase(),
-                                  style: const TextStyle(fontSize: 48, color: Colors.white),
-                                ),
-                              ),
+                              width: 120, height: 120,
+                              decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xFF8B5CF6)),
+                              child: Center(child: Text((widget.targetUserName ?? '?')[0].toUpperCase(), style: const TextStyle(fontSize: 48, color: Colors.white))),
                             ),
                             const SizedBox(height: 16),
-                            Text(
-                              widget.targetUserName ?? 'Unknown',
-                              style: const TextStyle(
-                                fontSize: 20,
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
+                            Text(widget.targetUserName ?? 'Unknown', style: const TextStyle(fontSize: 20, color: Colors.white, fontWeight: FontWeight.bold)),
                             const SizedBox(height: 8),
-                            Text(
-                              _remoteUid != null ? 'Connected' : 'Connecting...',
-                              style: const TextStyle(color: Colors.white54),
-                            ),
+                            Text(_remoteUid != null ? 'Connected • ${_formatDuration(_callDurationSeconds)}' : 'Connecting...',
+                                style: const TextStyle(color: Colors.white54)),
                           ],
                         ),
                       ),
@@ -989,59 +802,41 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
                   Align(
                     alignment: Alignment.topLeft,
                     child: SizedBox(
-                      width: 120,
-                      height: 160,
+                      width: 120, height: 160,
                       child: _localUserJoined
                           ? (_cameraOff
-                              ? Container(
-                                  color: Colors.black,
-                                  child: const Center(
-                                    child: Icon(Icons.videocam_off, color: Colors.white54),
-                                  ),
-                                )
+                              ? Container(color: Colors.black, child: const Center(child: Icon(Icons.videocam_off, color: Colors.white54)))
                               : AgoraVideoView(
-                                  controller: VideoViewController(
-                                    rtcEngine: _engine!,
-                                    canvas: const VideoCanvas(uid: 0),
-                                  ),
+                                  controller: VideoViewController(rtcEngine: _engine!, canvas: const VideoCanvas(uid: 0)),
                                 ))
-                          : const Center(
-                              child: CircularProgressIndicator(
-                                valueColor: AlwaysStoppedAnimation(Color(0xFF8B5CF6)),
-                              ),
-                            ),
+                          : const Center(child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation(Color(0xFF8B5CF6)))),
                     ),
                   ),
                 Align(
                   alignment: Alignment.bottomCenter,
                   child: Padding(
                     padding: const EdgeInsets.only(bottom: 32),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        _buildControlButton(
-                          icon: _muted ? Icons.mic_off : Icons.mic,
-                          color: _muted ? Colors.red : Colors.white24,
-                          onTap: _toggleMute,
-                        ),
-                        const SizedBox(width: 20),
-                        if (widget.isVideoCall!)
-                          _buildControlButton(
-                            icon: _cameraOff ? Icons.videocam_off : Icons.videocam,
-                            color: _cameraOff ? Colors.red : Colors.white24,
-                            onTap: _toggleCamera,
-                          ),
-                        if (widget.isVideoCall!) const SizedBox(width: 20),
-                        GestureDetector(
-                          onTap: _endCall,
-                          child: Container(
-                            padding: const EdgeInsets.all(16),
-                            decoration: const BoxDecoration(
-                              color: Colors.red,
-                              shape: BoxShape.circle,
+                        if (_callDurationSeconds > 0)
+                          Text(_formatDuration(_callDurationSeconds), style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 16),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            _buildControlButton(icon: _muted ? Icons.mic_off : Icons.mic, color: _muted ? Colors.red : Colors.white24, onTap: _toggleMute),
+                            const SizedBox(width: 16),
+                            _buildControlButton(icon: _speakerOn ? Icons.volume_up : Icons.volume_off, color: _speakerOn ? const Color(0xFF8B5CF6) : Colors.white24, onTap: _toggleSpeaker),
+                            const SizedBox(width: 16),
+                            if (widget.isVideoCall!)
+                              _buildControlButton(icon: _cameraOff ? Icons.videocam_off : Icons.videocam, color: _cameraOff ? Colors.red : Colors.white24, onTap: _toggleCamera),
+                            if (widget.isVideoCall!) const SizedBox(width: 16),
+                            GestureDetector(
+                              onTap: _endCall,
+                              child: Container(padding: const EdgeInsets.all(16), decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle), child: const Icon(Icons.call_end, color: Colors.white, size: 32)),
                             ),
-                            child: const Icon(Icons.call_end, color: Colors.white, size: 32),
-                          ),
+                          ],
                         ),
                       ],
                     ),
@@ -1052,21 +847,10 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildControlButton({
-    required IconData icon,
-    required Color color,
-    required VoidCallback onTap,
-  }) {
+  Widget _buildControlButton({required IconData icon, required Color color, required VoidCallback onTap}) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: color,
-          shape: BoxShape.circle,
-        ),
-        child: Icon(icon, color: Colors.white, size: 24),
-      ),
+      child: Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: color, shape: BoxShape.circle), child: Icon(icon, color: Colors.white, size: 24)),
     );
   }
 }
