@@ -73,7 +73,17 @@ class _OtpScreenState extends State<OtpScreen> {
       await authProvider.createMockUser();
 
       await OnlineStatusService.setOnline();
-      if (mounted) Navigator.pushReplacementNamed(context, '/setup_profile');
+      if (mounted) {
+  Navigator.pushReplacement(
+    context,
+    MaterialPageRoute(
+      builder: (context) => EmailVerificationScreen(
+        userId: authProvider.currentUser?.uid ?? widget.cleanPhoneNumber,
+        backendUrl: 'https://aurachat-backend-5utu.onrender.com',
+      ),
+    ),
+  );
+}
     } else {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
