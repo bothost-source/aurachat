@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../../services/ai_moderation_service.dart';
 
 /// Screen shown when user is banned
 class BannedScreen extends StatefulWidget {
@@ -22,9 +23,7 @@ class _BannedScreenState extends State<BannedScreen> {
     super.initState();
     _updateTimeRemaining();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) {
-        _updateTimeRemaining();
-      }
+      if (mounted) _updateTimeRemaining();
     });
   }
 
@@ -75,7 +74,7 @@ class _BannedScreenState extends State<BannedScreen> {
     final banReason = widget.banStatus['ban_reason'] ?? 'Violation of community guidelines';
 
     return WillPopScope(
-      onWillPop: () async => false, // 🔒 Prevent back button
+      onWillPop: () async => false,
       child: Scaffold(
         backgroundColor: const Color(0xFF0A0A0F),
         body: SafeArea(
@@ -91,30 +90,18 @@ class _BannedScreenState extends State<BannedScreen> {
                     shape: BoxShape.circle,
                     border: Border.all(color: Colors.red.withOpacity(0.3)),
                   ),
-                  child: const Icon(
-                    Icons.block,
-                    size: 64,
-                    color: Colors.red,
-                  ),
+                  child: const Icon(Icons.block, size: 64, color: Colors.red),
                 ),
                 const SizedBox(height: 32),
                 const Text(
                   'Account Banned',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 16),
                 Text(
                   _getBanMessage(widget.banStatus['ban_level']),
                   textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.7),
-                    fontSize: 16,
-                    height: 1.5,
-                  ),
+                  style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 16, height: 1.5),
                 ),
                 const SizedBox(height: 24),
                 Container(
@@ -126,52 +113,28 @@ class _BannedScreenState extends State<BannedScreen> {
                   ),
                   child: Column(
                     children: [
-                      Text(
-                        'Reason',
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.5),
-                          fontSize: 12,
-                        ),
-                      ),
+                      Text('Reason', style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12)),
                       const SizedBox(height: 4),
                       Text(
                         banReason.toString().toUpperCase(),
-                        style: const TextStyle(
-                          color: Colors.red,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                        ),
+                        style: const TextStyle(color: Colors.red, fontSize: 14, fontWeight: FontWeight.w600),
                       ),
                     ],
                   ),
                 ),
                 if (!isPermanent) ...[
                   const SizedBox(height: 32),
-                  Text(
-                    'Time Remaining',
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.5),
-                      fontSize: 14,
-                    ),
-                  ),
+                  Text('Time Remaining', style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 14)),
                   const SizedBox(height: 8),
                   Text(
                     _formatDuration(_timeRemaining),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 36,
-                      fontWeight: FontWeight.bold,
-                      fontFamily: 'monospace',
-                    ),
+                    style: const TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.bold, fontFamily: 'monospace'),
                   ),
                   const SizedBox(height: 8),
                   Text(
                     'Your account will be automatically unbanned when the timer reaches zero.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.4),
-                      fontSize: 12,
-                    ),
+                    style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 12),
                   ),
                 ],
                 const SizedBox(height: 48),
@@ -182,9 +145,7 @@ class _BannedScreenState extends State<BannedScreen> {
                       backgroundColor: Colors.white.withOpacity(0.1),
                       foregroundColor: Colors.white54,
                       padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                     child: const Text('Please wait for the ban to expire'),
                   )
@@ -195,9 +156,7 @@ class _BannedScreenState extends State<BannedScreen> {
                       backgroundColor: const Color(0xFF8B5CF6),
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                     child: const Text('Submit Appeal'),
                   ),
@@ -261,7 +220,7 @@ class _BannedScreenState extends State<BannedScreen> {
   }
 }
 
-/// Screen shown when user is unbanned (after ban expires)
+/// Screen shown when user is unbanned
 class UnbannedScreen extends StatelessWidget {
   const UnbannedScreen({super.key});
 
@@ -282,30 +241,18 @@ class UnbannedScreen extends StatelessWidget {
                   shape: BoxShape.circle,
                   border: Border.all(color: Colors.green.withOpacity(0.3)),
                 ),
-                child: const Icon(
-                  Icons.check_circle,
-                  size: 64,
-                  color: Colors.green,
-                ),
+                child: const Icon(Icons.check_circle, size: 64, color: Colors.green),
               ),
               const SizedBox(height: 32),
               const Text(
                 'Welcome Back!',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 16),
               Text(
                 'Your account has been unbanned. Please follow our community guidelines to avoid future bans.',
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Colors.white.withOpacity(0.7),
-                  fontSize: 16,
-                  height: 1.5,
-                ),
+                style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 16, height: 1.5),
               ),
               const SizedBox(height: 48),
               ElevatedButton(
@@ -314,9 +261,7 @@ class UnbannedScreen extends StatelessWidget {
                   backgroundColor: const Color(0xFF8B5CF6),
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
                 child: const Text('Continue to App'),
               ),
@@ -324,6 +269,39 @@ class UnbannedScreen extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// BAN GUARD - Check ban status before allowing app access
+class BanGuard extends StatelessWidget {
+  final Widget child;
+
+  const BanGuard({super.key, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final userId = FirebaseAuth.instance.currentUser?.uid;
+
+    if (userId == null) return child;
+
+    return FutureBuilder<Map<String, dynamic>?>(
+      future: AIModerationService.checkBanStatus(userId),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            backgroundColor: Color(0xFF0A0A0F),
+            body: Center(child: CircularProgressIndicator(color: Color(0xFF8B5CF6))),
+          );
+        }
+
+        final banStatus = snapshot.data;
+        if (banStatus != null && banStatus['is_banned'] == true) {
+          return BannedScreen(banStatus: banStatus);
+        }
+
+        return child;
+      },
     );
   }
 }
