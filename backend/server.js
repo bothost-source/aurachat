@@ -51,7 +51,16 @@ app.use('/api/auth/login', authLimiter);
 // Logging
 app.use(requestLogger);
 
-// Health check
+// Health check for UptimeRobot (root path)
+app.get('/', (req, res) => {
+  res.status(200).json({ 
+    status: 'ok', 
+    message: 'AURA CHAT Backend is running',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Health check (detailed)
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'ok', 
