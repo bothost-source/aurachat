@@ -5,25 +5,18 @@ import 'package:permission_handler/permission_handler.dart';
 class CallService {
   static String? _appId;
 
-  // Initialize with your Agora App ID
   static void initialize(String appId) {
     _appId = appId;
   }
 
-  // Generate a random channel name for the call
   static String generateChannelName() {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
     final random = Random();
     return List.generate(10, (_) => chars[random.nextInt(chars.length)]).join();
   }
 
-  // Create RtcEngine for video call
   static Future<RtcEngine> createVideoClient(String channelName) async {
-    if (_appId == null) {
-      throw Exception('CallService not initialized. Call initialize() first.');
-    }
-
-    // Request permissions
+    if (_appId == null) throw Exception('CallService not initialized');
     await [Permission.microphone, Permission.camera].request();
 
     final engine = createAgoraRtcEngine();
@@ -32,14 +25,19 @@ class CallService {
       channelProfile: ChannelProfileType.channelProfileCommunication,
     ));
 
+    await engine.enableAudio();
     await engine.enableVideo();
     await engine.startPreview();
-    
-    // Set video encoder configuration
+
+    await engine.setAudioProfile(
+      profile: AudioProfileType.audioProfileDefault,
+      scenario: AudioScenarioType.audioScenarioGameStreaming,
+    );
+
     await engine.setVideoEncoderConfiguration(
       const VideoEncoderConfiguration(
         dimensions: VideoDimensions(width: 640, height: 360),
-        frameRate: 15, // Changed from VideoFrameRate.fps15 to int
+        frameRate: 15,
         bitrate: 0,
       ),
     );
@@ -47,13 +45,8 @@ class CallService {
     return engine;
   }
 
-  // Create RtcEngine for voice call (no video)
   static Future<RtcEngine> createVoiceClient(String channelName) async {
-    if (_appId == null) {
-      throw Exception('CallService not initialized. Call initialize() first.');
-    }
-
-    // Request microphone permission only
+    if (_appId == null) throw Exception('CallService not initialized');
     await Permission.microphone.request();
 
     final engine = createAgoraRtcEngine();
@@ -63,13 +56,20 @@ class CallService {
     ));
 
     await engine.enableAudio();
-    // Disable video for voice calls
     await engine.disableVideo();
+
+    await engine.setAudioProfile(
+      profile: AudioProfileType.audioProfileSpeechStandard,
+      scenario: AudioScenarioType.audioScenarioGameStreaming,
+    );
 
     return engine;
   }
 
-  // Join channel with token (for production, use token server)
+  static Future<void> setSpeakerphone(RtcEngine engine, bool enabled) async {
+    await engine.setEnableSpeakerphone(enabled);
+  }
+
   static Future<void> joinChannel({
     required RtcEngine engine,
     required String channelName,
@@ -92,7 +92,6 @@ class CallService {
     );
   }
 
-  // Leave channel and clean up
   static Future<void> leaveChannel(RtcEngine engine) async {
     await engine.leaveChannel();
     await engine.release();
