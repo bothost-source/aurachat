@@ -2,11 +2,15 @@ const express = require('express');
 const router = express.Router();
 const admin = require('firebase-admin');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { generateAgoraToken } = require('../services/agoraToken');
 
 const db = admin.firestore();
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// POST /api/moderation/report - Receive report from Flutter
+// ═══════════════════════════════════════════════════════════
+// REPORT ENDPOINT — Called by Flutter app when user reports someone
+// ═══════════════════════════════════════════════════════════
+
 router.post('/report', async (req, res) => {
   try {
     const { messageContent, reporterId, reportedUserId, chatId, messageId } = req.body;
@@ -18,13 +22,19 @@ router.post('/report', async (req, res) => {
     // Rate limit check
     const canProceed = await checkRateLimit(reporterId);
     if (!canProceed) {
-      return res.status(429).json({ status: 'rate_limited', message: 'Please wait before submitting another report' });
+      return res.status(429).json({ 
+        status: 'rate_limited',
+        message: 'Please wait before submitting another report' 
+      });
     }
 
     // Reporter reliability check
     const isReliable = await checkReporterReliability(reporterId);
     if (!isReliable) {
-      return res.status(403).json({ status: 'reporter_flagged', message: 'Your reporting privileges are under review' });
+      return res.status(403).json({
+        status: 'reporter_flagged',
+        message: 'Your reporting privileges are under review'
+      });
     }
 
     // Call Gemini AI
@@ -66,7 +76,10 @@ router.post('/report', async (req, res) => {
   }
 });
 
-// GET /api/moderation/ban-status/:userId - Check if user is banned
+// ═══════════════════════════════════════════════════════════
+// BAN STATUS ENDPOINT — Called by Flutter to check if user is banned
+// ═══════════════════════════════════════════════════════════
+
 router.get('/ban-status/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
@@ -98,7 +111,27 @@ router.get('/ban-status/:userId', async (req, res) => {
   }
 });
 
-// Helper: Check rate limit
+// ═══════════════════════════════════════════════════════════
+// AGORA TOKEN ENDPOINT — Called by Flutter to get call token
+// ═══════════════════════════════════════════════════════════
+
+router.get('/agora-token', (req, res) => {
+  const { channelName, uid } = req.query;
+  if (!channelName) return res.status(400).json({ error: 'channelName required' });
+  
+  try {
+    const token = generateAgoraToken(channelName, parseInt(uid) || 0);
+    res.json({ token });
+  } catch (error) {
+    console.error('Token generation error:', error);
+    res.status(500).json({ error: 'Failed to generate token' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// HELPER FUNCTIONS
+// ═══════════════════════════════════════════════════════════
+
 async function checkRateLimit(reporterId) {
   const snapshot = await db.collection('reports')
     .where('reporter_id', '==', reporterId)
@@ -115,7 +148,6 @@ async function checkRateLimit(reporterId) {
   return secondsSince >= 3600;
 }
 
-// Helper: Check reporter reliability
 async function checkReporterReliability(reporterId) {
   const snapshot = await db.collection('reports')
     .where('reporter_id', '==', reporterId)
@@ -127,7 +159,6 @@ async function checkReporterReliability(reporterId) {
   return (dismissed / snapshot.size) < 0.7;
 }
 
-// Helper: Call Gemini AI
 async function callGeminiAI(messageContent) {
   try {
     const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
@@ -178,7 +209,6 @@ Confidence guide:
   }
 }
 
-// Helper: Fallback keyword analysis
 function fallbackAnalysis(messageContent) {
   const lower = messageContent.toLowerCase();
   
@@ -195,7 +225,6 @@ function fallbackAnalysis(messageContent) {
   return { category: 'clean', confidence: 0.15, reasoning: 'No harmful content', recommended_action: 'none' };
 }
 
-// Helper: Auto-action based on AI recommendation
 async function autoAction({ reportedUserId, action, reason, reportId }) {
   switch (action) {
     case 'warn':
@@ -223,7 +252,6 @@ async function autoAction({ reportedUserId, action, reason, reportId }) {
   }
 }
 
-// Helper: Ban user with escalating durations
 async function banUser(userId, durationMs, reason, reportId, level) {
   const userDoc = await db.collection('users').doc(userId).get();
   const banHistory = userDoc.data()?.ban_history || [];
@@ -269,7 +297,6 @@ async function banUser(userId, durationMs, reason, reportId, level) {
   });
 }
 
-// Helper: Unban user
 async function unbanUser(userId) {
   await db.collection('users').doc(userId).update({
     is_banned: false,
