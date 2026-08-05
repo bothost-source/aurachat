@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../services/online_status_service.dart';
 import '../../services/app_localizations.dart';
+import 'email_verification_screen.dart';
 
 class OtpScreen extends StatefulWidget {
   final String phoneNumber;
@@ -78,7 +79,7 @@ class _OtpScreenState extends State<OtpScreen> {
     context,
     MaterialPageRoute(
       builder: (context) => EmailVerificationScreen(
-        userId: authProvider.currentUser?.uid ?? widget.cleanPhoneNumber,
+        userId: widget.cleanPhoneNumber,
         backendUrl: 'https://aurachat-backend-5utu.onrender.com',
       ),
     ),
