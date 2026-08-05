@@ -425,9 +425,7 @@ class ChatProvider extends ChangeNotifier {
         return;
       }
 
-      final memberRole = (chatData['participants_data']?[memberId]?['role'] ?? 'member') 'member') as String;
-      if (memberRole == 'owner') {
-        _ as String;
+      final memberRole = (chatData['participants_data']?[memberId]?['role'] ?? 'member') as String;
       if (memberRole == 'owner') {
         _error = 'Cannot ban the owner';
         notifyListeners();
