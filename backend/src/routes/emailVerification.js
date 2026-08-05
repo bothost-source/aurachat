@@ -11,14 +11,14 @@ const verificationCodes = new Map();
 router.post('/send-email-verification', async (req, res) => {
   try {
     const { email, userId } = req.body;
-    
+
     if (!email || !userId) {
       return res.status(400).json({ error: 'Email and userId required' });
     }
 
     // Generate 6-digit code
     const code = Math.floor(100000 + Math.random() * 900000).toString();
-    
+
     // Store code with expiry (15 minutes)
     verificationCodes.set(userId, {
       code,
@@ -26,9 +26,9 @@ router.post('/send-email-verification', async (req, res) => {
       expiresAt: Date.now() + 15 * 60 * 1000
     });
 
-    // Send email via Resend
+    // Send email via Resend (using their default domain — no custom domain needed)
     await resend.emails.send({
-      from: process.env.EMAIL_FROM || 'onboarding@resend.dev',
+      from: 'AURA CHAT <onboarding@resend.dev>',
       to: email,
       subject: 'AURA CHAT - Email Verification',
       html: `
@@ -53,13 +53,13 @@ router.post('/send-email-verification', async (req, res) => {
 router.post('/verify-email', (req, res) => {
   try {
     const { userId, code } = req.body;
-    
+
     if (!userId || !code) {
       return res.status(400).json({ error: 'UserId and code required' });
     }
 
     const stored = verificationCodes.get(userId);
-    
+
     if (!stored) {
       return res.status(400).json({ error: 'No verification code found' });
     }
@@ -75,7 +75,7 @@ router.post('/verify-email', (req, res) => {
 
     // Success - clean up
     verificationCodes.delete(userId);
-    
+
     res.json({ 
       success: true, 
       message: 'Email verified',
