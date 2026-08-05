@@ -6,6 +6,21 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
+// ============================================================================
+// INITIALIZE FIREBASE ADMIN FIRST — Before any routes
+// ============================================================================
+const admin = require('firebase-admin');
+
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert({
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+    }),
+  });
+}
+
 const connectDB = require('./src/config/database');
 const { setupSocketHandlers } = require('./src/services/socketService');
 const { setupAIModeration } = require('./src/services/aiModerationService');
@@ -88,19 +103,6 @@ setupAIModeration();
 // ============================================================================
 // PUSH NOTIFICATIONS - Listen for new messages and send FCM pushes
 // ============================================================================
-const admin = require('firebase-admin');
-
-// Initialize Firebase Admin with service account
-if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-    }),
-  });
-}
-
 const db = admin.firestore();
 const messaging = admin.messaging();
 
