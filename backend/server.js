@@ -16,6 +16,7 @@ const moderationRoutes = require('./src/routes/moderation');
 const userRoutes = require('./src/routes/users');
 const { errorHandler } = require('./src/middleware/errorHandler');
 const { requestLogger } = require('./src/middleware/logger');
+const emailVerificationRoutes = require('./src/routes/emailVerification');
 
 const app = express();
 const server = http.createServer(app);
@@ -71,6 +72,7 @@ app.get('/health', (req, res) => {
 });
 
 // API Routes
+app.use('/api/auth', emailVerificationRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/bot', botRoutes);
