@@ -34,6 +34,10 @@ const { requestLogger } = require('./src/middleware/logger');
 const emailVerificationRoutes = require('./src/routes/emailVerification');
 
 const app = express();
+
+// FIX: Trust proxy so rate limiting works correctly behind Render's proxy
+app.set('trust proxy', 1);
+
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
@@ -108,37 +112,37 @@ const messaging = admin.messaging();
 
 function startPushNotificationListener() {
   console.log('Starting push notification listener...');
-  
+
   db.collectionGroup('messages')
     .where('sent_to_fcm', '==', false)
     .onSnapshot(async (snapshot) => {
       for (const change of snapshot.docChanges()) {
         if (change.type !== 'added') continue;
-        
+
         const message = change.doc.data();
         const messageId = change.doc.id;
         const chatId = message.chat_id;
         const senderId = message.sender_id;
-        
+
         if (!chatId || !senderId) continue;
-        
+
         try {
           const chatDoc = await db.collection('chats').doc(chatId).get();
           if (!chatDoc.exists) continue;
-          
+
           const chatData = chatDoc.data();
           const participants = chatData.participants || [];
           const chatType = chatData.type || 'direct';
           const chatName = chatData.name || 'AURA Chat';
           const recipients = participants.filter(id => id !== senderId);
-          
+
           if (recipients.length === 0) continue;
-          
+
           const senderDoc = await db.collection('users').doc(senderId).get();
           const senderName = senderDoc.exists 
             ? (senderDoc.data().username || 'Someone') 
             : 'Someone';
-          
+
           let title, body;
           if (chatType === 'direct') {
             title = senderName;
@@ -150,24 +154,24 @@ function startPushNotificationListener() {
             title = chatName;
             body = formatMessageBody(message);
           }
-          
+
           const tokens = [];
           for (const userId of recipients) {
             const userDoc = await db.collection('users').doc(userId).get();
             if (!userDoc.exists) continue;
-            
+
             const userData = userDoc.data();
             const token = userData?.fcmToken;
             if (!token) continue;
-            
+
             const mutedChats = userData?.muted_chats || [];
             if (mutedChats.includes(chatId)) continue;
-            
+
             tokens.push(token);
           }
-          
+
           if (tokens.length === 0) continue;
-          
+
           const sendPromises = tokens.map(token => 
             messaging.send({
               token: token,
@@ -197,12 +201,12 @@ function startPushNotificationListener() {
               console.error('Failed to send to token:', token, err.message);
             })
           );
-          
+
           await Promise.all(sendPromises);
           await change.doc.ref.update({ sent_to_fcm: true });
-          
+
           console.log(`Push sent to ${tokens.length} users for chat ${chatId}`);
-          
+
         } catch (error) {
           console.error('Push notification error:', error);
         }
@@ -213,7 +217,7 @@ function startPushNotificationListener() {
 function formatMessageBody(message) {
   const type = message.type || 'text';
   const content = message.content || '';
-  
+
   switch (type) {
     case 'image': return '📷 Photo';
     case 'video': return '🎥 Video';
