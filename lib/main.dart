@@ -227,6 +227,7 @@ class _AuraChatAppState extends State<AuraChatApp>
 
   DateTime? _backgroundTime;
   bool _isLocked = false;
+  bool _lockChecked = false;
 
   @override
   void initState() {
@@ -371,12 +372,25 @@ class _AuraChatAppState extends State<AuraChatApp>
             themeMode: themeProvider.themeMode,
             initialRoute: '/',
             builder: (context, child) {
-              // LOCK SCREEN (existing) - takes priority
+              // Check lock status on first build
+              if (!_lockChecked) {
+                _lockChecked = true;
+                final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+                final currentUser = FirebaseAuth.instance.currentUser;
+                
+                if (currentUser != null && (settingsProvider.biometricLock || settingsProvider.appPasscode)) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    setState(() => _isLocked = true);
+                  });
+                }
+              }
+
+              // LOCK SCREEN - takes priority over everything
               if (_isLocked) {
                 return _buildLockScreen();
               }
 
-              // REAL-TIME BAN CHECK - continuously listens to Firestore
+              // REAL-TIME BAN CHECK
               final currentUser = FirebaseAuth.instance.currentUser;
               if (currentUser != null) {
                 return StreamBuilder<DocumentSnapshot>(
@@ -385,7 +399,7 @@ class _AuraChatAppState extends State<AuraChatApp>
                       .doc(currentUser.uid)
                       .snapshots(),
                   builder: (context, snapshot) {
-                    // Loading state
+                    // Loading
                     if (snapshot.connectionState == ConnectionState.waiting) {
                       return const Scaffold(
                         backgroundColor: Color(0xFF0A0A0F),
@@ -404,7 +418,6 @@ class _AuraChatAppState extends State<AuraChatApp>
                     if (isBanned && bannedUntil != null) {
                       final banExpiry = bannedUntil.toDate();
                       if (DateTime.now().isAfter(banExpiry)) {
-                        // Ban expired - auto unban in background
                         FirebaseFirestore.instance
                             .collection('users')
                             .doc(currentUser.uid)
@@ -415,12 +428,11 @@ class _AuraChatAppState extends State<AuraChatApp>
                           'ban_report_id': null,
                           'ban_level': null,
                         });
-                        // Show normal app while update processes
                         return child!;
                       }
                     }
 
-                    // BANNED - show banned screen permanently
+                    // BANNED - show banned screen
                     if (isBanned) {
                       final banStatus = {
                         'is_banned': true,
@@ -438,7 +450,7 @@ class _AuraChatAppState extends State<AuraChatApp>
                 );
               }
 
-              // Not authenticated - show normal flow
+              // Not authenticated
               return child!;
             },
             routes: {
