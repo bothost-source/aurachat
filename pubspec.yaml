@@ -18,7 +18,7 @@ dependencies:
   firebase_database: ^11.3.0
   firebase_storage: ^12.4.0
   firebase_messaging: ^15.2.0
-  cloudinary: ^1.2.0
+  cloudinary_public: ^0.23.1
   # State Management
   provider: ^6.1.2
   google_generative_ai: ^0.4.0
