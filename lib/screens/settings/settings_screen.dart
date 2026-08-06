@@ -1,13 +1,18 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../utils/verified_badge.dart';
 
-// Language support
+// ─── YOUR CLOUDINARY CONFIG ────────────────────────────────────────
+const String _cloudName = 'dn2mwp1lc';
+const String _uploadPreset = 'aura_chat';
+// ───────────────────────────────────────────────────────────────────
+
 class AppLocalizations {
   static String currentLanguage = 'en';
 
@@ -204,6 +209,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await _uploadProfileImage();
   }
 
+  /// UPLOAD TO CLOUDINARY
   Future<void> _uploadProfileImage() async {
     if (_newProfileImage == null) return;
 
@@ -213,15 +219,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (userId == null) return;
 
       final fileBytes = await _newProfileImage!.readAsBytes();
-      final fileName = 'avatars/$userId/profile_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final fileName = 'profile_${DateTime.now().millisecondsSinceEpoch}.jpg';
 
-      final storage = FirebaseStorage.instance;
-      final ref = storage.ref().child(fileName);
-      await ref.putData(fileBytes);
+      // ─── Cloudinary Upload ───────────────────────────────────────
+      final uri = Uri.parse(
+        'https://api.cloudinary.com/v1_1/$_cloudName/image/upload',
+      );
 
-      final publicUrl = await ref.getDownloadURL();
+      final request = http.MultipartRequest('POST', uri)
+        ..fields['upload_preset'] = _uploadPreset
+        ..fields['public_id'] = 'aura_profiles/$userId/$fileName'
+        ..files.add(
+          http.MultipartFile.fromBytes(
+            'file',
+            fileBytes,
+            filename: fileName,
+          ),
+        );
 
-      // Update user profile in database
+      final response = await request.send();
+      final responseData = await response.stream.bytesToString();
+      final jsonData = jsonDecode(responseData);
+
+      if (response.statusCode != 200) {
+        throw Exception('Cloudinary error: ${jsonData['error']?['message'] ?? responseData}');
+      }
+
+      final publicUrl = jsonData['secure_url'] as String;
+      // ─────────────────────────────────────────────────────────────
+
+      // Save to Firestore
       final firestore = FirebaseFirestore.instance;
       await firestore.collection('users').doc(userId).update({
         'avatar_url': publicUrl,
@@ -243,11 +270,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
     } catch (e) {
       setState(() => _isUploading = false);
-      debugPrint('Upload error: $e');
+      debugPrint('Cloudinary upload error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Failed to update profile picture'),
+          SnackBar(
+            content: Text('Failed to upload: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -381,7 +408,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       backgroundColor: const Color(0xFF0A0A0F),
       body: CustomScrollView(
         slivers: [
-          // App bar with gradient
           SliverAppBar(
             expandedHeight: 200,
             floating: false,
@@ -419,7 +445,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       children: [
                         Row(
                           children: [
-                            // Avatar with tap to change — NULL-SAFE
                             GestureDetector(
                               onTap: _isUploading ? null : _pickNewProfileImage,
                               child: Stack(
@@ -439,7 +464,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     ),
                                     child: _buildAvatar(avatar, _newProfileImage),
                                   ),
-                                  // Edit icon
                                   Positioned(
                                     bottom: 0,
                                     right: 0,
@@ -469,7 +493,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               ),
                             ),
                             const SizedBox(width: 16),
-                            // Name and phone — with verified badge
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -534,7 +557,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 ],
                               ),
                             ),
-                            // QR code button
                             Container(
                               padding: const EdgeInsets.all(10),
                               decoration: BoxDecoration(
@@ -559,8 +581,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
           ),
-
-          // Settings content
           SliverPadding(
             padding: const EdgeInsets.all(20),
             sliver: SliverList(
@@ -587,7 +607,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   subtitle: AppLocalizations.get('create_edit_photo'),
                   onTap: _pickNewProfileImage,
                 ),
-
                 _buildSectionTitle(AppLocalizations.get('preferences')),
                 _buildSettingTile(
                   icon: Icons.chat_bubble_outline,
@@ -617,7 +636,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   subtitle: currentLang['name']!,
                   onTap: _showLanguagePicker,
                 ),
-
                 _buildSectionTitle(AppLocalizations.get('help')),
                 _buildSettingTile(
                   icon: Icons.help_outline,
@@ -626,7 +644,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   subtitle: AppLocalizations.get('help_center'),
                   onTap: () => Navigator.pushNamed(context, '/help'),
                 ),
-
                 const SizedBox(height: 16),
                 _buildSettingTile(
                   icon: Icons.people_outline,
@@ -634,10 +651,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   title: AppLocalizations.get('invite_friends'),
                   onTap: () => Navigator.pushNamed(context, '/invite_friends'),
                 ),
-
                 const SizedBox(height: 32),
-
-                // Log Out Button
                 Container(
                   decoration: BoxDecoration(
                     color: Colors.red.withOpacity(0.1),
@@ -665,10 +679,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onTap: _logOut,
                   ),
                 ),
-
                 const SizedBox(height: 24),
-
-                // App version
                 Center(
                   child: Text(
                     AppLocalizations.get('version'),
@@ -687,9 +698,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  /// NULL-SAFE avatar builder for settings header
   Widget _buildAvatar(String? avatarUrl, File? localFile) {
-    // Local file takes priority (newly picked image)
     if (localFile != null) {
       return ClipOval(
         child: Image.file(
@@ -701,7 +710,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       );
     }
 
-    // If no URL, show default gradient avatar
     if (avatarUrl == null || avatarUrl.isEmpty) {
       return Container(
         decoration: const BoxDecoration(
@@ -716,7 +724,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       );
     }
 
-    // Try to load network image with error handling
     return ClipOval(
       child: Image.network(
         avatarUrl,
