@@ -29,6 +29,12 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
   bool _isChannel = false;
   String? _generatedLink;
 
+  // Theme colors matching SetupProfileScreen
+  static const Color _bgDark = Color(0xFF0A0A0F);
+  static const Color _bgCard = Color(0xFF1a103c);
+  static const Color _purple = Color(0xFF8B5CF6);
+  static const Color _cyan = Color(0xFF06B6D4);
+
   @override
   void dispose() {
     _nameController.dispose();
@@ -56,7 +62,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
 
       final imageUrl = await CloudinaryService.uploadImage(
         File(pickedFile.path),
-        'aurachat/groups/$userId' // Fixed: was \$userId
+        'aurachat/groups/$userId'
       );
 
       if (imageUrl == null) {
@@ -65,11 +71,11 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
 
       setState(() => _groupPhotoUrl = imageUrl);
     } catch (e) {
-      debugPrint('Photo upload failed: $e'); // Fixed: was \$e
+      debugPrint('Photo upload failed: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Photo upload failed: $e. Continuing without photo.'), // Fixed: was \$e
+            content: Text('Photo upload failed: $e. Continuing without photo.'),
             backgroundColor: Colors.orange,
           ),
         );
@@ -93,7 +99,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
       final snapshot = await firestore
           .collection('users')
           .where('username', isGreaterThanOrEqualTo: query)
-          .where('username', isLessThanOrEqualTo: '$query\uf8ff') // Fixed: was \$query
+          .where('username', isLessThanOrEqualTo: '$query\uf8ff')
           .limit(20)
           .get();
 
@@ -107,7 +113,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
 
       setState(() => _searchResults = filtered);
     } catch (e) {
-      debugPrint('Search error: $e'); // Fixed: was \$e
+      debugPrint('Search error: $e');
     }
   }
 
@@ -124,9 +130,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
 
   Future<void> _createGroup() async {
     if (_nameController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a group name')),
-      );
+      _showError('Please enter a ${_isChannel ? "channel" : "group"} name');
       return;
     }
 
@@ -175,7 +179,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
           'slow_mode_seconds': 0,
           'restrict_new_members_minutes': 0,
           'message_retention_days': 0,
-          'welcome_message': 'Welcome to ${_nameController.text.trim()}!', // Fixed: was \${_nameController...
+          'welcome_message': 'Welcome to ${_nameController.text.trim()}!',
           'rules': 'Be respectful and kind to all members.',
           'announcements_only': false,
           'polls_enabled': true,
@@ -203,7 +207,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
         );
         setState(() => _generatedLink = inviteResult['link'] as String?);
       } catch (e) {
-        debugPrint('Invitation creation failed: $e'); // Fixed: was \$e
+        debugPrint('Invitation creation failed: $e');
       }
 
       await chatProvider.loadChats();
@@ -213,7 +217,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('${_isChannel ? "Channel" : "Group"} created successfully!'), // Fixed: was \${_isChannel...
+            content: Text('${_isChannel ? "Channel" : "Group"} created successfully!'),
           ),
         );
         Navigator.pop(context);
@@ -221,261 +225,302 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
     } catch (e) {
       setState(() => _isLoading = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'), // Fixed: was \$e
-            backgroundColor: Colors.red,
-          ),
-        );
+        _showError('Error: $e');
       }
     }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red.withOpacity(0.9),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        title: Text(_isChannel ? 'New Channel' : 'New Group'),
-        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
-        elevation: 0,
-        actions: [
-          if (_isLoading)
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-              ),
-            )
-          else
-            TextButton(
-              onPressed: _createGroup,
-              child: const Text('Create', style: TextStyle(color: Colors.white)),
-            ),
-        ],
-      ),
-      body: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              children: [
-                GestureDetector(
-                  onTap: _pickGroupPhoto,
-                  child: Stack(
-                    children: [
-                      _buildGroupAvatar(),
-                      Positioned(
-                        bottom: 0,
-                        right: 0,
-                        child: Container(
-                          padding: const EdgeInsets.all(6),
-                          decoration: BoxDecoration(
-                            color: Theme.of(context).primaryColor,
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(
-                            Icons.camera_alt,
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              _bgDark,
+              _bgCard,
+              Color(0xFF0f172a),
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              // Header
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.arrow_back, color: Colors.white),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                    Expanded(
+                      child: ShaderMask(
+                        shaderCallback: (bounds) => const LinearGradient(
+                          colors: [_purple, _cyan],
+                        ).createShader(bounds),
+                        child: Text(
+                          _isChannel ? 'New Channel' : 'New Group',
+                          style: const TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.w900,
                             color: Colors.white,
-                            size: 18,
                           ),
                         ),
                       ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _nameController,
-                  decoration: InputDecoration(
-                    labelText: _isChannel ? 'Channel Name' : 'Group Name',
-                    hintText: _isChannel ? 'Enter channel name' : 'Enter group name',
-                    prefixIcon: const Icon(Icons.edit),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
                     ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _descriptionController,
-                  maxLines: 2,
-                  decoration: InputDecoration(
-                    labelText: 'Description',
-                    hintText: 'Add a description (optional)',
-                    prefixIcon: const Icon(Icons.description),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _inviteNameController,
-                  decoration: InputDecoration(
-                    labelText: 'Invitation Link Name',
-                    hintText: 'e.g., my-awesome-group (optional)',
-                    prefixIcon: const Icon(Icons.link),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Checkbox(
-                      value: _isChannel,
-                      onChanged: (value) => setState(() => _isChannel = value ?? false),
-                    ),
-                    const Text('Create as Channel (one-way messaging)'),
+                    if (_isLoading)
+                      const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    else
+                      TextButton(
+                        onPressed: _createGroup,
+                        child: const Text('Create', style: TextStyle(color: _cyan, fontWeight: FontWeight.bold)),
+                      ),
                   ],
                 ),
-                if (_generatedLink != null) ...[
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.green.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.green.withOpacity(0.3)),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.check_circle, color: Colors.green, size: 16),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Link: $_generatedLink', // Fixed: was \$_generatedLink
-                            style: const TextStyle(fontSize: 12),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
+              ),
 
-          if (_selectedMembers.isNotEmpty) ...[
-            Container(
-              height: 100,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                itemCount: _selectedMembers.length,
-                itemBuilder: (context, index) {
-                  final member = _selectedMembers[index];
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 12),
-                    child: Column(
-                      children: [
-                        Stack(
-                          children: [
-                            _buildMemberAvatar(member['avatar_url'], member['username']),
-                            Positioned(
-                              top: 0,
-                              right: 0,
-                              child: GestureDetector(
-                                onTap: () => _toggleMember(member),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Photo upload
+                      Center(
+                        child: GestureDetector(
+                          onTap: _pickGroupPhoto,
+                          child: Stack(
+                            children: [
+                              _buildGroupAvatar(),
+                              Positioned(
+                                bottom: 0,
+                                right: 0,
                                 child: Container(
-                                  padding: const EdgeInsets.all(2),
+                                  padding: const EdgeInsets.all(6),
                                   decoration: const BoxDecoration(
-                                    color: Colors.red,
+                                    gradient: LinearGradient(colors: [_purple, _cyan]),
                                     shape: BoxShape.circle,
                                   ),
-                                  child: const Icon(
-                                    Icons.close,
-                                    size: 14,
-                                    color: Colors.white,
-                                  ),
+                                  child: const Icon(Icons.camera_alt, color: Colors.white, size: 18),
                                 ),
                               ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Center(
+                        child: Text(
+                          'Tap to add photo',
+                          style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.4)),
+                        ),
+                      ),
+                      const SizedBox(height: 32),
+
+                      // Name field
+                      _buildGlassInput(
+                        label: _isChannel ? 'Channel Name' : 'Group Name',
+                        hint: _isChannel ? 'Enter channel name' : 'Enter group name',
+                        icon: Icons.edit,
+                        controller: _nameController,
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Description field
+                      _buildGlassInput(
+                        label: 'Description',
+                        hint: 'Add a description (optional)',
+                        icon: Icons.description,
+                        controller: _descriptionController,
+                        maxLines: 2,
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Invite link name
+                      _buildGlassInput(
+                        label: 'Invitation Link Name',
+                        hint: 'e.g., my-awesome-group (optional)',
+                        icon: Icons.link,
+                        controller: _inviteNameController,
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Channel toggle
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.05),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: Colors.white.withOpacity(0.08)),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: _purple.withOpacity(0.2),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.campaign, color: _purple, size: 20),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Create as Channel',
+                                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                                  ),
+                                  Text(
+                                    'One-way messaging (only admins can post)',
+                                    style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 12),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Switch(
+                              value: _isChannel,
+                              onChanged: (v) => setState(() => _isChannel = v),
+                              activeColor: _purple,
                             ),
                           ],
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          member['username'] ?? 'Unknown',
-                          style: const TextStyle(fontSize: 12),
-                          overflow: TextOverflow.ellipsis,
+                      ),
+
+                      if (_generatedLink != null) ...[
+                        const SizedBox(height: 16),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.green.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.green.withOpacity(0.3)),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.check_circle, color: Colors.green, size: 16),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Link: $_generatedLink',
+                                  style: const TextStyle(fontSize: 12, color: Colors.white),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ],
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
 
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: TextField(
-              controller: _searchController,
-              onChanged: _searchUsers,
-              decoration: InputDecoration(
-                hintText: 'Search users to add... (optional)',
-                prefixIcon: const Icon(Icons.search),
-                suffixIcon: _searchController.text.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear),
-                        onPressed: () {
-                          _searchController.clear();
-                          setState(() => _searchResults = []);
-                        },
-                      )
-                    : null,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
+                      const SizedBox(height: 24),
+
+                      // Search users
+                      _buildGlassInput(
+                        label: 'Add Members',
+                        hint: 'Search users to add... (optional)',
+                        icon: Icons.search,
+                        controller: _searchController,
+                        onChanged: _searchUsers,
+                      ),
+
+                      // Selected members
+                      if (_selectedMembers.isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        SizedBox(
+                          height: 90,
+                          child: ListView.builder(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: _selectedMembers.length,
+                            itemBuilder: (context, index) {
+                              final member = _selectedMembers[index];
+                              return Padding(
+                                padding: const EdgeInsets.only(right: 12),
+                                child: Column(
+                                  children: [
+                                    Stack(
+                                      children: [
+                                        _buildMemberAvatar(member['avatar_url'], member['username']),
+                                        Positioned(
+                                          top: 0,
+                                          right: 0,
+                                          child: GestureDetector(
+                                            onTap: () => _toggleMember(member),
+                                            child: Container(
+                                              padding: const EdgeInsets.all(2),
+                                              decoration: const BoxDecoration(
+                                                color: Colors.red,
+                                                shape: BoxShape.circle,
+                                              ),
+                                              child: const Icon(Icons.close, size: 14, color: Colors.white),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      member['username'] ?? 'Unknown',
+                                      style: const TextStyle(fontSize: 12, color: Colors.white70),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+
+                      // Search results
+                      if (_searchResults.isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        ..._searchResults.map((user) {
+                          final isSelected = _selectedMembers.any((m) => m['id'] == user['id']);
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.03),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: ListTile(
+                              leading: _buildMemberAvatar(user['avatar_url'], user['username']),
+                              title: Text(user['username'] ?? 'Unknown', style: const TextStyle(color: Colors.white)),
+                              subtitle: Text(user['phone'] ?? '', style: TextStyle(color: Colors.white.withOpacity(0.4))),
+                              trailing: isSelected
+                                  ? const Icon(Icons.check_circle, color: _purple)
+                                  : const Icon(Icons.add_circle_outline, color: Colors.white54),
+                              onTap: () => _toggleMember(user),
+                            ),
+                          );
+                        }).toList(),
+                      ],
+                    ],
+                  ),
                 ),
               ),
-            ),
+            ],
           ),
-
-          Expanded(
-            child: _searchResults.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.search,
-                          size: 64,
-                          color: Colors.grey.withOpacity(0.5),
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          _searchController.text.isEmpty
-                              ? 'Search for users to add (optional)'
-                              : 'No users found',
-                          style: TextStyle(color: Colors.grey.withOpacity(0.7)),
-                        ),
-                      ],
-                    ),
-                  )
-                : ListView.builder(
-                    itemCount: _searchResults.length,
-                    itemBuilder: (context, index) {
-                      final user = _searchResults[index];
-                      final isSelected = _selectedMembers.any((m) => m['id'] == user['id']);
-
-                      return ListTile(
-                        leading: _buildMemberAvatar(user['avatar_url'], user['username']),
-                        title: Text(user['username'] ?? 'Unknown'),
-                        subtitle: Text(user['phone'] ?? ''),
-                        trailing: isSelected
-                            ? Icon(Icons.check_circle, color: Theme.of(context).primaryColor)
-                            : const Icon(Icons.add_circle_outline),
-                        onTap: () => _toggleMember(user),
-                      );
-                    },
-                  ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -484,7 +529,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
     if (_groupPhotoUrl != null && _groupPhotoUrl!.isNotEmpty) {
       return CircleAvatar(
         radius: 50,
-        backgroundColor: Theme.of(context).primaryColor.withOpacity(0.2),
+        backgroundColor: _purple.withOpacity(0.2),
         backgroundImage: NetworkImage(_groupPhotoUrl!),
         onBackgroundImageError: (_, __) {},
       );
@@ -492,11 +537,11 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
 
     return CircleAvatar(
       radius: 50,
-      backgroundColor: Theme.of(context).primaryColor.withOpacity(0.2),
+      backgroundColor: _purple.withOpacity(0.2),
       child: Icon(
         _isChannel ? Icons.campaign : Icons.group,
         size: 50,
-        color: Theme.of(context).primaryColor,
+        color: _purple,
       ),
     );
   }
@@ -512,11 +557,51 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
 
     return CircleAvatar(
       radius: 28,
-      backgroundColor: Theme.of(context).primaryColor.withOpacity(0.2),
+      backgroundColor: _purple.withOpacity(0.2),
       child: Text(
         (username ?? 'U')[0].toUpperCase(),
-        style: const TextStyle(fontSize: 20),
+        style: const TextStyle(fontSize: 20, color: Colors.white),
       ),
+    );
+  }
+
+  Widget _buildGlassInput({
+    required String label,
+    required String hint,
+    required IconData icon,
+    required TextEditingController controller,
+    int maxLines = 1,
+    Function(String)? onChanged,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: Colors.white.withOpacity(0.7)),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.05),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.white.withOpacity(0.08)),
+          ),
+          child: TextField(
+            controller: controller,
+            maxLines: maxLines,
+            style: const TextStyle(color: Colors.white, fontSize: 16),
+            onChanged: onChanged,
+            decoration: InputDecoration(
+              hintText: hint,
+              hintStyle: TextStyle(color: Colors.white.withOpacity(0.25)),
+              prefixIcon: Icon(icon, color: Colors.white.withOpacity(0.3)),
+              border: InputBorder.none,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
