@@ -1,9 +1,9 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'dart:io';
+import '../../services/cloudinary_service.dart';
 
 class CreateStatusScreen extends StatefulWidget {
   const CreateStatusScreen({super.key});
@@ -16,6 +16,12 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
   final _textController = TextEditingController();
   File? _selectedImage;
   bool _isLoading = false;
+
+  // Theme colors matching SetupProfileScreen
+  static const Color _bgDark = Color(0xFF0A0A0F);
+  static const Color _bgCard = Color(0xFF1a103c);
+  static const Color _purple = Color(0xFF8B5CF6);
+  static const Color _cyan = Color(0xFF06B6D4);
 
   @override
   void dispose() {
@@ -31,9 +37,7 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
     );
 
     if (pickedFile != null) {
-      setState(() {
-        _selectedImage = File(pickedFile.path);
-      });
+      setState(() => _selectedImage = File(pickedFile.path));
     }
   }
 
@@ -45,17 +49,13 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
     );
 
     if (pickedFile != null) {
-      setState(() {
-        _selectedImage = File(pickedFile.path);
-      });
+      setState(() => _selectedImage = File(pickedFile.path));
     }
   }
 
   Future<void> _createStatus() async {
     if (_textController.text.trim().isEmpty && _selectedImage == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please add text or an image')),
-      );
+      _showError('Please add text or an image');
       return;
     }
 
@@ -71,166 +71,231 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
 
       String? mediaUrl;
 
-      // Upload image if selected
+      // Upload image via Cloudinary if selected
       if (_selectedImage != null) {
-        final ref = FirebaseStorage.instance
-            .ref()
-            .child('statuses')
-            .child(userId)
-            .child('${DateTime.now().millisecondsSinceEpoch}.jpg');
+        mediaUrl = await CloudinaryService.uploadImage(
+          _selectedImage!,
+          'aurachat/statuses/$userId'
+        );
 
-        await ref.putFile(_selectedImage!);
-        mediaUrl = await ref.getDownloadURL();
+        if (mediaUrl == null) {
+          throw Exception('Failed to upload image to Cloudinary');
+        }
       }
 
-      // Create status (expires in 24 hours)
-      final expiresAt = DateTime.now().add(const Duration(hours: 24));
+      // Create status with 24h expiry
+      final now = DateTime.now();
+      final expiresAt = now.add(const Duration(hours: 24));
 
       await FirebaseFirestore.instance.collection('statuses').add({
         'user_id': userId,
         'text': _textController.text.trim().isNotEmpty ? _textController.text.trim() : null,
         'media_url': mediaUrl,
-        'created_at': Timestamp.now(),
+        'created_at': Timestamp.fromDate(now),
         'expires_at': Timestamp.fromDate(expiresAt),
+        'viewed_by': [],
       });
 
       setState(() => _isLoading = false);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Status added!')),
+          const SnackBar(content: Text('Status added! Expires in 24h')),
         );
         Navigator.pop(context);
       }
     } catch (e) {
       setState(() => _isLoading = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        _showError('Error: $e');
       }
     }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red.withOpacity(0.9),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.close, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              _bgDark,
+              _bgCard,
+              Color(0xFF0f172a),
+            ],
+          ),
         ),
-        actions: [
-          if (_isLoading)
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.white,
-                ),
-              ),
-            )
-          else
-            TextButton(
-              onPressed: _createStatus,
-              child: const Text(
-                'Share',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-              ),
-            ),
-        ],
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: _selectedImage != null
-                ? Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      Image.file(
-                        _selectedImage!,
-                        fit: BoxFit.contain,
-                      ),
-                      Positioned(
-                        bottom: 100,
-                        left: 16,
-                        right: 16,
-                        child: TextField(
-                          controller: _textController,
-                          style: const TextStyle(
-                            color: Colors.white,
+        child: SafeArea(
+          child: Column(
+            children: [
+              // Header
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.close, color: Colors.white),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                    Expanded(
+                      child: ShaderMask(
+                        shaderCallback: (bounds) => const LinearGradient(
+                          colors: [_purple, _cyan],
+                        ).createShader(bounds),
+                        child: const Text(
+                          'Create Status',
+                          style: TextStyle(
                             fontSize: 24,
-                            shadows: [
-                              Shadow(
-                                color: Colors.black,
-                                blurRadius: 4,
-                              ),
-                            ],
+                            fontWeight: FontWeight.w900,
+                            color: Colors.white,
                           ),
-                          decoration: const InputDecoration(
-                            hintText: 'Add a caption...',
-                            hintStyle: TextStyle(color: Colors.white70),
-                            border: InputBorder.none,
-                          ),
-                          maxLines: null,
-                          textAlign: TextAlign.center,
                         ),
                       ),
-                    ],
-                  )
-                : Center(
-                    child: TextField(
-                      controller: _textController,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 32,
-                      ),
-                      decoration: const InputDecoration(
-                        hintText: 'Type a status...',
-                        hintStyle: TextStyle(color: Colors.white54),
-                        border: InputBorder.none,
-                        contentPadding: EdgeInsets.all(32),
-                      ),
-                      maxLines: null,
-                      textAlign: TextAlign.center,
-                      autofocus: true,
                     ),
-                  ),
-          ),
+                    if (_isLoading)
+                      const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    else
+                      TextButton(
+                        onPressed: _createStatus,
+                        child: const Text(
+                          'Share',
+                          style: TextStyle(color: _cyan, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
 
-          // Bottom Actions
-          Container(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                _buildActionButton(
-                  icon: Icons.photo_library,
-                  label: 'Gallery',
-                  onTap: _pickImage,
+              // 24h expiry info
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.white.withOpacity(0.08)),
                 ),
-                _buildActionButton(
-                  icon: Icons.camera_alt,
-                  label: 'Camera',
-                  onTap: _takePhoto,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.timer, size: 14, color: Colors.white.withOpacity(0.5)),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Auto-deletes after 24 hours',
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.5),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
                 ),
-                if (_selectedImage != null)
-                  _buildActionButton(
-                    icon: Icons.delete,
-                    label: 'Remove',
-                    onTap: () => setState(() => _selectedImage = null),
-                    color: Colors.red,
-                  ),
-              ],
-            ),
+              ),
+
+              Expanded(
+                child: _selectedImage != null
+                    ? Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          Image.file(
+                            _selectedImage!,
+                            fit: BoxFit.contain,
+                          ),
+                          Positioned(
+                            bottom: 100,
+                            left: 16,
+                            right: 16,
+                            child: TextField(
+                              controller: _textController,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 24,
+                                shadows: [
+                                  Shadow(color: Colors.black, blurRadius: 4),
+                                ],
+                              ),
+                              decoration: const InputDecoration(
+                                hintText: 'Add a caption...',
+                                hintStyle: TextStyle(color: Colors.white70),
+                                border: InputBorder.none,
+                              ),
+                              maxLines: null,
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        ],
+                      )
+                    : Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(32),
+                          child: TextField(
+                            controller: _textController,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 32,
+                            ),
+                            decoration: InputDecoration(
+                              hintText: 'Type a status...',
+                              hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+                              border: InputBorder.none,
+                            ),
+                            maxLines: null,
+                            textAlign: TextAlign.center,
+                            autofocus: true,
+                          ),
+                        ),
+                      ),
+              ),
+
+              // Bottom Actions
+              Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.03),
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    _buildActionButton(
+                      icon: Icons.photo_library,
+                      label: 'Gallery',
+                      onTap: _pickImage,
+                    ),
+                    _buildActionButton(
+                      icon: Icons.camera_alt,
+                      label: 'Camera',
+                      onTap: _takePhoto,
+                    ),
+                    if (_selectedImage != null)
+                      _buildActionButton(
+                        icon: Icons.delete,
+                        label: 'Remove',
+                        onTap: () => setState(() => _selectedImage = null),
+                        color: Colors.red,
+                      ),
+                  ],
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -247,9 +312,12 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: (color ?? Colors.white).withOpacity(0.2),
+              gradient: color == null
+                  ? const LinearGradient(colors: [_purple, _cyan])
+                  : null,
+              color: color != null ? color.withOpacity(0.2) : null,
               shape: BoxShape.circle,
             ),
             child: Icon(
@@ -258,11 +326,11 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
               size: 28,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 8),
           Text(
             label,
             style: TextStyle(
-              color: color ?? Colors.white,
+              color: color ?? Colors.white.withOpacity(0.7),
               fontSize: 12,
             ),
           ),
