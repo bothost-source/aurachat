@@ -1,9 +1,17 @@
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:firebase_storage/firebase_storage.dart';
+import 'package:http/http.dart' as http;
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../utils/verified_badge.dart';
+
+// ─── YOUR CLOUDINARY CONFIG ────────────────────────────────────────
+const String _cloudName = 'dn2mwp1lc';
+const String _uploadPreset = 'aura_chat';
+// ───────────────────────────────────────────────────────────────────
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -47,6 +55,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     super.dispose();
   }
 
+  /// UPLOAD TO CLOUDINARY (replaces Firebase Storage)
   Future<void> _pickImage() async {
     final picker = ImagePicker();
     final pickedFile = await picker.pickImage(source: ImageSource.gallery);
@@ -56,19 +65,48 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       try {
         final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
-        final storage = FirebaseStorage.instance;
         final userId = authProvider.user?.uid ?? authProvider.mockUserId;
 
         if (userId == null) return;
 
         final fileBytes = await pickedFile.readAsBytes();
-        final fileName = 'avatars/$userId/${DateTime.now().millisecondsSinceEpoch}.jpg';
+        final fileName = 'profile_${DateTime.now().millisecondsSinceEpoch}.jpg';
 
-        final ref = storage.ref().child(fileName);
-        await ref.putData(fileBytes);
+        // ─── Cloudinary Upload ───────────────────────────────────────
+        final uri = Uri.parse(
+          'https://api.cloudinary.com/v1_1/$_cloudName/image/upload',
+        );
 
-        final imageUrl = await ref.getDownloadURL();
+        final request = http.MultipartRequest('POST', uri)
+          ..fields['upload_preset'] = _uploadPreset
+          ..fields['public_id'] = 'aura_profiles/$userId/$fileName'
+          ..files.add(
+            http.MultipartFile.fromBytes(
+              'file',
+              fileBytes,
+              filename: fileName,
+            ),
+          );
 
+        final response = await request.send();
+        final responseData = await response.stream.bytesToString();
+        final jsonData = jsonDecode(responseData);
+
+        if (response.statusCode != 200) {
+          throw Exception('Cloudinary error: ${jsonData['error']?['message'] ?? responseData}');
+        }
+
+        final imageUrl = jsonData['secure_url'] as String;
+        // ─────────────────────────────────────────────────────────────
+
+        // Save avatar_url to Firestore
+        final firestore = FirebaseFirestore.instance;
+        await firestore.collection('users').doc(userId).update({
+          'avatar_url': imageUrl,
+          'updated_at': FieldValue.serverTimestamp(),
+        });
+
+        // Update local provider
         await authProvider.updateProfile(photoUrl: imageUrl);
 
         if (mounted) {
