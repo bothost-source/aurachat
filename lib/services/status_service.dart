@@ -65,6 +65,125 @@ class StatusService {
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // NEW: Get statuses from saved contacts only
+  // ═══════════════════════════════════════════════════════════════════════════
+  static Future<List<Map<String, dynamic>>> getContactStatuses(String userId) async {
+    try {
+      // 1. Get saved contacts for this user
+      final contactsSnapshot = await _firestore
+          .collection('users')
+          .doc(userId)
+          .collection('contacts')
+          .get();
+
+      if (contactsSnapshot.docs.isEmpty) return [];
+
+      final contactIds = contactsSnapshot.docs.map((d) => d.id).toList();
+
+      // 2. Get active statuses from those contacts + user's own
+      final now = Timestamp.now();
+      final allUserIds = [...contactIds, userId];
+
+      // Firestore 'in' query max 10 items — batch if needed
+      final statuses = <Map<String, dynamic>>[];
+
+      for (int i = 0; i < allUserIds.length; i += 10) {
+        final batch = allUserIds.sublist(
+          i,
+          i + 10 > allUserIds.length ? allUserIds.length : i + 10,
+        );
+
+        final snapshot = await _firestore
+            .collection('statuses')
+            .where('user_id', whereIn: batch)
+            .where('expires_at', isGreaterThan: now)
+            .orderBy('expires_at', descending: true)
+            .get();
+
+        for (final doc in snapshot.docs) {
+          final data = doc.data();
+          final statusUserId = data['user_id'] as String;
+
+          // Get user info
+          final userDoc = await _firestore.collection('users').doc(statusUserId).get();
+          final userData = userDoc.data();
+
+          statuses.add({
+            'id': doc.id,
+            ...data,
+            'is_mine': statusUserId == userId,
+            'users': {
+              'username': userData?['username'],
+              'avatar_url': userData?['avatar_url'],
+            },
+          });
+        }
+      }
+
+      return statuses;
+    } catch (e) {
+      print('Get contact statuses error: $e');
+      return [];
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // NEW: Mark a status as viewed by current user
+  // ═══════════════════════════════════════════════════════════════════════════
+  static Future<void> markAsViewed(String statusId, String userId) async {
+    try {
+      await _firestore
+          .collection('statuses')
+          .doc(statusId)
+          .collection('views')
+          .doc(userId)
+          .set({
+        'viewed_at': Timestamp.now(),
+      });
+    } catch (e) {
+      print('Mark as viewed error: $e');
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // NEW: Check if a user is in current user's contacts
+  // ═══════════════════════════════════════════════════════════════════════════
+  static Future<bool> isContact(String currentUserId, String contactUserId) async {
+    try {
+      final doc = await _firestore
+          .collection('users')
+          .doc(currentUserId)
+          .collection('contacts')
+          .doc(contactUserId)
+          .get();
+      return doc.exists;
+    } catch (e) {
+      print('Is contact error: $e');
+      return false;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // NEW: Save a contact to current user's contacts list
+  // ═══════════════════════════════════════════════════════════════════════════
+  static Future<bool> saveContact(String currentUserId, String contactUserId) async {
+    try {
+      await _firestore
+          .collection('users')
+          .doc(currentUserId)
+          .collection('contacts')
+          .doc(contactUserId)
+          .set({
+        'saved_at': Timestamp.now(),
+      });
+      return true;
+    } catch (e) {
+      print('Save contact error: $e');
+      return false;
+    }
+  }
+
   // Get active statuses (not expired)
   static Future<List<Map<String, dynamic>>> getActiveStatuses() async {
     try {
