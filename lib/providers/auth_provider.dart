@@ -4,7 +4,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/online_status_service.dart';
 
-// RENAMED from AuthProvider to AuraAuthProvider
 class AuraAuthProvider extends ChangeNotifier {
   final firebase_auth.FirebaseAuth _auth = firebase_auth.FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -32,7 +31,7 @@ class AuraAuthProvider extends ChangeNotifier {
   String? get userBio => _userBio;
   String? get userPhotoUrl => _userPhotoUrl;
   String? get mockUserId => _mockUserId;
-  
+
   set mockUserId(String? value) {
     _mockUserId = value;
     notifyListeners();
@@ -42,6 +41,7 @@ class AuraAuthProvider extends ChangeNotifier {
     _initAuth();
   }
 
+  /// ==================== INIT AUTH ====================
   Future<void> _initAuth() async {
     _setLoading(true);
     try {
@@ -52,6 +52,7 @@ class AuraAuthProvider extends ChangeNotifier {
         await _loadUserProfile();
         await OnlineStatusService.setOnline();
       } else {
+        // Check for saved mock user session
         final prefs = await SharedPreferences.getInstance();
         _mockUserId = prefs.getString('mock_user_id');
         if (_mockUserId != null) {
@@ -61,6 +62,7 @@ class AuraAuthProvider extends ChangeNotifier {
           _displayName = prefs.getString('mock_display_name');
           _userBio = prefs.getString('mock_bio');
           _userPhotoUrl = prefs.getString('mock_avatar');
+          _email = prefs.getString('mock_email');
           await _loadUserProfile();
         }
       }
@@ -69,6 +71,73 @@ class AuraAuthProvider extends ChangeNotifier {
       debugPrint('Auth init error: $e');
     } finally {
       _setLoading(false);
+    }
+  }
+
+  /// ==================== CHECK IF PHONE EXISTS ====================
+  Future<Map<String, dynamic>?> checkPhoneExists(String phone) async {
+    try {
+      final snapshot = await _firestore
+          .collection('users')
+          .where('phone', isEqualTo: phone)
+          .limit(1)
+          .get();
+
+      if (snapshot.docs.isNotEmpty) {
+        return snapshot.docs.first.data();
+      }
+      return null;
+    } catch (e) {
+      debugPrint('Check phone error: $e');
+      return null;
+    }
+  }
+
+  /// ==================== LOGIN EXISTING USER ====================
+  Future<bool> loginExistingUser(String phone) async {
+    _setLoading(true);
+    try {
+      final userData = await checkPhoneExists(phone);
+      if (userData == null) {
+        _error = 'User not found';
+        _setLoading(false);
+        return false;
+      }
+
+      final userId = userData['id'] as String?;
+      if (userId == null) {
+        _error = 'Invalid user data';
+        _setLoading(false);
+        return false;
+      }
+
+      // Set mock user for phone-based auth
+      _mockUserId = userId;
+      _phoneNumber = phone;
+      _email = userData['email'] as String?;
+      _userName = userData['username'] as String?;
+      _displayName = userData['display_name'] as String?;
+      _userBio = userData['bio'] as String?;
+      _userPhotoUrl = userData['avatar_url'] as String?;
+      _isAuthenticated = true;
+
+      // Save session
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('mock_user_id', userId);
+      await prefs.setString('mock_phone', phone);
+      await prefs.setString('mock_username', _userName ?? '');
+      await prefs.setString('mock_display_name', _displayName ?? '');
+      await prefs.setString('mock_bio', _userBio ?? '');
+      await prefs.setString('mock_avatar', _userPhotoUrl ?? '');
+      await prefs.setString('mock_email', _email ?? '');
+
+      notifyListeners();
+      _setLoading(false);
+      return true;
+    } catch (e) {
+      _error = 'Login failed: $e';
+      _setLoading(false);
+      return false;
     }
   }
 
@@ -90,7 +159,7 @@ class AuraAuthProvider extends ChangeNotifier {
   Future<void> refreshSession() async {
     try {
       _user = _auth.currentUser;
-      _isAuthenticated = _user != null;
+      _isAuthenticated = _user != null || _mockUserId != null;
       if (_isAuthenticated) await _loadUserProfile();
     } catch (e) {
       _isAuthenticated = false;
@@ -209,11 +278,10 @@ class AuraAuthProvider extends ChangeNotifier {
       final doc = await _firestore.collection('users').doc(userId).get();
 
       if (doc.exists) {
-      final data = doc.data()!;
-       _userName = data['username'] as String?;
+        final data = doc.data()!;
+        _userName = data['username'] as String?;
         _displayName = data['display_name'] as String?;
         _userBio = data['bio'] as String?;
-        // Check for base64 avatar first, then regular URL
         _userPhotoUrl = data['avatar_base64'] as String? ?? data['avatar_url'] as String?;
         _phoneNumber = data['phone'] as String? ?? _phoneNumber;
         _email = data['email'] as String? ?? _email;
@@ -280,6 +348,7 @@ class AuraAuthProvider extends ChangeNotifier {
       await prefs.setString('mock_display_name', displayName ?? username);
       await prefs.setString('mock_bio', bio ?? '');
       await prefs.setString('mock_avatar', photoUrl ?? '');
+      await prefs.setString('mock_email', _email ?? '');
 
       notifyListeners();
       _setLoading(false);
@@ -293,55 +362,129 @@ class AuraAuthProvider extends ChangeNotifier {
   }
 
   Future<bool> updateProfile({
-  String? username,
-  String? displayName,
-  String? bio,
-  String? photoUrl,
-}) async {
-  _setLoading(true);
-  try {
-    final userId = _user?.uid ?? _mockUserId;
-    if (userId == null) {
-      _error = 'Not authenticated';
+    String? username,
+    String? displayName,
+    String? bio,
+    String? photoUrl,
+  }) async {
+    _setLoading(true);
+    try {
+      final userId = _user?.uid ?? _mockUserId;
+      if (userId == null) {
+        _error = 'Not authenticated';
+        _setLoading(false);
+        return false;
+      }
+
+      final updates = <String, dynamic>{
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+      if (username != null) updates['username'] = username;
+      if (displayName != null) updates['display_name'] = displayName;
+      if (bio != null) updates['bio'] = bio;
+      if (photoUrl != null) updates['avatar_url'] = photoUrl;
+
+      await _firestore.collection('users').doc(userId).set(
+        updates,
+        SetOptions(merge: true),
+      );
+
+      if (username != null) _userName = username;
+      if (displayName != null) _displayName = displayName;
+      if (bio != null) _userBio = bio;
+      if (photoUrl != null) _userPhotoUrl = photoUrl;
+
+      final prefs = await SharedPreferences.getInstance();
+      if (username != null) await prefs.setString('mock_username', username);
+      if (displayName != null) await prefs.setString('mock_display_name', displayName);
+      if (bio != null) await prefs.setString('mock_bio', bio);
+      if (photoUrl != null) await prefs.setString('mock_avatar', photoUrl);
+
+      notifyListeners();
+      _setLoading(false);
+      return true;
+    } catch (e) {
+      _error = 'Update failed: $e';
       _setLoading(false);
       return false;
     }
-
-    final updates = <String, dynamic>{
-      'updated_at': DateTime.now().toIso8601String(),
-    };
-    if (username != null) updates['username'] = username;
-    if (displayName != null) updates['display_name'] = displayName;
-    if (bio != null) updates['bio'] = bio;
-    if (photoUrl != null) updates['avatar_url'] = photoUrl;
-
-    // ✅ FIX: Use .set() with merge instead of .update()
-    await _firestore.collection('users').doc(userId).set(
-      updates,
-      SetOptions(merge: true),
-    );
-
-    if (username != null) _userName = username;
-    if (displayName != null) _displayName = displayName;
-    if (bio != null) _userBio = bio;
-    if (photoUrl != null) _userPhotoUrl = photoUrl;
-
-    final prefs = await SharedPreferences.getInstance();
-    if (username != null) await prefs.setString('mock_username', username);
-    if (displayName != null) await prefs.setString('mock_display_name', displayName);
-    if (bio != null) await prefs.setString('mock_bio', bio);
-    if (photoUrl != null) await prefs.setString('mock_avatar', photoUrl);
-
-    notifyListeners();
-    _setLoading(false);
-    return true;
-  } catch (e) {
-    _error = 'Update failed: $e';
-    _setLoading(false);
-    return false;
   }
-}
 
+  /// ==================== CHANGE NUMBER ====================
+  Future<bool> changePhoneNumber(String newPhone) async {
+    _setLoading(true);
+    try {
+      final userId = _user?.uid ?? _mockUserId;
+      if (userId == null) {
+        _error = 'Not authenticated';
+        _setLoading(false);
+        return false;
+      }
+
+      // Check if new phone is already taken
+      final existing = await checkPhoneExists(newPhone);
+      if (existing != null) {
+        _error = 'Phone number already in use';
+        _setLoading(false);
+        return false;
+      }
+
+      // Update in Firestore
+      await _firestore.collection('users').doc(userId).update({
+        'phone': newPhone,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+
+      _phoneNumber = newPhone;
+
+      // Update local prefs
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('mock_phone', newPhone);
+
+      notifyListeners();
+      _setLoading(false);
+      return true;
+    } catch (e) {
+      _error = 'Change number failed: $e';
+      _setLoading(false);
+      return false;
+    }
+  }
+
+  /// ==================== CHANGE EMAIL ====================
+  Future<bool> changeEmail(String newEmail) async {
+    _setLoading(true);
+    try {
+      final userId = _user?.uid ?? _mockUserId;
+      if (userId == null) {
+        _error = 'Not authenticated';
+        _setLoading(false);
+        return false;
+      }
+
+      // Update in Firestore
+      await _firestore.collection('users').doc(userId).update({
+        'email': newEmail,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+
+      _email = newEmail;
+
+      // Update local prefs
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('mock_email', newEmail);
+
+      notifyListeners();
+      _setLoading(false);
+      return true;
+    } catch (e) {
+      _error = 'Change email failed: $e';
+      _setLoading(false);
+      return false;
+    }
+  }
+
+  /// ==================== SIGN OUT ====================
   Future<void> signOut() async {
     _setLoading(true);
     try {
