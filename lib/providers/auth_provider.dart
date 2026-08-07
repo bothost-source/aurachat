@@ -293,50 +293,54 @@ class AuraAuthProvider extends ChangeNotifier {
   }
 
   Future<bool> updateProfile({
-    String? username,
-    String? displayName,
-    String? bio,
-    String? photoUrl,
-  }) async {
-    _setLoading(true);
-    try {
-      final userId = _user?.uid ?? _mockUserId;
-      if (userId == null) {
-        _error = 'Not authenticated';
-        _setLoading(false);
-        return false;
-      }
-
-      final updates = <String, dynamic>{
-        'updated_at': DateTime.now().toIso8601String(),
-      };
-      if (username != null) updates['username'] = username;
-      if (displayName != null) updates['display_name'] = displayName;
-      if (bio != null) updates['bio'] = bio;
-      if (photoUrl != null) updates['avatar_url'] = photoUrl;
-
-      await _firestore.collection('users').doc(userId).update(updates);
-
-      if (username != null) _userName = username;
-      if (displayName != null) _displayName = displayName;
-      if (bio != null) _userBio = bio;
-      if (photoUrl != null) _userPhotoUrl = photoUrl;
-
-      final prefs = await SharedPreferences.getInstance();
-      if (username != null) await prefs.setString('mock_username', username);
-      if (displayName != null) await prefs.setString('mock_display_name', displayName);
-      if (bio != null) await prefs.setString('mock_bio', bio);
-      if (photoUrl != null) await prefs.setString('mock_avatar', photoUrl);
-
-      notifyListeners();
-      _setLoading(false);
-      return true;
-    } catch (e) {
-      _error = 'Update failed: $e';
+  String? username,
+  String? displayName,
+  String? bio,
+  String? photoUrl,
+}) async {
+  _setLoading(true);
+  try {
+    final userId = _user?.uid ?? _mockUserId;
+    if (userId == null) {
+      _error = 'Not authenticated';
       _setLoading(false);
       return false;
     }
+
+    final updates = <String, dynamic>{
+      'updated_at': DateTime.now().toIso8601String(),
+    };
+    if (username != null) updates['username'] = username;
+    if (displayName != null) updates['display_name'] = displayName;
+    if (bio != null) updates['bio'] = bio;
+    if (photoUrl != null) updates['avatar_url'] = photoUrl;
+
+    // ✅ FIX: Use .set() with merge instead of .update()
+    await _firestore.collection('users').doc(userId).set(
+      updates,
+      SetOptions(merge: true),
+    );
+
+    if (username != null) _userName = username;
+    if (displayName != null) _displayName = displayName;
+    if (bio != null) _userBio = bio;
+    if (photoUrl != null) _userPhotoUrl = photoUrl;
+
+    final prefs = await SharedPreferences.getInstance();
+    if (username != null) await prefs.setString('mock_username', username);
+    if (displayName != null) await prefs.setString('mock_display_name', displayName);
+    if (bio != null) await prefs.setString('mock_bio', bio);
+    if (photoUrl != null) await prefs.setString('mock_avatar', photoUrl);
+
+    notifyListeners();
+    _setLoading(false);
+    return true;
+  } catch (e) {
+    _error = 'Update failed: $e';
+    _setLoading(false);
+    return false;
   }
+}
 
   Future<void> signOut() async {
     _setLoading(true);
