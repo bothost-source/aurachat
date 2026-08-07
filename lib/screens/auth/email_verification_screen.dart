@@ -39,37 +39,47 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
   }
 
   Future<void> _sendCode() async {
-    final email = _emailController.text.trim();
-    if (email.isEmpty || !email.contains('@')) {
-      setState(() => _error = 'Enter a valid email');
-      return;
-    }
-
-    setState(() { _isLoading = true; _error = null; });
-
-    try {
-      final response = await http.post(
-        Uri.parse('${widget.backendUrl}/api/auth/send-email-verification'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'email': email, 'userId': widget.userId}),
-      );
-
-      if (response.statusCode == 200) {
-        setState(() {
-          _codeSent = true;
-          _resendTimer = 60;
-        });
-        _startResendTimer();
-      } else {
-        final data = jsonDecode(response.body);
-        setState(() => _error = data['error'] ?? 'Failed to send code');
-      }
-    } catch (e) {
-      setState(() => _error = 'Network error: $e');
-    } finally {
-      setState(() => _isLoading = false);
-    }
+  final email = _emailController.text.trim();
+  if (email.isEmpty || !email.contains('@')) {
+    setState(() => _error = 'Enter a valid email');
+    return;
   }
+
+  setState(() { _isLoading = true; _error = null; });
+
+  try {
+    print('📱 Sending to: ${widget.backendUrl}/api/auth/send-email-verification');
+    print('📱 Body: ${jsonEncode({'email': email, 'userId': widget.userId})}');
+
+    final response = await http.post(
+      Uri.parse('${widget.backendUrl}/api/auth/send-email-verification'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'email': email, 'userId': widget.userId}),
+    );
+
+    print('📱 Response status: ${response.statusCode}');
+    print('📱 Response body: ${response.body}');
+
+    final data = jsonDecode(response.body);
+
+    if (response.statusCode == 200) {
+      setState(() {
+        _codeSent = true;
+        _resendTimer = 60;
+      });
+      _startResendTimer();
+    } else {
+      // Show the FULL error from backend
+      final backendError = data['details'] ?? data['error'] ?? 'Unknown error';
+      setState(() => _error = 'Backend: $backendError');
+    }
+  } catch (e) {
+    print('📱 Network error: $e');
+    setState(() => _error = 'Network error: $e');
+  } finally {
+    setState(() => _isLoading = false);
+  }
+}
 
   void _onCodeChanged(int index, String value) {
     if (value.length == 1 && index < 5) {
