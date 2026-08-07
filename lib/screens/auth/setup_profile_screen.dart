@@ -182,14 +182,15 @@ Future<String?> _uploadProfileImage(String userId) async {
       throw Exception('Failed to upload image');
     }
     
-    // Save URL to Firestore
+    // ✅ FIX: Use .set() with merge instead of .update()
+    // This creates the document if it doesn't exist
     await FirebaseFirestore.instance
         .collection('users')
         .doc(userId)
-        .update({
+        .set({
           'avatar_url': imageUrl,
           'updated_at': FieldValue.serverTimestamp(),
-        });
+        }, SetOptions(merge: true));
     
     return imageUrl;
   } catch (e) {
