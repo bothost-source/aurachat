@@ -66,7 +66,7 @@ jobs:
 
       - name: Fix minSdkVersion and enable code shrinking
         run: |
-          sed -i 's/flutter.minSdkVersion/24/g' android/app/build.gradle
+          sed -i 's/flutter.minSdkVersion/23/g' android/app/build.gradle
           # Enable code shrinking for smaller APK
           sed -i 's/buildTypes {/buildTypes {\n        release {\n            minifyEnabled true\n            shrinkResources true\n        }/' android/app/build.gradle
 
