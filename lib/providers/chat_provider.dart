@@ -26,6 +26,9 @@ class ChatProvider extends ChangeNotifier {
     _init();
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // NEW: Initialize with optional mock user ID
+  // ═══════════════════════════════════════════════════════════════════════════
   Future<void> _init() async {
     _currentUserId = _auth.currentUser?.uid;
     if (_currentUserId != null) {
@@ -34,6 +37,21 @@ class ChatProvider extends ChangeNotifier {
       _subscribeToChats();
     }
   }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // NEW: Set mock user ID from AuraAuthProvider
+  // Call this when using mock OTP
+  // ═══════════════════════════════════════════════════════════════════════════
+  Future<void> setMockUser(String mockUserId) async {
+    _currentUserId = mockUserId;
+    await _loadBlockedUsers();
+    await loadChats();
+    _subscribeToChats();
+    notifyListeners();
+  }
+
+  /// Get current user ID (real or mock)
+  String? get currentUserId => _currentUserId;
 
   /// Load blocked users list
   Future<void> _loadBlockedUsers() async {
@@ -55,9 +73,9 @@ class ChatProvider extends ChangeNotifier {
   Future<void> blockUser(String userId) async {
     if (_currentUserId == null) return;
     try {
-      await _firestore.collection('users').doc(_currentUserId).update({
+      await _firestore.collection('users').doc(_currentUserId).set({
         'blocked_users': FieldValue.arrayUnion([userId]),
-      });
+      }, SetOptions(merge: true));
       _blockedUsers.add(userId);
       notifyListeners();
     } catch (e) {
@@ -70,9 +88,9 @@ class ChatProvider extends ChangeNotifier {
   Future<void> unblockUser(String userId) async {
     if (_currentUserId == null) return;
     try {
-      await _firestore.collection('users').doc(_currentUserId).update({
+      await _firestore.collection('users').doc(_currentUserId).set({
         'blocked_users': FieldValue.arrayRemove([userId]),
-      });
+      }, SetOptions(merge: true));
       _blockedUsers.remove(userId);
       notifyListeners();
     } catch (e) {
@@ -86,7 +104,10 @@ class ChatProvider extends ChangeNotifier {
     _error = null;
 
     try {
-      final userId = _auth.currentUser?.uid;
+      // ═══════════════════════════════════════════════════════════════════════
+      // FIX: Use _currentUserId instead of _auth.currentUser?.uid
+      // ═══════════════════════════════════════════════════════════════════════
+      final userId = _currentUserId;
       if (userId == null) {
         _setLoading(false);
         return;
@@ -158,9 +179,13 @@ class ChatProvider extends ChangeNotifier {
   }
 
   void _subscribeToChats() {
-    final userId = _auth.currentUser?.uid;
+    // ═══════════════════════════════════════════════════════════════════════
+    // FIX: Use _currentUserId instead of _auth.currentUser?.uid
+    // ═══════════════════════════════════════════════════════════════════════
+    final userId = _currentUserId;
     if (userId == null) return;
 
+    _chatsSubscription?.cancel();
     _chatsSubscription = _firestore
         .collection('chats')
         .where('participants', arrayContains: userId)
@@ -174,7 +199,10 @@ class ChatProvider extends ChangeNotifier {
     _setLoading(true);
 
     try {
-      final userId = _auth.currentUser?.uid;
+      // ═══════════════════════════════════════════════════════════════════════
+      // FIX: Use _currentUserId
+      // ═══════════════════════════════════════════════════════════════════════
+      final userId = _currentUserId;
       if (userId == null) {
         _setLoading(false);
         return;
@@ -197,7 +225,10 @@ class ChatProvider extends ChangeNotifier {
 
   Future<Map<String, dynamic>?> startDirectChat(String otherUserId) async {
     try {
-      final userId = _auth.currentUser?.uid;
+      // ═══════════════════════════════════════════════════════════════════════
+      // FIX: Use _currentUserId
+      // ═══════════════════════════════════════════════════════════════════════
+      final userId = _currentUserId;
       if (userId == null) return null;
 
       // Check if blocked
@@ -235,7 +266,10 @@ class ChatProvider extends ChangeNotifier {
 
   Future<void> markMessagesAsRead(String chatId) async {
     try {
-      final userId = _auth.currentUser?.uid;
+      // ═══════════════════════════════════════════════════════════════════════
+      // FIX: Use _currentUserId
+      // ═══════════════════════════════════════════════════════════════════════
+      final userId = _currentUserId;
       if (userId == null) return;
 
       final unreadSnapshot = await _firestore
@@ -264,7 +298,10 @@ class ChatProvider extends ChangeNotifier {
 
   Future<void> deleteChat(String chatId) async {
     try {
-      final userId = _auth.currentUser?.uid;
+      // ═══════════════════════════════════════════════════════════════════════
+      // FIX: Use _currentUserId
+      // ═══════════════════════════════════════════════════════════════════════
+      final userId = _currentUserId;
       if (userId == null) return;
 
       await _firestore
@@ -283,7 +320,7 @@ class ChatProvider extends ChangeNotifier {
 
   Future<void> archiveChat(String chatId) async {
     try {
-      final userId = _auth.currentUser?.uid;
+      final userId = _currentUserId;
       if (userId == null) return;
 
       await _firestore
@@ -301,7 +338,7 @@ class ChatProvider extends ChangeNotifier {
 
   Future<void> unarchiveChat(String chatId) async {
     try {
-      final userId = _auth.currentUser?.uid;
+      final userId = _currentUserId;
       if (userId == null) return;
 
       await _firestore
@@ -320,7 +357,7 @@ class ChatProvider extends ChangeNotifier {
   /// Leave a group or channel
   Future<void> leaveChat(String chatId) async {
     try {
-      final userId = _auth.currentUser?.uid;
+      final userId = _currentUserId;
       if (userId == null) return;
 
       final chatDoc = await _firestore.collection('chats').doc(chatId).get();
@@ -358,7 +395,7 @@ class ChatProvider extends ChangeNotifier {
   /// Kick a member (owner/admin only)
   Future<void> kickMember(String chatId, String memberId) async {
     try {
-      final userId = _auth.currentUser?.uid;
+      final userId = _currentUserId;
       if (userId == null) return;
 
       final chatDoc = await _firestore.collection('chats').doc(chatId).get();
@@ -410,7 +447,7 @@ class ChatProvider extends ChangeNotifier {
   /// Ban a member (owner/admin only)
   Future<void> banMember(String chatId, String memberId) async {
     try {
-      final userId = _auth.currentUser?.uid;
+      final userId = _currentUserId;
       if (userId == null) return;
 
       final chatDoc = await _firestore.collection('chats').doc(chatId).get();
@@ -458,7 +495,7 @@ class ChatProvider extends ChangeNotifier {
   /// Promote member to admin (owner only)
   Future<void> promoteToAdmin(String chatId, String memberId) async {
     try {
-      final userId = _auth.currentUser?.uid;
+      final userId = _currentUserId;
       if (userId == null) return;
 
       final chatDoc = await _firestore.collection('chats').doc(chatId).get();
@@ -496,7 +533,7 @@ class ChatProvider extends ChangeNotifier {
   /// Toggle group settings (owner/admin only)
   Future<void> toggleSetting(String chatId, String settingKey, bool value) async {
     try {
-      final userId = _auth.currentUser?.uid;
+      final userId = _currentUserId;
       if (userId == null) return;
 
       final chatDoc = await _firestore.collection('chats').doc(chatId).get();
