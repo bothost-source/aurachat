@@ -2,10 +2,12 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../services/online_status_service.dart';
 import '../../services/app_localizations.dart';
 import 'email_verification_screen.dart';
+import 'setup_profile_screen.dart';
 
 class OtpScreen extends StatefulWidget {
   final String phoneNumber;
@@ -33,6 +35,23 @@ class _OtpScreenState extends State<OtpScreen> {
   void initState() {
     super.initState();
     _startResendTimer();
+    _savePendingOtpState();
+  }
+
+  /// Save that we're in OTP flow so app reopen knows to stay here
+  Future<void> _savePendingOtpState() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('pending_otp_phone', widget.cleanPhoneNumber);
+    await prefs.setString('pending_otp_expected', widget.expectedOtp);
+    await prefs.setInt('pending_otp_timestamp', DateTime.now().millisecondsSinceEpoch);
+  }
+
+  /// Clear OTP state on success
+  Future<void> _clearPendingOtpState() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('pending_otp_phone');
+    await prefs.remove('pending_otp_expected');
+    await prefs.remove('pending_otp_timestamp');
   }
 
   void _startResendTimer() {
@@ -71,20 +90,54 @@ class _OtpScreenState extends State<OtpScreen> {
     if (enteredOtp == widget.expectedOtp) {
       final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
       authProvider.setMockPhone(widget.cleanPhoneNumber);
-      await authProvider.createMockUser();
 
-      await OnlineStatusService.setOnline();
-      if (mounted) {
-  Navigator.pushReplacement(
-    context,
-    MaterialPageRoute(
-      builder: (context) => EmailVerificationScreen(
-        userId: widget.cleanPhoneNumber,
-        backendUrl: 'https://aurachat-backend-5utu.onrender.com',
-      ),
-    ),
-  );
-}
+      // ==================== CHECK IF PHONE EXISTS ====================
+      final existingUser = await authProvider.checkPhoneExists(widget.cleanPhoneNumber);
+
+      if (existingUser != null) {
+        // EXISTING USER - login directly
+        final success = await authProvider.loginExistingUser(widget.cleanPhoneNumber);
+        if (success && mounted) {
+          await _clearPendingOtpState();
+          await OnlineStatusService.setOnline();
+
+          // Check if email exists - if yes, verify it. If no, collect it.
+          final existingEmail = existingUser['email'] as String?;
+          if (existingEmail != null && existingEmail.isNotEmpty) {
+            // Has email - go to email verification with auto-detected email
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(
+                builder: (context) => EmailVerificationScreen(
+                  userId: widget.cleanPhoneNumber,
+                  backendUrl: 'https://aurachat-backend-5utu.onrender.com',
+                  autoDetectedEmail: existingEmail,
+                  isLoginFlow: true,
+                ),
+              ),
+            );
+          } else {
+            // No email on file - go to setup (shouldn't happen for existing users)
+            Navigator.pushReplacementNamed(context, '/setup_profile');
+          }
+        }
+      } else {
+        // NEW USER - create mock user, then collect email
+        await authProvider.createMockUser();
+        await OnlineStatusService.setOnline();
+        if (mounted) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => EmailVerificationScreen(
+                userId: widget.cleanPhoneNumber,
+                backendUrl: 'https://aurachat-backend-5utu.onrender.com',
+                isLoginFlow: false,
+              ),
+            ),
+          );
+        }
+      }
     } else {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
