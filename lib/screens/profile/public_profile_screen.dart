@@ -256,10 +256,11 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
 
       if (isBlocked) {
         // Unblock
-        await userRef.update({
+        // ✅ FIX: Use .set() with merge instead of .update()
+        await userRef.set({
           'blocked_users': FieldValue.arrayRemove([targetUserId]),
           'updated_at': FieldValue.serverTimestamp(),
-        });
+        }, SetOptions(merge: true));
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Unblocked @$username')),
@@ -267,11 +268,12 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
         }
       } else {
         // Block — also remove from contacts if they were one
-        await userRef.update({
+        // ✅ FIX: Use .set() with merge instead of .update()
+        await userRef.set({
           'blocked_users': FieldValue.arrayUnion([targetUserId]),
           'contacts': FieldValue.arrayRemove([targetUserId]),
           'updated_at': FieldValue.serverTimestamp(),
-        });
+        }, SetOptions(merge: true));
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -300,20 +302,22 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
       final userRef = FirebaseFirestore.instance.collection('users').doc(currentUserId);
 
       if (isContact) {
-        await userRef.update({
+        // ✅ FIX: Use .set() with merge instead of .update()
+        await userRef.set({
           'contacts': FieldValue.arrayRemove([targetUserId]),
           'updated_at': FieldValue.serverTimestamp(),
-        });
+        }, SetOptions(merge: true));
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Contact removed')),
           );
         }
       } else {
-        await userRef.update({
+        // ✅ FIX: Use .set() with merge instead of .update()
+        await userRef.set({
           'contacts': FieldValue.arrayUnion([targetUserId]),
           'updated_at': FieldValue.serverTimestamp(),
-        });
+        }, SetOptions(merge: true));
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
