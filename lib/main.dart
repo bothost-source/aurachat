@@ -58,6 +58,9 @@ import 'services/connectivity.dart';
 import 'services/online_status_service.dart';
 import 'services/call_service.dart';
 import 'services/call_signaling_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'screens/auth/email_verification_screen.dart';
+
 
 // ============================================================================
 // BACKGROUND MESSAGE HANDLER — Must be top-level function
@@ -213,6 +216,122 @@ class ErrorApp extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+
+// ============================================================================
+// AUTH ROUTER — Handles app reopen state: pending OTP, pending email, 
+// authenticated user, or fresh start
+// ============================================================================
+class AuthRouter extends StatefulWidget {
+  const AuthRouter({super.key});
+
+  @override
+  State<AuthRouter> createState() => _AuthRouterState();
+}
+
+class _AuthRouterState extends State<AuthRouter> {
+  Widget? _targetScreen;
+  bool _isChecking = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkAuthState();
+  }
+
+  Future<void> _checkAuthState() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    // Check 1: Pending OTP (app closed during OTP flow)
+    final pendingOtpPhone = prefs.getString('pending_otp_phone');
+    final pendingOtpExpected = prefs.getString('pending_otp_expected');
+    final pendingOtpTimestamp = prefs.getInt('pending_otp_timestamp');
+
+    if (pendingOtpPhone != null && 
+        pendingOtpExpected != null && 
+        pendingOtpTimestamp != null) {
+      // Check if OTP is still valid (10 minute expiry)
+      final otpAge = DateTime.now().millisecondsSinceEpoch - pendingOtpTimestamp;
+      if (otpAge < 10 * 60 * 1000) { // 10 minutes
+        setState(() {
+          _targetScreen = OtpScreen(
+            phoneNumber: pendingOtpPhone,
+            expectedOtp: pendingOtpExpected,
+            cleanPhoneNumber: pendingOtpPhone,
+          );
+          _isChecking = false;
+        });
+        return;
+      } else {
+        // OTP expired - clear state
+        await prefs.remove('pending_otp_phone');
+        await prefs.remove('pending_otp_expected');
+        await prefs.remove('pending_otp_timestamp');
+      }
+    }
+
+    // Check 2: Pending email verification (app closed during email flow)
+    final pendingEmailUserId = prefs.getString('pending_email_user_id');
+    final pendingEmailVerification = prefs.getBool('pending_email_verification') ?? false;
+    final pendingEmailTimestamp = prefs.getInt('pending_email_timestamp');
+
+    if (pendingEmailUserId != null && 
+        pendingEmailVerification && 
+        pendingEmailTimestamp != null) {
+      // Check if email verification is still valid (30 minute expiry)
+      final emailAge = DateTime.now().millisecondsSinceEpoch - pendingEmailTimestamp;
+      if (emailAge < 30 * 60 * 1000) { // 30 minutes
+        setState(() {
+          _targetScreen = EmailVerificationScreen(
+            userId: pendingEmailUserId,
+            backendUrl: 'https://aurachat-backend-5utu.onrender.com',
+            isLoginFlow: true,
+          );
+          _isChecking = false;
+        });
+        return;
+      } else {
+        // Email verification expired - clear state
+        await prefs.remove('pending_email_user_id');
+        await prefs.remove('pending_email_verification');
+        await prefs.remove('pending_email_timestamp');
+      }
+    }
+
+    // Check 3: Authenticated user (real Firebase or mock)
+    final currentUser = FirebaseAuth.instance.currentUser;
+    final mockUserId = prefs.getString('mock_user_id');
+
+    if (currentUser != null || mockUserId != null) {
+      setState(() {
+        _targetScreen = const MainAppScreen();
+        _isChecking = false;
+      });
+      return;
+    }
+
+    // Check 4: Fresh start - show splash/onboarding
+    setState(() {
+      _targetScreen = const SplashScreen();
+      _isChecking = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isChecking) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF0A0A0F),
+        body: Center(
+          child: CircularProgressIndicator(
+            color: Color(0xFF8B5CF6),
+          ),
+        ),
+      );
+    }
+    return _targetScreen!;
   }
 }
 
@@ -455,7 +574,7 @@ class _AuraChatAppState extends State<AuraChatApp>
               return child!;
             },
             routes: {
-              '/': (context) => const SplashScreen(),
+              '/': (context) => const AuthRouter(),
               '/terms': (context) => const TermsScreen(),
               '/login': (context) => const LoginScreen(),
               '/setup_profile': (context) => const SetupProfileScreen(),
