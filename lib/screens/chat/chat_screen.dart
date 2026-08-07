@@ -17,7 +17,7 @@ import 'package:photo_view/photo_view.dart';
 import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:video_player/video_player.dart';
-import 'package:flutter_sound/flutter_sound.dart';
+import 'package:flutter_audio_recorder2/flutter_audio_recorder2.dart';
 import 'package:http/http.dart' as http;
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../providers/chat_provider.dart';
@@ -51,7 +51,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
   final _scrollController = ScrollController();
 
   final AudioPlayer _audioPlayer = AudioPlayer();
-  final FlutterSoundRecorder _audioRecorder = FlutterSoundRecorder();
+  FlutterAudioRecorder2? _audioRecorder;
 
   bool _showEmojiPicker = false;
   bool _isPlayingAudio = false;
@@ -184,7 +184,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     _searchController.dispose();
     _scrollController.dispose();
     _audioPlayer.dispose();
-    _audioRecorder.closeRecorder();
+    // recorder cleaned up automatically
     _messageSubscription?.cancel();
     _blockSubscription?.cancel();
     _otherUserSubscription?.cancel();
@@ -1487,8 +1487,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
 
   Future<void> _startRecording() async {
     try {
-      final status = await Permission.microphone.request();
-      if (status != PermissionStatus.granted) {
+      final micStatus = await Permission.microphone.request();
+      final storageStatus = await Permission.storage.request();
+      if (micStatus != PermissionStatus.granted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Microphone permission required')),
         );
@@ -1496,17 +1497,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
       }
 
       final dir = await getTemporaryDirectory();
-      final path = '${dir.path}/voice_note_${DateTime.now().millisecondsSinceEpoch}.aac';
+      final path = '${dir.path}/voice_note_${DateTime.now().millisecondsSinceEpoch}';
 
-      await _audioRecorder.openRecorder();
-      await _audioRecorder.startRecorder(
-        toFile: path,
-        codec: Codec.aacADTS,
-      );
+      _audioRecorder = FlutterAudioRecorder2(path, audioFormat: AudioFormat.AAC);
+      await _audioRecorder!.initialized;
+      await _audioRecorder!.start();
 
       setState(() {
         _isRecording = true;
-        _recordingPath = path;
+        _recordingPath = '$path.aac';
         _recordingStartTime = DateTime.now();
         _recordingSeconds = 0;
       });
@@ -1523,7 +1522,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     try {
       _recordingTimer?.cancel();
       final path = await _audioRecorder.stopRecorder();
-      await _audioRecorder.closeRecorder();
+      await // recorder cleaned up automatically
       setState(() => _isRecording = false);
 
       if (path != null) {
@@ -1546,7 +1545,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     try {
       _recordingTimer?.cancel();
       await _audioRecorder.stopRecorder();
-      await _audioRecorder.closeRecorder();
+      await // recorder cleaned up automatically
       if (_recordingPath != null) {
         final file = File(_recordingPath!);
         if (await file.exists()) await file.delete();
