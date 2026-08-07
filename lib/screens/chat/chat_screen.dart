@@ -17,7 +17,7 @@ import 'package:photo_view/photo_view.dart';
 import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:video_player/video_player.dart';
-import 'package:record/record.dart';
+import 'package:flutter_sound/flutter_sound.dart';
 import 'package:http/http.dart' as http;
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../providers/chat_provider.dart';
@@ -51,7 +51,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
   final _scrollController = ScrollController();
 
   final AudioPlayer _audioPlayer = AudioPlayer();
-  final AudioRecorder _audioRecorder = AudioRecorder();
+  final FlutterSoundRecorder _audioRecorder = FlutterSoundRecorder();
 
   bool _showEmojiPicker = false;
   bool _isPlayingAudio = false;
@@ -184,7 +184,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     _searchController.dispose();
     _scrollController.dispose();
     _audioPlayer.dispose();
-    _audioRecorder.dispose();
+    _audioRecorder.closeRecorder();
     _messageSubscription?.cancel();
     _blockSubscription?.cancel();
     _otherUserSubscription?.cancel();
@@ -1496,11 +1496,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
       }
 
       final dir = await getTemporaryDirectory();
-      final path = '${dir.path}/voice_note_${DateTime.now().millisecondsSinceEpoch}.m4a';
+      final path = '${dir.path}/voice_note_${DateTime.now().millisecondsSinceEpoch}.aac';
 
-      await _audioRecorder.start(
-        const RecordConfig(encoder: AudioEncoder.aacLc, bitRate: 128000, sampleRate: 44100),
-        path: path,
+      await _audioRecorder.openRecorder();
+      await _audioRecorder.startRecorder(
+        toFile: path,
+        codec: Codec.aacADTS,
       );
 
       setState(() {
@@ -1521,7 +1522,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
   Future<void> _stopRecordingAndSend() async {
     try {
       _recordingTimer?.cancel();
-      final path = await _audioRecorder.stop();
+      final path = await _audioRecorder.stopRecorder();
+      await _audioRecorder.closeRecorder();
       setState(() => _isRecording = false);
 
       if (path != null) {
@@ -1543,7 +1545,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
   Future<void> _cancelRecording() async {
     try {
       _recordingTimer?.cancel();
-      await _audioRecorder.stop();
+      await _audioRecorder.stopRecorder();
+      await _audioRecorder.closeRecorder();
       if (_recordingPath != null) {
         final file = File(_recordingPath!);
         if (await file.exists()) await file.delete();
