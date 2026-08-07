@@ -27,8 +27,19 @@ class _MainAppScreenState extends State<MainAppScreen>
       setState(() => _currentIndex = _tabController.index);
     });
     
+    // ═══════════════════════════════════════════════════════════════════════
+    // FIX: Tell ChatProvider about mock users
+    // ═══════════════════════════════════════════════════════════════════════
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      Provider.of<ChatProvider>(context, listen: false).loadChats();
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+      final chatProvider = Provider.of<ChatProvider>(context, listen: false);
+      
+      // If using mock user, tell ChatProvider about it
+      if (authProvider.mockUserId != null) {
+        chatProvider.setMockUser(authProvider.mockUserId!);
+      } else {
+        chatProvider.loadChats();
+      }
     });
   }
 
