@@ -1,18 +1,22 @@
 const express = require('express');
 const router = express.Router();
-const { Resend } = require('resend');
+const sgMail = require('@sendgrid/mail');
 
 // ═══════════════════════════════════════════════════════════════════════════
-// INIT RESEND WITH FULL DIAGNOSTICS
+// INIT SENDGRID WITH FULL DIAGNOSTICS
 // ═══════════════════════════════════════════════════════════════════════════
 console.log('📧 [EmailVerification] Loading email verification routes...');
 
-const apiKey = process.env.RESEND_API_KEY;
-console.log('📧 [EmailVerification] RESEND_API_KEY present?', !!apiKey);
-console.log('📧 [EmailVerification] RESEND_API_KEY length:', apiKey ? apiKey.length : 0);
-console.log('📧 [EmailVerification] EMAIL_FROM:', process.env.EMAIL_FROM || '(not set, using default)');
+const apiKey = process.env.SENDGRID_API_KEY;
+console.log('📧 [EmailVerification] SENDGRID_API_KEY present?', !!apiKey);
+console.log('📧 [EmailVerification] SENDGRID_API_KEY length:', apiKey ? apiKey.length : 0);
+console.log('📧 [EmailVerification] EMAIL_FROM:', process.env.EMAIL_FROM || '(not set)');
 
-const resend = new Resend(apiKey);
+if (!apiKey) {
+  console.error('❌ [EmailVerification] SENDGRID_API_KEY is missing! Emails will fail.');
+}
+
+sgMail.setApiKey(apiKey || '');
 
 const verificationCodes = new Map();
 
@@ -50,55 +54,74 @@ router.post('/send-email-verification', async (req, res) => {
     });
     console.log(`📤 [send-email-verification] Code stored. Total stored: ${verificationCodes.size}`);
 
-    // ── Send via Resend ────────────────────────────────────────────────────
-    const fromEmail = process.env.EMAIL_FROM || 'onboarding@resend.dev';
-    console.log(`📤 [send-email-verification] Sending from: ${fromEmail}`);
+    // ── Send via SendGrid ──────────────────────────────────────────────────
+    const fromEmail = process.env.EMAIL_FROM;
 
-    const { data, error } = await resend.emails.send({
-      from: `AURA CHAT <${fromEmail}>`,
+    if (!fromEmail) {
+      console.error('❌ [send-email-verification] EMAIL_FROM not set!');
+      return res.status(500).json({ 
+        error: 'Server misconfigured: EMAIL_FROM not set' 
+      });
+    }
+
+    const msg = {
       to: email,
+      from: fromEmail,
       subject: 'AURA CHAT - Email Verification',
       html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #8B5CF6;">AURA CHAT</h2>
-          <p>Your verification code is:</p>
-          <h1 style="font-size: 48px; letter-spacing: 8px; color: #06B6D4;">${code}</h1>
-          <p>This code expires in 15 minutes.</p>
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <div style="text-align: center; margin-bottom: 30px;">
+            <h2 style="color: #8B5CF6; font-size: 28px; margin: 0;">AURA CHAT</h2>
+            <p style="color: #666; margin-top: 8px;">Secure Messaging</p>
+          </div>
+          
+          <div style="background: #f8f9fa; border-radius: 12px; padding: 30px; text-align: center;">
+            <p style="color: #333; font-size: 16px; margin-bottom: 20px;">Your verification code is:</p>
+            <h1 style="font-size: 52px; letter-spacing: 12px; color: #06B6D4; margin: 20px 0; font-family: monospace;">${code}</h1>
+            <p style="color: #666; font-size: 14px;">This code expires in 15 minutes.</p>
+          </div>
+          
+          <p style="color: #999; font-size: 12px; text-align: center; margin-top: 30px;">
+            If you didn't request this code, you can safely ignore this email.
+          </p>
         </div>
-      `
-    });
+      `,
+      text: `AURA CHAT - Your verification code is: ${code}. This code expires in 15 minutes.`,
+    };
 
-    // ── Log EXACT Resend response ──────────────────────────────────────────
-    console.log('📤 [send-email-verification] Resend response data:', JSON.stringify(data, null, 2));
-    console.log('📤 [send-email-verification] Resend response error:', JSON.stringify(error, null, 2));
+    console.log(`📤 [send-email-verification] Sending from: ${fromEmail} to: ${email}`);
 
-    if (error) {
-      console.error('❌ [send-email-verification] Resend ERROR:', error);
-      return res.status(500).json({ 
-        error: 'Failed to send email', 
-        details: error.message || error,
-        code: error.statusCode || 'unknown'
+    const [response] = await sgMail.send(msg);
+
+    console.log('📤 [send-email-verification] SendGrid response status:', response.statusCode);
+    console.log('📤 [send-email-verification] SendGrid headers:', JSON.stringify(response.headers, null, 2));
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      console.log(`✅ [send-email-verification] Email sent! MessageId: ${response.headers['x-message-id']}`);
+      res.json({ 
+        success: true, 
+        message: 'Verification code sent',
+        messageId: response.headers['x-message-id']
+      });
+    } else {
+      console.error('❌ [send-email-verification] Unexpected status:', response.statusCode);
+      res.status(500).json({ 
+        error: 'Email service returned unexpected status', 
+        status: response.statusCode 
       });
     }
-
-    if (!data || !data.id) {
-      console.error('❌ [send-email-verification] Resend returned empty data:', data);
-      return res.status(500).json({ 
-        error: 'Email service returned empty response',
-        details: data 
-      });
-    }
-
-    console.log(`✅ [send-email-verification] Email sent! ID: ${data.id}`);
-    res.json({ success: true, message: 'Verification code sent', emailId: data.id });
 
   } catch (error) {
     console.error('💥 [send-email-verification] UNEXPECTED ERROR:', error);
-    console.error('💥 [send-email-verification] Stack:', error.stack);
+    
+    if (error.response) {
+      console.error('💥 [send-email-verification] SendGrid error body:', JSON.stringify(error.response.body, null, 2));
+    }
+    
     res.status(500).json({ 
-      error: 'Server crashed while sending email', 
+      error: 'Failed to send email', 
       details: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      sendgridError: error.response ? error.response.body : null
     });
   }
 });
