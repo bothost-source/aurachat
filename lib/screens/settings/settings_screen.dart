@@ -248,12 +248,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final publicUrl = jsonData['secure_url'] as String;
       // ─────────────────────────────────────────────────────────────
 
-      // Save to Firestore
+           // Save to Firestore
+      // ✅ FIX: Use .set() with merge instead of .update()
       final firestore = FirebaseFirestore.instance;
-      await firestore.collection('users').doc(userId).update({
+      await firestore.collection('users').doc(userId).set({
         'avatar_url': publicUrl,
         'updated_at': FieldValue.serverTimestamp(),
-      });
+      }, SetOptions(merge: true));
 
       // Update local provider
       await authProvider.updateProfile(photoUrl: publicUrl);
