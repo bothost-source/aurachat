@@ -15,6 +15,10 @@ import 'package:just_audio/just_audio.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:intl/intl.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:video_player/video_player.dart';
+import 'package:record/record.dart';
+import 'package:http/http.dart' as http;
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../providers/chat_provider.dart';
 import '../../services/cloudinary_service.dart';
@@ -47,10 +51,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
   final _scrollController = ScrollController();
 
   final AudioPlayer _audioPlayer = AudioPlayer();
+  final AudioRecorder _audioRecorder = AudioRecorder();
 
   bool _showEmojiPicker = false;
   bool _isPlayingAudio = false;
   String? _currentlyPlayingAudioId;
+  Duration _audioDuration = Duration.zero;
+  Duration _audioPosition = Duration.zero;
   List<Map<String, dynamic>> _messages = [];
   StreamSubscription? _messageSubscription;
   StreamSubscription? _blockSubscription;
@@ -61,6 +68,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
   String? _replyingToContent;
   String? _replyingToSender;
   String? _editingMessageId;
+
+  // Voice note recording
+  bool _isRecording = false;
+  DateTime? _recordingStartTime;
+  Timer? _recordingTimer;
+  String? _recordingPath;
+  int _recordingSeconds = 0;
+
+  // Video players cache
+  final Map<String, VideoPlayerController> _videoControllers = {};
 
   // Search
   bool _isSearching = false;
@@ -98,6 +115,27 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _initAudioPlayer();
+  }
+
+  void _initAudioPlayer() {
+    _audioPlayer.durationStream.listen((d) {
+      if (mounted && d != null) setState(() => _audioDuration = d);
+    });
+    _audioPlayer.positionStream.listen((p) {
+      if (mounted) setState(() => _audioPosition = p);
+    });
+    _audioPlayer.playerStateStream.listen((state) {
+      if (mounted) {
+        setState(() => _isPlayingAudio = state.playing);
+        if (state.processingState == ProcessingState.completed) {
+          setState(() {
+            _currentlyPlayingAudioId = null;
+            _audioPosition = Duration.zero;
+          });
+        }
+      }
+    });
   }
 
   @override
@@ -146,12 +184,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     _searchController.dispose();
     _scrollController.dispose();
     _audioPlayer.dispose();
+    _audioRecorder.dispose();
     _messageSubscription?.cancel();
     _blockSubscription?.cancel();
     _otherUserSubscription?.cancel();
     _typingSubscription?.cancel();
     _typingTimer?.cancel();
     _statusTimer?.cancel();
+    _recordingTimer?.cancel();
+    for (final controller in _videoControllers.values) {
+      controller.dispose();
+    }
     _stopTyping();
     _setOfflineStatus();
     super.dispose();
@@ -630,6 +673,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     String? mediaUrl,
     String? fileName,
     String? fileSize,
+    int? duration,
   }) async {
     try {
       final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
@@ -650,6 +694,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
         'media_url': mediaUrl,
         'file_name': fileName,
         'file_size': fileSize,
+        'duration': duration,
         'reply_to': _replyingTo,
         'reply_to_content': _replyingToContent,
         'reply_to_sender': _replyingToSender,
@@ -752,7 +797,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     }
   }
 
-  /// Add/remove reaction
   Future<void> _toggleReaction(String messageId, String emoji) async {
     try {
       final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
@@ -789,7 +833,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     }
   }
 
-  /// Show reaction picker
   void _showReactionPicker(String messageId) {
     final reactions = ['❤️', '👍', '👎', '😂', '😮', '😢', '🎉', '🔥'];
 
@@ -840,7 +883,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     );
   }
 
-  /// Forward message
   void _forwardMessage(Map<String, dynamic> message) {
     Navigator.pushNamed(context, '/forward_message', arguments: {
       'message': message,
@@ -848,7 +890,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     });
   }
 
-  /// Copy message text
   void _copyMessage(String content) {
     Clipboard.setData(ClipboardData(text: content));
     ScaffoldMessenger.of(context).showSnackBar(
@@ -856,7 +897,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     );
   }
 
-  /// Pin message
   Future<void> _pinMessage(String messageId) async {
     try {
       await FirebaseFirestore.instance
@@ -880,7 +920,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     }
   }
 
-  /// Unpin message
   Future<void> _unpinMessage(String messageId) async {
     try {
       await FirebaseFirestore.instance
@@ -895,7 +934,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     }
   }
 
-  /// Search messages
   void _searchMessages(String query) {
     if (query.isEmpty) {
       setState(() {
@@ -1045,6 +1083,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     final isDeleted = message['deleted_for_everyone'] == true;
     final isText = message['type'] == 'text';
     final canEdit = isMe && isText && !isDeleted;
+    final type = message['type'] ?? 'text';
+    final mediaUrl = message['media_url'] as String?;
 
     showModalBottomSheet(
       context: context,
@@ -1062,7 +1102,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
               decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(2)),
             ),
             const SizedBox(height: 16),
-            // Quick reactions row
             if (!isDeleted) ...[
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
@@ -1136,6 +1175,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
                 onTap: () {
                   Navigator.pop(context);
                   _pinMessage(message['id']);
+                },
+              ),
+            ],
+            if (!isDeleted && mediaUrl != null && (type == 'image' || type == 'video' || type == 'audio')) ...[
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(color: const Color(0xFF06B6D4).withOpacity(0.2), shape: BoxShape.circle),
+                  child: const Icon(Icons.download, color: Color(0xFF06B6D4)),
+                ),
+                title: const Text('Download', style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _downloadMedia(mediaUrl, message['file_name'] ?? 'download');
                 },
               ),
             ],
@@ -1315,15 +1368,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     );
   }
 
+  // ==================== MEDIA PICKING & UPLOAD ====================
+
   Future<void> _pickImage() async {
-    if (!_canSendFiles) {
-      _showPermissionDenied();
-      return;
-    }
-    if (!_isGroup && _isBlocked) {
-      _showBlockedWarning();
-      return;
-    }
+    if (!_canSendFiles) { _showPermissionDenied(); return; }
+    if (!_isGroup && _isBlocked) { _showBlockedWarning(); return; }
     final picker = ImagePicker();
     final pickedFile = await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
     if (pickedFile != null) {
@@ -1332,14 +1381,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
   }
 
   Future<void> _takePhoto() async {
-    if (!_canSendFiles) {
-      _showPermissionDenied();
-      return;
-    }
-    if (!_isGroup && _isBlocked) {
-      _showBlockedWarning();
-      return;
-    }
+    if (!_canSendFiles) { _showPermissionDenied(); return; }
+    if (!_isGroup && _isBlocked) { _showBlockedWarning(); return; }
     final picker = ImagePicker();
     final pickedFile = await picker.pickImage(source: ImageSource.camera, imageQuality: 80);
     if (pickedFile != null) {
@@ -1347,15 +1390,43 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     }
   }
 
+  Future<void> _pickVideoFromGallery() async {
+    if (!_canSendFiles) { _showPermissionDenied(); return; }
+    if (!_isGroup && _isBlocked) { _showBlockedWarning(); return; }
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickVideo(source: ImageSource.gallery);
+    if (pickedFile != null) {
+      final file = File(pickedFile.path);
+      final size = await file.length();
+      await _uploadAndSendMedia(
+        file: file,
+        type: 'video',
+        fileName: pickedFile.name,
+        fileSize: _formatFileSize(size.toInt()),
+      );
+    }
+  }
+
+  Future<void> _recordVideo() async {
+    if (!_canSendFiles) { _showPermissionDenied(); return; }
+    if (!_isGroup && _isBlocked) { _showBlockedWarning(); return; }
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickVideo(source: ImageSource.camera);
+    if (pickedFile != null) {
+      final file = File(pickedFile.path);
+      final size = await file.length();
+      await _uploadAndSendMedia(
+        file: file,
+        type: 'video',
+        fileName: pickedFile.name,
+        fileSize: _formatFileSize(size.toInt()),
+      );
+    }
+  }
+
   Future<void> _pickFile() async {
-    if (!_canSendFiles) {
-      _showPermissionDenied();
-      return;
-    }
-    if (!_isGroup && _isBlocked) {
-      _showBlockedWarning();
-      return;
-    }
+    if (!_canSendFiles) { _showPermissionDenied(); return; }
+    if (!_isGroup && _isBlocked) { _showBlockedWarning(); return; }
     final result = await FilePicker.platform.pickFiles(allowMultiple: false, withData: true);
     if (result != null && result.files.isNotEmpty) {
       final file = result.files.first;
@@ -1375,6 +1446,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     required String type,
     String? fileName,
     String? fileSize,
+    int? duration,
   }) async {
     try {
       final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
@@ -1388,7 +1460,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
             SizedBox(width: 12),
             Text('Uploading...'),
           ]),
-          duration: Duration(seconds: 30),
+          duration: Duration(seconds: 60),
         ),
       );
 
@@ -1399,10 +1471,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
 
       await _sendMessage(
         type: type,
-        content: fileName ?? 'Image',
+        content: fileName ?? (type == 'image' ? 'Image' : type == 'video' ? 'Video' : type == 'audio' ? 'Voice Message' : 'File'),
         mediaUrl: mediaUrl,
         fileName: fileName,
         fileSize: fileSize,
+        duration: duration,
       );
     } catch (e) {
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
@@ -1410,25 +1483,112 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     }
   }
 
+  // ==================== VOICE NOTE RECORDING ====================
+
+  Future<void> _startRecording() async {
+    try {
+      final status = await Permission.microphone.request();
+      if (status != PermissionStatus.granted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Microphone permission required')),
+        );
+        return;
+      }
+
+      final dir = await getTemporaryDirectory();
+      final path = '${dir.path}/voice_note_${DateTime.now().millisecondsSinceEpoch}.m4a';
+
+      await _audioRecorder.start(
+        const RecordConfig(encoder: AudioEncoder.aacLc, bitRate: 128000, sampleRate: 44100),
+        path: path,
+      );
+
+      setState(() {
+        _isRecording = true;
+        _recordingPath = path;
+        _recordingStartTime = DateTime.now();
+        _recordingSeconds = 0;
+      });
+
+      _recordingTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (mounted) setState(() => _recordingSeconds++);
+      });
+    } catch (e) {
+      debugPrint('Start recording error: $e');
+    }
+  }
+
+  Future<void> _stopRecordingAndSend() async {
+    try {
+      _recordingTimer?.cancel();
+      final path = await _audioRecorder.stop();
+      setState(() => _isRecording = false);
+
+      if (path != null) {
+        final file = File(path);
+        final size = await file.length();
+        await _uploadAndSendMedia(
+          file: file,
+          type: 'audio',
+          fileName: 'Voice Message',
+          fileSize: _formatFileSize(size.toInt()),
+          duration: _recordingSeconds,
+        );
+      }
+    } catch (e) {
+      debugPrint('Stop recording error: $e');
+    }
+  }
+
+  Future<void> _cancelRecording() async {
+    try {
+      _recordingTimer?.cancel();
+      await _audioRecorder.stop();
+      if (_recordingPath != null) {
+        final file = File(_recordingPath!);
+        if (await file.exists()) await file.delete();
+      }
+      setState(() {
+        _isRecording = false;
+        _recordingPath = null;
+        _recordingSeconds = 0;
+      });
+    } catch (e) {
+      debugPrint('Cancel recording error: $e');
+    }
+  }
+
+  String _formatDuration(int seconds) {
+    final m = (seconds ~/ 60).toString().padLeft(2, '0');
+    final s = (seconds % 60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
+  // ==================== AUDIO PLAYBACK ====================
+
   Future<void> _playAudio(String messageId, String audioUrl) async {
     try {
       if (_currentlyPlayingAudioId == messageId) {
-        await _audioPlayer.stop();
-        setState(() { _isPlayingAudio = false; _currentlyPlayingAudioId = null; });
+        if (_isPlayingAudio) {
+          await _audioPlayer.pause();
+        } else {
+          await _audioPlayer.play();
+        }
       } else {
+        await _audioPlayer.stop();
         await _audioPlayer.setUrl(audioUrl);
         await _audioPlayer.play();
-        setState(() { _isPlayingAudio = true; _currentlyPlayingAudioId = messageId; });
-        _audioPlayer.playerStateStream.listen((state) {
-          if (state.processingState == ProcessingState.completed) {
-            setState(() { _isPlayingAudio = false; _currentlyPlayingAudioId = null; });
-          }
+        setState(() {
+          _currentlyPlayingAudioId = messageId;
+          _audioPosition = Duration.zero;
         });
       }
     } catch (e) {
       debugPrint('Play audio error: $e');
     }
   }
+
+  // ==================== FILE & DOWNLOAD ====================
 
   Future<void> _openFile(String url, String? fileName) async {
     try {
@@ -1446,6 +1606,44 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     }
   }
 
+  Future<void> _downloadMedia(String url, String fileName) async {
+    try {
+      final status = await Permission.storage.request();
+      if (status != PermissionStatus.granted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Storage permission required to download')),
+        );
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Downloading...')),
+      );
+
+      final response = await http.get(Uri.parse(url));
+      if (response.statusCode == 200) {
+        final dir = await getTemporaryDirectory();
+        final path = '${dir.path}/$fileName';
+        final file = File(path);
+        await file.writeAsBytes(response.bodyBytes);
+
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Downloaded')),
+        );
+      } else {
+        throw Exception('Failed to download');
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Download failed: $e')),
+      );
+    }
+  }
+
+  // ==================== IMAGE VIEWER ====================
+
   void _showImageViewer(String imageUrl) {
     showDialog(
       context: context,
@@ -1461,11 +1659,33 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
               maxScale: PhotoViewComputedScale.covered * 2,
             ),
             Positioned(
-              top: MediaQuery.of(context).padding.top + 8,
-              right: 8,
-              child: IconButton(
-                icon: const Icon(Icons.close, color: Colors.white),
-                onPressed: () => Navigator.pop(context),
+              top: MediaQuery.of(context).padding.top + 16,
+              left: 16,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.5),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: IconButton(
+                  icon: const Icon(Icons.download, color: Colors.white),
+                  onPressed: () {
+                    _downloadMedia(imageUrl, 'image_${DateTime.now().millisecondsSinceEpoch}.jpg');
+                  },
+                ),
+              ),
+            ),
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 16,
+              right: 16,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.5),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white),
+                  onPressed: () => Navigator.pop(context),
+                ),
               ),
             ),
           ],
@@ -1474,7 +1694,21 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     );
   }
 
-  /// Check if date separator should show
+  // ==================== VIDEO PLAYER ====================
+
+  VideoPlayerController _getVideoController(String url) {
+    if (!_videoControllers.containsKey(url)) {
+      final controller = VideoPlayerController.networkUrl(Uri.parse(url));
+      controller.initialize().then((_) {
+        if (mounted) setState(() {});
+      });
+      _videoControllers[url] = controller;
+    }
+    return _videoControllers[url]!;
+  }
+
+  // ==================== DATE HELPERS ====================
+
   bool _shouldShowDateSeparator(int index) {
     if (index == 0) return true;
     final currentDate = DateTime.parse(_messages[index]['created_at']);
@@ -1494,6 +1728,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     if (_isSameDay(date, yesterday)) return 'Yesterday';
     return DateFormat('MMMM d, yyyy').format(date);
   }
+
+  // ==================== BUILD ====================
 
   @override
   Widget build(BuildContext context) {
@@ -1559,43 +1795,27 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
                             if (_isBlocked)
                               Text(
                                 _iBlockedThem ? 'You blocked this user' : 'Blocked',
-                                style: TextStyle(
-                                  fontSize: 12, 
-                                  color: Colors.red.withOpacity(0.8),
-                                ),
+                                style: TextStyle(fontSize: 12, color: Colors.red.withOpacity(0.8)),
                               )
                             else if (_otherUserTyping)
                               const Text(
                                 'typing...',
-                                style: TextStyle(
-                                  fontSize: 12, 
-                                  color: Color(0xFF06B6D4),
-                                  fontStyle: FontStyle.italic,
-                                ),
+                                style: TextStyle(fontSize: 12, color: Color(0xFF06B6D4), fontStyle: FontStyle.italic),
                               )
                             else if (_otherUserStatus != null)
                               Text(
                                 _otherUserStatus!,
-                                style: TextStyle(
-                                  fontSize: 12, 
-                                  color: const Color(0xFF06B6D4).withOpacity(0.8),
-                                ),
+                                style: TextStyle(fontSize: 12, color: const Color(0xFF06B6D4).withOpacity(0.8)),
                               )
                             else
                               Text(
                                 'Online',
-                                style: TextStyle(
-                                  fontSize: 12, 
-                                  color: const Color(0xFF06B6D4).withOpacity(0.8),
-                                ),
+                                style: TextStyle(fontSize: 12, color: const Color(0xFF06B6D4).withOpacity(0.8)),
                               ),
                           ] else ...[
                             Text(
                               '$_myRole \u2022 Tap for info',
-                              style: TextStyle(
-                                fontSize: 12, 
-                                color: const Color(0xFF06B6D4).withOpacity(0.8),
-                              ),
+                              style: TextStyle(fontSize: 12, color: const Color(0xFF06B6D4).withOpacity(0.8)),
                             ),
                           ],
                         ],
@@ -1611,15 +1831,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
                 ),
                 IconButton(
                   icon: const Icon(Icons.videocam, color: Colors.white70), 
-                  onPressed: (_isBlocked && !_isGroup) 
-                    ? _showBlockedWarning 
-                    : () {}
+                  onPressed: (_isBlocked && !_isGroup) ? _showBlockedWarning : () {}
                 ),
                 IconButton(
                   icon: const Icon(Icons.call, color: Colors.white70), 
-                  onPressed: (_isBlocked && !_isGroup) 
-                    ? _showBlockedWarning 
-                    : () {}
+                  onPressed: (_isBlocked && !_isGroup) ? _showBlockedWarning : () {}
                 ),
                 if (_isGroup && _chatId != null)
                   IconButton(
@@ -1894,6 +2110,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
               ),
             ),
 
+          // Recording indicator
+          if (_isRecording)
+            _buildRecordingIndicator(),
+
           if (_showEmojiPicker)
             SizedBox(
               height: 250,
@@ -1973,22 +2193,43 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Container(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: (_isBlocked && !_isGroup) || !_canSend || _isAnnouncementsOnly
-                          ? [Colors.grey, Colors.grey]
-                          : [const Color(0xFF8B5CF6), const Color(0xFF06B6D4)],
+                  // Mic or Send button
+                  if (_messageController.text.trim().isEmpty && !_isRecording)
+                    GestureDetector(
+                      onLongPressStart: (_) => _startRecording(),
+                      onLongPressEnd: (_) => _stopRecordingAndSend(),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: (_isBlocked && !_isGroup) || !_canSend || _isAnnouncementsOnly
+                              ? [Colors.grey, Colors.grey]
+                              : [const Color(0xFF8B5CF6), const Color(0xFF06B6D4)],
+                          ),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: IconButton(
+                          icon: const Icon(Icons.mic, color: Colors.white, size: 20),
+                          onPressed: null,
+                        ),
                       ),
-                      borderRadius: BorderRadius.circular(20),
+                    )
+                  else if (!_isRecording)
+                    Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: (_isBlocked && !_isGroup) || !_canSend || _isAnnouncementsOnly || _messageController.text.trim().isEmpty
+                            ? [Colors.grey, Colors.grey]
+                            : [const Color(0xFF8B5CF6), const Color(0xFF06B6D4)],
+                        ),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: IconButton(
+                        icon: const Icon(Icons.send, color: Colors.white, size: 20),
+                        onPressed: (_canSend && !_isAnnouncementsOnly && _messageController.text.trim().isNotEmpty && !(_isBlocked && !_isGroup))
+                          ? _sendTextMessage
+                          : null,
+                      ),
                     ),
-                    child: IconButton(
-                      icon: const Icon(Icons.send, color: Colors.white, size: 20),
-                      onPressed: (_canSend && !_isAnnouncementsOnly && _messageController.text.trim().isNotEmpty && !(_isBlocked && !_isGroup))
-                        ? _sendTextMessage
-                        : null,
-                    ),
-                  ),
                 ],
               ),
             ),
@@ -2177,7 +2418,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        // Reply preview
                         if (message['reply_to'] != null)
                           GestureDetector(
                             onTap: () => _scrollToMessage(message['reply_to']),
@@ -2188,10 +2428,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
                                 color: Colors.black.withOpacity(0.2),
                                 borderRadius: BorderRadius.circular(8),
                                 border: Border(
-                                  left: BorderSide(
-                                    color: const Color(0xFF8B5CF6),
-                                    width: 3,
-                                  ),
+                                  left: BorderSide(color: const Color(0xFF8B5CF6), width: 3),
                                 ),
                               ),
                               child: Column(
@@ -2199,21 +2436,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
                                 children: [
                                   Text(
                                     message['reply_to_sender'] ?? 'Unknown',
-                                    style: const TextStyle(
-                                      color: Color(0xFF8B5CF6),
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                    ),
+                                    style: const TextStyle(color: Color(0xFF8B5CF6), fontSize: 11, fontWeight: FontWeight.w600),
                                   ),
                                   const SizedBox(height: 2),
                                   Text(
                                     message['reply_to_content'] ?? '',
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: isMe ? Colors.white70 : Colors.grey,
-                                    ),
+                                    style: TextStyle(fontSize: 12, color: isMe ? Colors.white70 : Colors.grey),
                                   ),
                                 ],
                               ),
@@ -2244,11 +2474,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
                         if (isDeleted)
                           Text(
                             'This message was deleted',
-                            style: TextStyle(
-                              color: Colors.white.withOpacity(0.4),
-                              fontSize: 14,
-                              fontStyle: FontStyle.italic,
-                            ),
+                            style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 14, fontStyle: FontStyle.italic),
                           )
                         else if (type == 'text')
                           Text(content, style: TextStyle(color: isMe ? Colors.white : Colors.white.withOpacity(0.9), fontSize: 15))
@@ -2271,7 +2497,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
                             ),
                           )
                         else if (type == 'audio' && mediaUrl != null)
-                          _buildAudioPlayer(messageId: message['id'], audioUrl: mediaUrl, isMe: isMe)
+                          _buildVoiceNoteBubble(
+                            messageId: message['id'],
+                            audioUrl: mediaUrl,
+                            duration: message['duration'] as int?,
+                            isMe: isMe,
+                          )
+                        else if (type == 'video' && mediaUrl != null)
+                          _buildVideoBubble(videoUrl: mediaUrl, isMe: isMe)
                         else if (type == 'file')
                           _buildFileMessage(content: content, mediaUrl: mediaUrl, fileName: message['file_name'], fileSize: message['file_size'], isMe: isMe),
 
@@ -2281,10 +2514,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
                           children: [
                             Text(
                               DateFormat('HH:mm').format(createdAt), 
-                              style: TextStyle(
-                                fontSize: 10, 
-                                color: isMe ? Colors.white.withOpacity(0.7) : Colors.white.withOpacity(0.4),
-                              ),
+                              style: TextStyle(fontSize: 10, color: isMe ? Colors.white.withOpacity(0.7) : Colors.white.withOpacity(0.4)),
                             ),
                             if (isEdited && !isDeleted) ...[
                               const SizedBox(width: 4),
@@ -2304,7 +2534,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
                     ),
                   ),
 
-                  // Reactions row
                   if (reactions.isNotEmpty)
                     Positioned(
                       bottom: -10,
@@ -2316,12 +2545,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
                           color: const Color(0xFF1a103c),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(color: Colors.white.withOpacity(0.1)),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.3),
-                              blurRadius: 4,
-                            ),
-                          ],
+                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 4)],
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -2330,10 +2554,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
                             final count = (entry.value as List).length;
                             return Padding(
                               padding: const EdgeInsets.symmetric(horizontal: 2),
-                              child: Text(
-                                '$emoji${count > 1 ? count : ''}',
-                                style: const TextStyle(fontSize: 12),
-                              ),
+                              child: Text('$emoji${count > 1 ? count : ''}', style: const TextStyle(fontSize: 12)),
                             );
                           }).toList(),
                         ),
@@ -2348,28 +2569,126 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     );
   }
 
-  Widget _buildAudioPlayer({required String messageId, required String audioUrl, required bool isMe}) {
-    final isPlaying = _currentlyPlayingAudioId == messageId && _isPlayingAudio;
+  Widget _buildVoiceNoteBubble({required String messageId, required String audioUrl, int? duration, required bool isMe}) {
+    final isCurrent = _currentlyPlayingAudioId == messageId;
+    final position = isCurrent ? _audioPosition : Duration.zero;
+    final totalDuration = isCurrent && _audioDuration != Duration.zero
+        ? _audioDuration
+        : Duration(seconds: duration ?? 0);
+    final progress = totalDuration.inMilliseconds > 0
+        ? position.inMilliseconds / totalDuration.inMilliseconds
+        : 0.0;
+
+    String fmt(Duration d) {
+      final m = d.inMinutes.toString().padLeft(2, '0');
+      final s = (d.inSeconds % 60).toString().padLeft(2, '0');
+      return '$m:$s';
+    }
+
     return Container(
-      width: 200,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      width: 240,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       child: Row(
         children: [
-          IconButton(
-            icon: Icon(isPlaying ? Icons.pause : Icons.play_arrow, color: isMe ? Colors.white : const Color(0xFF8B5CF6), size: 28),
-            onPressed: () => _playAudio(messageId, audioUrl),
-          ),
-          Expanded(
+          GestureDetector(
+            onTap: () => _playAudio(messageId, audioUrl),
             child: Container(
-              height: 30,
+              width: 40,
+              height: 40,
               decoration: BoxDecoration(
-                color: isMe ? Colors.white.withOpacity(0.2) : const Color(0xFF8B5CF6).withOpacity(0.2),
-                borderRadius: BorderRadius.circular(15),
+                color: isMe ? Colors.white.withOpacity(0.25) : const Color(0xFF8B5CF6).withOpacity(0.2),
+                shape: BoxShape.circle,
               ),
-              child: Center(child: Text('Voice Message', style: TextStyle(fontSize: 12, color: isMe ? Colors.white : Colors.white.withOpacity(0.8)))),
+              child: Icon(
+                isCurrent && _isPlayingAudio ? Icons.pause : Icons.play_arrow,
+                color: isMe ? Colors.white : const Color(0xFF8B5CF6),
+                size: 22,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  height: 28,
+                  alignment: Alignment.centerLeft,
+                  child: Stack(
+                    alignment: Alignment.centerLeft,
+                    children: [
+                      Container(
+                        height: 3,
+                        decoration: BoxDecoration(
+                          color: isMe ? Colors.white.withOpacity(0.2) : Colors.white.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                      FractionallySizedBox(
+                        widthFactor: progress.clamp(0.0, 1.0),
+                        child: Container(
+                          height: 3,
+                          decoration: BoxDecoration(
+                            color: isMe ? Colors.white : const Color(0xFF8B5CF6),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  isCurrent ? '${fmt(position)} / ${fmt(totalDuration)}' : fmt(totalDuration),
+                  style: TextStyle(fontSize: 11, color: isMe ? Colors.white.withOpacity(0.8) : Colors.white.withOpacity(0.5)),
+                ),
+              ],
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildVideoBubble({required String videoUrl, required bool isMe}) {
+    if (!_videoControllers.containsKey(videoUrl)) {
+      final controller = VideoPlayerController.networkUrl(Uri.parse(videoUrl));
+      controller.initialize().then((_) { if (mounted) setState(() {}); });
+      _videoControllers[videoUrl] = controller;
+    }
+    final controller = _videoControllers[videoUrl]!;
+    final isInitialized = controller.value.isInitialized;
+
+    return GestureDetector(
+      onTap: () {
+        if (isInitialized) {
+          setState(() {
+            controller.value.isPlaying ? controller.pause() : controller.play();
+          });
+        }
+      },
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          width: 240,
+          height: 180,
+          color: Colors.black,
+          child: isInitialized
+            ? Stack(
+                fit: StackFit.expand,
+                children: [
+                  VideoPlayer(controller),
+                  if (!controller.value.isPlaying)
+                    Container(
+                      color: Colors.black.withOpacity(0.4),
+                      child: const Icon(Icons.play_circle_fill, color: Colors.white, size: 50),
+                    ),
+                ],
+              )
+            : const Center(
+                child: SizedBox(width: 32, height: 32, child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation(Color(0xFF8B5CF6)))),
+              ),
+        ),
       ),
     );
   }
@@ -2406,6 +2725,65 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     );
   }
 
+  Widget _buildRecordingIndicator() {
+    String fmt(int s) {
+      final m = (s ~/ 60).toString().padLeft(2, '0');
+      final sec = (s % 60).toString().padLeft(2, '0');
+      return '$m:$sec';
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.red.withOpacity(0.15),
+        border: Border(top: BorderSide(color: Colors.red.withOpacity(0.3))),
+      ),
+      child: SafeArea(
+        child: Row(
+          children: [
+            Container(
+              width: 10, height: 10,
+              decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 12),
+            Text(
+              'Recording ${fmt(_recordingSeconds)}',
+              style: const TextStyle(color: Colors.red, fontWeight: FontWeight.w600),
+            ),
+            const Spacer(),
+            GestureDetector(
+              onTap: _cancelRecording,
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: Colors.red.withOpacity(0.2), shape: BoxShape.circle),
+                child: const Icon(Icons.delete, color: Colors.red, size: 20),
+              ),
+            ),
+            const SizedBox(width: 12),
+            GestureDetector(
+              onTap: _stopRecordingAndSend,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)]),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.send, color: Colors.white, size: 16),
+                    SizedBox(width: 4),
+                    Text('Send', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _showAttachmentMenu(BuildContext context) {
     showModalBottomSheet(
       context: context,
@@ -2418,13 +2796,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
           children: [
             Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(2))),
             const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            Wrap(
+              spacing: 16,
+              runSpacing: 16,
+              alignment: WrapAlignment.center,
               children: [
                 _buildAttachmentButton(icon: Icons.photo, label: 'Gallery', color: const Color(0xFF8B5CF6), onTap: () { Navigator.pop(context); _pickImage(); }),
                 _buildAttachmentButton(icon: Icons.camera_alt, label: 'Camera', color: const Color(0xFF06B6D4), onTap: () { Navigator.pop(context); _takePhoto(); }),
+                _buildAttachmentButton(icon: Icons.videocam, label: 'Video', color: Colors.purple, onTap: () { Navigator.pop(context); _pickVideoFromGallery(); }),
+                _buildAttachmentButton(icon: Icons.videocam_off, label: 'Record', color: Colors.pink, onTap: () { Navigator.pop(context); _recordVideo(); }),
                 _buildAttachmentButton(icon: Icons.insert_drive_file, label: 'Document', color: Colors.blue, onTap: () { Navigator.pop(context); _pickFile(); }),
-                _buildAttachmentButton(icon: Icons.location_on, label: 'Location', color: Colors.green, onTap: () { Navigator.pop(context); }),
               ],
             ),
           ],
