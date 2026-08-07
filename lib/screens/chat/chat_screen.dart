@@ -1521,7 +1521,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
   Future<void> _stopRecordingAndSend() async {
     try {
       _recordingTimer?.cancel();
-      final path = await _audioRecorder.stopRecorder();
+      final path = await _audioRecorder.stop();
       await _audioRecorder.dispose();
       setState(() => _isRecording = false);
 
@@ -1544,7 +1544,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
   Future<void> _cancelRecording() async {
     try {
       _recordingTimer?.cancel();
-      await _audioRecorder.stopRecorder();
+      await _audioRecorder.stop();
       await _audioRecorder.dispose();
       if (_recordingPath != null) {
         final file = File(_recordingPath!);
