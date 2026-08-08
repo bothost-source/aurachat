@@ -349,6 +349,14 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                   children: [
                     Expanded(
                       child: _buildActionButton(
+                        icon: Icons.person_add,
+                        label: 'Add',
+                        onTap: () => _showAddMembersSheet(context),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _buildActionButton(
                         icon: Icons.share,
                         label: 'Invite',
                         onTap: _shareInvitationLink,
@@ -495,6 +503,204 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                       }).toList(),
                     );
                   },
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  void _showAddMembersSheet(BuildContext context) {
+    final searchController = TextEditingController();
+    List<Map<String, dynamic>> searchResults = [];
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1a103c),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) {
+          return Container(
+            padding: const EdgeInsets.all(20),
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.7,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'Add Members',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: searchController,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    hintText: 'Search by username...',
+                    hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+                    filled: true,
+                    fillColor: Colors.white.withOpacity(0.05),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    prefixIcon: const Icon(Icons.search, color: Colors.white54),
+                  ),
+                  onChanged: (value) async {
+                    if (value.length < 2) {
+                      setModalState(() => searchResults = []);
+                      return;
+                    }
+                    final snapshot = await FirebaseFirestore.instance
+                        .collection('users')
+                        .where('username', isGreaterThanOrEqualTo: value)
+                        .where('username', isLessThanOrEqualTo: '\$value\uf8ff')
+                        .limit(10)
+                        .get();
+                    setModalState(() {
+                      searchResults = snapshot.docs
+                          .map((doc) => {'id': doc.id, ...doc.data()})
+                          .toList();
+                    });
+                  },
+                ),
+                const SizedBox(height: 16),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: searchResults.length,
+                    itemBuilder: (context, index) {
+                      final user = searchResults[index];
+                      return ListTile(
+                        leading: CircleAvatar(
+                          backgroundImage: user['avatar_url'] != null
+                              ? NetworkImage(user['avatar_url'])
+                              : null,
+                          child: user['avatar_url'] == null
+                              ? Text((user['username'] ?? 'U')[0].toUpperCase())
+                              : null,
+                        ),
+                        title: Text(user['username'] ?? 'Unknown',
+                            style: const TextStyle(color: Colors.white)),
+                        trailing: ElevatedButton(
+                          onPressed: () async {
+                            final chatProvider = Provider.of<ChatProvider>(context, listen: false);
+                            final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+                            final currentUserId = authProvider.user?.uid ?? authProvider.mockUserId;
+
+                            // Check if user allows being added to groups
+                            final userDoc = await FirebaseFirestore.instance
+                                .collection('users')
+                                .doc(user['id'])
+                                .get();
+                            final privacySettings = userDoc.data()?['privacy_settings'] ?? {};
+                            final allowAddToGroups = privacySettings['allow_add_to_groups'] ?? true;
+
+                            if (!allowAddToGroups) {
+                              if (context.mounted) {
+                                showDialog(
+                                  context: context,
+                                  builder: (context) => AlertDialog(
+                                    backgroundColor: const Color(0xFF1a103c),
+                                    title: const Text('Can't Add User', style: TextStyle(color: Colors.white)),
+                                    content: Text(
+                                      '${user['username']} doesn't allow being added to groups. Send them the invite link instead?',
+                                      style: const TextStyle(color: Colors.white70),
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.pop(context),
+                                        child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+                                      ),
+                                      ElevatedButton(
+                                        onPressed: () async {
+                                          Navigator.pop(context);
+                                          // Get or create invite link
+                                          final preview = await InvitationService.getInvitationPreview(widget.chatId);
+                                          final link = preview?['link'] ?? '';
+                                          // Start DM with invite
+                                          final dmChat = await chatProvider.startDirectChat(user['id']);
+                                          if (dmChat != null && context.mounted) {
+                                            Navigator.pushNamed(
+                                              context,
+                                              '/chat',
+                                              arguments: {
+                                                'chatId': dmChat['id'],
+                                                'chatName': user['username'],
+                                                'chatAvatar': user['avatar_url'],
+                                                'isGroup': false,
+                                              },
+                                            );
+                                            // Send link as first message (user will paste it)
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(content: Text('Opening chat with ${user['username']}. Send the invite link: $link')),
+                                            );
+                                          }
+                                        },
+                                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF8B5CF6)),
+                                        child: const Text('Send Link'),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }
+                              return;
+                            }
+
+                            // Add user to group
+                            await FirebaseFirestore.instance
+                                .collection('chats')
+                                .doc(widget.chatId)
+                                .update({
+                              'participants': FieldValue.arrayUnion([user['id']]),
+                              'participants_data.${user['id']}': {
+                                'role': 'member',
+                                'joined_at': FieldValue.serverTimestamp(),
+                              },
+                              'member_count': FieldValue.increment(1),
+                            });
+
+                            // Add system message
+                            await FirebaseFirestore.instance
+                                .collection('chats')
+                                .doc(widget.chatId)
+                                .collection('messages')
+                                .add({
+                              'type': 'system',
+                              'content': '${user['username']} was added by ${authProvider.userName ?? 'an admin'}',
+                              'created_at': FieldValue.serverTimestamp(),
+                            });
+
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('Added ${user['username']}')),
+                              );
+                            }
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF8B5CF6),
+                            minimumSize: const Size(60, 32),
+                          ),
+                          child: const Text('Add', style: TextStyle(fontSize: 12)),
+                        ),
+                      );
+                    },
+                  ),
                 ),
               ],
             ),
