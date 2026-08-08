@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../services/cloudinary_service.dart';
 
 class ChannelChatScreen extends StatefulWidget {
@@ -27,7 +29,6 @@ class _ChannelChatScreenState extends State<ChannelChatScreen> {
   bool _isLoading = false;
   File? _selectedImage;
 
-  // Theme colors matching SetupProfileScreen
   static const Color _bgDark = Color(0xFF0A0A0F);
   static const Color _bgCard = Color(0xFF1a103c);
   static const Color _purple = Color(0xFF8B5CF6);
@@ -40,19 +41,17 @@ class _ChannelChatScreenState extends State<ChannelChatScreen> {
       .orderBy('timestamp', descending: true)
       .snapshots();
 
-    Future<void> _sendMessage() async {
+  Future<void> _sendMessage() async {
     final text = _messageController.text.trim();
     if (text.isEmpty && _selectedImage == null) return;
 
     setState(() => _isLoading = true);
 
     try {
-      // FIX: Support mock users
       final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
       final userId = authProvider.user?.uid ?? authProvider.mockUserId;
       if (userId == null) throw Exception('Not authenticated');
 
-      // FIX: Get user data for sender name/avatar
       final userDoc = await FirebaseFirestore.instance.collection('users').doc(userId).get();
       final userData = userDoc.data() ?? {};
       final senderName = userData['username'] ?? 'Admin';
@@ -75,8 +74,8 @@ class _ChannelChatScreenState extends State<ChannelChatScreen> {
         'text': text.isNotEmpty ? text : null,
         'image_url': imageUrl,
         'sender_id': userId,
-        'sender_name': senderName,      // FIX: Store sender name
-        'sender_avatar': senderAvatar,    // FIX: Store sender avatar
+        'sender_name': senderName,
+        'sender_avatar': senderAvatar,
         'timestamp': FieldValue.serverTimestamp(),
       });
 
@@ -110,12 +109,12 @@ class _ChannelChatScreenState extends State<ChannelChatScreen> {
       SnackBar(content: Text(msg), backgroundColor: Colors.red),
     );
   }
-  
+
   String _formatTime(Timestamp? timestamp) {
     if (timestamp == null) return '';
     return DateFormat('HH:mm').format(timestamp.toDate());
   }
-  
+
   Widget _buildMessageAvatar(String? avatarUrl, String? username) {
     if (avatarUrl != null && avatarUrl.isNotEmpty) {
       return CircleAvatar(
@@ -193,13 +192,18 @@ class _ChannelChatScreenState extends State<ChannelChatScreen> {
                     ),
                     IconButton(
                       icon: const Icon(Icons.more_vert, color: Colors.white70),
-                      onPressed: () {},
+                      onPressed: () {
+                        Navigator.pushNamed(context, '/channel_info', arguments: {
+                          'chatId': widget.channelId,
+                          'chatName': widget.channelName,
+                        });
+                      },
                     ),
                   ],
                 ),
               ),
 
-                            // Messages — FIXED: All left-aligned like Telegram channels
+              // Messages — All left-aligned like Telegram
               Expanded(
                 child: StreamBuilder<QuerySnapshot>(
                   stream: _messagesStream,
@@ -261,16 +265,15 @@ class _ChannelChatScreenState extends State<ChannelChatScreen> {
                         final msg = messages[index].data() as Map<String, dynamic>;
                         final hasImage = msg['image_url'] != null;
 
-                        // FIX: All messages left-aligned, no "isMe" check for alignment
                         return Align(
-                          alignment: Alignment.centerLeft,  // FIX: Always left
+                          alignment: Alignment.centerLeft,
                           child: Container(
                             margin: const EdgeInsets.only(bottom: 12),
                             constraints: BoxConstraints(
-                              maxWidth: MediaQuery.of(context).size.width * 0.85,  // FIX: Wider like Telegram
+                              maxWidth: MediaQuery.of(context).size.width * 0.85,
                             ),
                             decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.05),  // FIX: Same style for all
+                              color: Colors.white.withOpacity(0.05),
                               borderRadius: BorderRadius.circular(16),
                               border: Border.all(color: Colors.white.withOpacity(0.08)),
                             ),
@@ -278,7 +281,6 @@ class _ChannelChatScreenState extends State<ChannelChatScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                // FIX: Always show sender name (admin name)
                                 Row(
                                   children: [
                                     _buildMessageAvatar(msg['sender_avatar'], msg['sender_name']),
@@ -372,61 +374,88 @@ class _ChannelChatScreenState extends State<ChannelChatScreen> {
                   ),
                 ),
 
-              // Input area
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.03),
-                  border: Border(
-                    top: BorderSide(color: Colors.white.withOpacity(0.08)),
-                  ),
-                ),
-                child: SafeArea(
-                  child: Row(
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.image, color: _purple),
-                        onPressed: _pickImage,
+              // Input area — Only show for admins/owner
+              FutureBuilder<DocumentSnapshot>(
+                future: FirebaseFirestore.instance.collection('chats').doc(widget.channelId).get(),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) return const SizedBox.shrink();
+                  
+                  final chatData = snapshot.data!.data() as Map<String, dynamic>?;
+                  final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+                  final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+                  final myRole = (chatData?['participants_data']?[userId]?['role'] ?? 'member') as String;
+                  final canPost = myRole == 'owner' || myRole == 'admin';
+                  
+                  if (!canPost) {
+                    return Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      color: Colors.white.withOpacity(0.03),
+                      child: Center(
+                        child: Text(
+                          'Only admins can post in this channel',
+                          style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 13),
+                        ),
                       ),
-                      Expanded(
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.05),
-                            borderRadius: BorderRadius.circular(24),
+                    );
+                  }
+
+                  return Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.03),
+                      border: Border(
+                        top: BorderSide(color: Colors.white.withOpacity(0.08)),
+                      ),
+                    ),
+                    child: SafeArea(
+                      child: Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.image, color: _purple),
+                            onPressed: _pickImage,
                           ),
-                          child: TextField(
-                            controller: _messageController,
-                            style: const TextStyle(color: Colors.white),
-                            decoration: InputDecoration(
-                              hintText: 'Message...',
-                              hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
-                              border: InputBorder.none,
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                          Expanded(
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.05),
+                                borderRadius: BorderRadius.circular(24),
+                              ),
+                              child: TextField(
+                                controller: _messageController,
+                                style: const TextStyle(color: Colors.white),
+                                decoration: InputDecoration(
+                                  hintText: 'Message...',
+                                  hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+                                  border: InputBorder.none,
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                ),
+                              ),
                             ),
                           ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      GestureDetector(
-                        onTap: _isLoading ? null : _sendMessage,
-                        child: Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: const BoxDecoration(
-                            gradient: LinearGradient(colors: [_purple, _cyan]),
-                            shape: BoxShape.circle,
+                          const SizedBox(width: 8),
+                          GestureDetector(
+                            onTap: _isLoading ? null : _sendMessage,
+                            child: Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: const BoxDecoration(
+                                gradient: LinearGradient(colors: [_purple, _cyan]),
+                                shape: BoxShape.circle,
+                              ),
+                              child: _isLoading
+                                  ? const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                    )
+                                  : const Icon(Icons.send, color: Colors.white, size: 20),
+                            ),
                           ),
-                          child: _isLoading
-                              ? const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                                )
-                              : const Icon(Icons.send, color: Colors.white, size: 20),
-                        ),
+                        ],
                       ),
-                    ],
-                  ),
-                ),
+                    ),
+                  );
+                },
               ),
             ],
           ),
