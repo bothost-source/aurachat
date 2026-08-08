@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/online_status_service.dart';
+import '../../providers/settings_provider.dart';
 
 class AuraAuthProvider extends ChangeNotifier {
   final firebase_auth.FirebaseAuth _auth = firebase_auth.FirebaseAuth.instance;
@@ -130,6 +131,14 @@ class AuraAuthProvider extends ChangeNotifier {
       await prefs.setString('mock_bio', _userBio ?? '');
       await prefs.setString('mock_avatar', _userPhotoUrl ?? '');
       await prefs.setString('mock_email', _email ?? '');
+
+      // Sync mock user to SettingsProvider for privacy settings
+      try {
+        final settingsProvider = SettingsProvider();
+        settingsProvider.setMockUserId(userId);
+      } catch (e) {
+        debugPrint('SettingsProvider sync error: $e');
+      }
 
       notifyListeners();
       _setLoading(false);
@@ -305,6 +314,15 @@ class AuraAuthProvider extends ChangeNotifier {
     _mockUserId = 'mock_${DateTime.now().millisecondsSinceEpoch}';
     _isAuthenticated = true;
     await prefs.setString('mock_user_id', _mockUserId!);
+
+    // Sync mock user to SettingsProvider for privacy settings
+    try {
+      final settingsProvider = SettingsProvider();
+      settingsProvider.setMockUserId(_mockUserId);
+    } catch (e) {
+      debugPrint('SettingsProvider sync error: $e');
+    }
+
     notifyListeners();
   }
 
