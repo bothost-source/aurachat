@@ -19,7 +19,6 @@ class _StatusScreenState extends State<StatusScreen> {
   List<Map<String, dynamic>> _statuses = [];
   bool _isLoading = true;
 
-  // Theme colors
   static const Color _bgDark = Color(0xFF0A0A0F);
   static const Color _bgCard = Color(0xFF1a103c);
   static const Color _purple = Color(0xFF8B5CF6);
@@ -42,6 +41,8 @@ class _StatusScreenState extends State<StatusScreen> {
         _statuses = statuses;
         _isLoading = false;
       });
+    } else {
+      setState(() => _isLoading = false);
     }
   }
 
@@ -138,7 +139,6 @@ class _StatusScreenState extends State<StatusScreen> {
     final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
     final userId = authProvider.user?.uid ?? authProvider.mockUserId;
 
-    // Mark as viewed (if not mine)
     if (userId != null && status['user_id'] != userId) {
       await StatusService.markAsViewed(status['id'], userId);
     }
@@ -202,51 +202,72 @@ class _StatusScreenState extends State<StatusScreen> {
                 ),
               ),
 
-              // My Status
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-                child: ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Stack(
-                    children: [
-                      Container(
-                        width: 60,
-                        height: 60,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: const LinearGradient(colors: [_purple, _cyan]),
-                          border: Border.all(
-                            color: _purple.withOpacity(0.5),
-                            width: 2,
+              // My Status — Shows YOUR most recent status with preview
+              FutureBuilder<List<Map<String, dynamic>>>(
+                future: userId != null ? StatusService.getMyStatuses(userId) : Future.value([]),
+                builder: (context, snapshot) {
+                  final myStatuses = snapshot.data ?? [];
+                  final hasStatus = myStatuses.isNotEmpty;
+                  final latestStatus = hasStatus ? myStatuses.first : null;
+
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Stack(
+                        children: [
+                          Container(
+                            width: 60,
+                            height: 60,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: hasStatus && latestStatus?['media_url'] == null
+                                  ? const LinearGradient(colors: [_purple, _cyan])
+                                  : null,
+                              image: hasStatus && latestStatus?['media_url'] != null
+                                  ? DecorationImage(
+                                      image: NetworkImage(latestStatus!['media_url']),
+                                      fit: BoxFit.cover,
+                                    )
+                                  : null,
+                              border: Border.all(
+                                color: hasStatus ? _cyan.withOpacity(0.8) : _purple.withOpacity(0.5),
+                                width: 2,
+                              ),
+                            ),
+                            child: !hasStatus || latestStatus?['media_url'] == null
+                                ? const Icon(Icons.person, color: Colors.white70, size: 28)
+                                : null,
                           ),
-                        ),
-                        child: const Icon(Icons.person, color: Colors.white70, size: 28),
-                      ),
-                      Positioned(
-                        bottom: 0,
-                        right: 0,
-                        child: Container(
-                          padding: const EdgeInsets.all(2),
-                          decoration: BoxDecoration(
-                            color: _purple,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: _bgDark, width: 2),
+                          Positioned(
+                            bottom: 0,
+                            right: 0,
+                            child: Container(
+                              padding: const EdgeInsets.all(2),
+                              decoration: BoxDecoration(
+                                color: _purple,
+                                shape: BoxShape.circle,
+                                border: Border.all(color: _bgDark, width: 2),
+                              ),
+                              child: const Icon(Icons.add, size: 14, color: Colors.white),
+                            ),
                           ),
-                          child: const Icon(Icons.add, size: 14, color: Colors.white),
-                        ),
+                        ],
                       ),
-                    ],
-                  ),
-                  title: const Text(
-                    'My Status',
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-                  ),
-                  subtitle: Text(
-                    'Tap to add status',
-                    style: TextStyle(color: Colors.white.withOpacity(0.4)),
-                  ),
-                  onTap: () => _showAddStatusOptions(context),
-                ),
+                      title: Text(
+                        hasStatus ? 'My Status' : 'My Status',
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                      ),
+                      subtitle: Text(
+                        hasStatus
+                            ? '${_getTimeAgo((latestStatus!['created_at'] as Timestamp).toDate())} • Tap to add new'
+                            : 'Tap to add status',
+                        style: TextStyle(color: Colors.white.withOpacity(0.4)),
+                      ),
+                      onTap: () => _showAddStatusOptions(context),
+                    ),
+                  );
+                },
               ),
 
               const Divider(color: Colors.white12, indent: 24, endIndent: 24),
@@ -257,7 +278,7 @@ class _StatusScreenState extends State<StatusScreen> {
                 child: Align(
                   alignment: Alignment.centerLeft,
                   child: Text(
-                    _statuses.isEmpty ? 'No contacts yet' : 'Recent Updates',
+                    _statuses.isEmpty ? 'No updates yet' : 'Recent Updates',
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
@@ -651,7 +672,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                           backgroundColor: const Color(0xFF8B5CF6),
                           child: avatar == null
                               ? Text(
-                                  username[0].toUpperCase(),
+                                  username.isNotEmpty ? username[0].toUpperCase() : '?',
                                   style: const TextStyle(color: Colors.white),
                                 )
                               : null,
