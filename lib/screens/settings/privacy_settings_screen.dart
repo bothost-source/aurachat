@@ -2,6 +2,8 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/settings_provider.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../providers/auth_provider.dart' show AuraAuthProvider;
 
 class PrivacySettingsScreen extends StatefulWidget {
   const PrivacySettingsScreen({super.key});
@@ -238,6 +240,28 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _syncToFirestore(SettingsProvider settings) async {
+    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+    final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+    if (userId == null) return;
+
+    await FirebaseFirestore.instance.collection('users').doc(userId).set({
+      'privacy_settings': {
+        'phone_number_visible': settings.phoneNumberVisible,
+        'last_seen_visible': settings.lastSeenVisible,
+        'profile_photo_visible': settings.profilePhotoVisible,
+        'forwarded_messages': settings.forwardedMessages,
+        'add_to_groups': settings.addToGroups,
+        'voice_video_calls_visible': settings.voiceVideoCallsVisible,
+        'find_by_phone': settings.findByPhone,
+        'find_by_username': settings.findByUsername,
+        'biometric_lock': settings.biometricLock,
+        'app_passcode': settings.appPasscode,
+      },
+      'updated_at': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
   }
 
   // ─── Section Header ───
