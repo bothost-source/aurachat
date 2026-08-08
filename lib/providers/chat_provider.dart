@@ -14,6 +14,8 @@ class ChatProvider extends ChangeNotifier {
   bool _isLoading = false;
   String? _error;
   StreamSubscription? _chatsSubscription;
+  StreamSubscription? _groupsSubscription;
+  StreamSubscription? _channelsSubscription;
   String? _currentUserId;
 
   List<Map<String, dynamic>> get chats => _chats;
@@ -26,34 +28,25 @@ class ChatProvider extends ChangeNotifier {
     _init();
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // NEW: Initialize with optional mock user ID
-  // ═══════════════════════════════════════════════════════════════════════════
   Future<void> _init() async {
     _currentUserId = _auth.currentUser?.uid;
     if (_currentUserId != null) {
       await _loadBlockedUsers();
       await loadChats();
-      _subscribeToChats();
+      _subscribeToAll();
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // NEW: Set mock user ID from AuraAuthProvider
-  // Call this when using mock OTP
-  // ═══════════════════════════════════════════════════════════════════════════
   Future<void> setMockUser(String mockUserId) async {
     _currentUserId = mockUserId;
     await _loadBlockedUsers();
     await loadChats();
-    _subscribeToChats();
+    _subscribeToAll();
     notifyListeners();
   }
 
-  /// Get current user ID (real or mock)
   String? get currentUserId => _currentUserId;
 
-  /// Load blocked users list
   Future<void> _loadBlockedUsers() async {
     try {
       final doc = await _firestore.collection('users').doc(_currentUserId).get();
@@ -66,10 +59,8 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
-  /// Check if a user is blocked
   bool isBlocked(String userId) => _blockedUsers.contains(userId);
 
-  /// Block a user
   Future<void> blockUser(String userId) async {
     if (_currentUserId == null) return;
     try {
@@ -84,7 +75,6 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
-  /// Unblock a user
   Future<void> unblockUser(String userId) async {
     if (_currentUserId == null) return;
     try {
@@ -99,33 +89,34 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // LOAD ALL CHATS: private (chats) + groups + channels
+  // ═══════════════════════════════════════════════════════════════════════════
   Future<void> loadChats() async {
     _setLoading(true);
     _error = null;
 
     try {
-      // ═══════════════════════════════════════════════════════════════════════
-      // FIX: Use _currentUserId instead of _auth.currentUser?.uid
-      // ═══════════════════════════════════════════════════════════════════════
       final userId = _currentUserId;
       if (userId == null) {
         _setLoading(false);
         return;
       }
 
-      final snapshot = await _firestore
+      final List<Map<String, dynamic>> allChats = [];
+
+      // ─── 1. PRIVATE CHATS (from 'chats' collection) ───
+      final chatsSnapshot = await _firestore
           .collection('chats')
           .where('participants', arrayContains: userId)
           .orderBy('last_message_at', descending: true)
           .get();
 
-      final List<Map<String, dynamic>> formattedChats = [];
-
-      for (final doc in snapshot.docs) {
+      for (final doc in chatsSnapshot.docs) {
         final chat = doc.data();
         final chatId = doc.id;
 
-        // Skip if this is a DM with a blocked user
+        // Skip blocked DMs
         if (chat['type'] == 'direct') {
           final participants = List<String>.from(chat['participants'] ?? []);
           final otherUserId = participants.firstWhere(
@@ -137,71 +128,209 @@ class ChatProvider extends ChangeNotifier {
           }
         }
 
-        final unreadSnapshot = await _firestore
-            .collection('chats')
-            .doc(chatId)
-            .collection('messages')
-            .where('is_read', isEqualTo: false)
-            .where('sender_id', isNotEqualTo: userId)
-            .get();
-
-        final unreadCount = unreadSnapshot.docs.length;
-
-        int participantsCount = 0;
-        if (chat['type'] == 'group' || chat['type'] == 'channel') {
-          participantsCount = (chat['participants'] as List<dynamic>?)?.length ?? 0;
-        }
-
-        // Get role
+        final unreadCount = await _getUnreadCount(chatId, userId);
+        final participantsCount = (chat['participants'] as List<dynamic>?)?.length ?? 0;
         final participantsData = chat['participants_data'] as Map<String, dynamic>? ?? {};
         final myData = participantsData[userId] as Map<String, dynamic>? ?? {};
         final role = myData['role'] ?? 'member';
+        final isArchived = myData['is_archived'] ?? false;
 
-        // Get creator phone for verified badge
-        final createdByPhone = chat['created_by_phone'] as String?;
+        if (isArchived) continue;
 
-        formattedChats.add({
+        allChats.add({
           ...chat,
           'id': chatId,
           'role': role,
           'unread_count': unreadCount,
           'participants_count': participantsCount,
-          'created_by_phone': createdByPhone,
+          'created_by_phone': chat['created_by_phone'],
         });
       }
 
-      _chats = formattedChats;
+      // ─── 2. GROUPS (from 'groups' collection) ───
+      final groupsSnapshot = await _firestore
+          .collection('groups')
+          .where('members', arrayContains: userId)
+          .orderBy('last_message_at', descending: true)
+          .get();
+
+      for (final doc in groupsSnapshot.docs) {
+        final group = doc.data();
+        final groupId = doc.id;
+
+        final unreadCount = await _getUnreadCountFromGroup(groupId, userId);
+        final membersCount = (group['members'] as List<dynamic>?)?.length ?? 0;
+        final membersData = group['members_data'] as Map<String, dynamic>? ?? {};
+        final myData = membersData[userId] as Map<String, dynamic>? ?? {};
+        final role = myData['role'] ?? 'member';
+
+        allChats.add({
+          'id': groupId,
+          'type': 'group',
+          'name': group['name'] ?? 'Unnamed Group',
+          'description': group['description'],
+          'avatar_url': group['avatar_url'],
+          'created_by': group['created_by'],
+          'created_by_phone': group['created_by_phone'],
+          'last_message': group['last_message'] ?? 'No messages yet',
+          'last_message_at': group['last_message_at'],
+          'role': role,
+          'unread_count': unreadCount,
+          'participants_count': membersCount,
+          'participants': group['members'] ?? [],
+          'settings': group['settings'] ?? {},
+        });
+      }
+
+      // ─── 3. CHANNELS (from 'channels' collection) ───
+      final channelsSnapshot = await _firestore
+          .collection('channels')
+          .where('subscribers', arrayContains: userId)
+          .orderBy('last_message_at', descending: true)
+          .get();
+
+      for (final doc in channelsSnapshot.docs) {
+        final channel = doc.data();
+        final channelId = doc.id;
+
+        final unreadCount = await _getUnreadCountFromChannel(channelId, userId);
+        final subscribersCount = (channel['subscribers'] as List<dynamic>?)?.length ?? 0;
+        final admins = List<String>.from(channel['admins'] ?? []);
+        final role = admins.contains(userId) ? 'admin' : 'subscriber';
+
+        allChats.add({
+          'id': channelId,
+          'type': 'channel',
+          'name': channel['name'] ?? 'Unnamed Channel',
+          'description': channel['description'],
+          'avatar_url': channel['avatar_url'],
+          'created_by': channel['created_by'],
+          'created_by_phone': channel['created_by_phone'],
+          'last_message': channel['last_message'] ?? 'No messages yet',
+          'last_message_at': channel['last_message_at'],
+          'role': role,
+          'unread_count': unreadCount,
+          'participants_count': subscribersCount,
+          'participants': channel['subscribers'] ?? [],
+          'settings': channel['settings'] ?? {},
+          'is_broadcast': channel['is_broadcast'] ?? false,
+        });
+      }
+
+      // Sort all by last_message_at (newest first)
+      allChats.sort((a, b) {
+        final aTime = _parseTimestamp(a['last_message_at']);
+        final bTime = _parseTimestamp(b['last_message_at']);
+        return bTime.compareTo(aTime);
+      });
+
+      _chats = allChats;
       _setLoading(false);
     } catch (e) {
       _error = 'Failed to load chats: $e';
+      debugPrint('loadChats error: $e');
       _setLoading(false);
     }
   }
 
-  void _subscribeToChats() {
-    // ═══════════════════════════════════════════════════════════════════════
-    // FIX: Use _currentUserId instead of _auth.currentUser?.uid
-    // ═══════════════════════════════════════════════════════════════════════
+  // Helper: parse Firestore Timestamp or DateTime or String
+  DateTime _parseTimestamp(dynamic value) {
+    if (value == null) return DateTime(1970);
+    if (value is Timestamp) return value.toDate();
+    if (value is DateTime) return value;
+    if (value is String) return DateTime.tryParse(value) ?? DateTime(1970);
+    return DateTime(1970);
+  }
+
+  // Helper: get unread count for private chat
+  Future<int> _getUnreadCount(String chatId, String userId) async {
+    try {
+      final snapshot = await _firestore
+          .collection('chats')
+          .doc(chatId)
+          .collection('messages')
+          .where('is_read', isEqualTo: false)
+          .where('sender_id', isNotEqualTo: userId)
+          .count()
+          .get();
+      return snapshot.count ?? 0;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  // Helper: get unread count for group
+  Future<int> _getUnreadCountFromGroup(String groupId, String userId) async {
+    try {
+      final snapshot = await _firestore
+          .collection('groups')
+          .doc(groupId)
+          .collection('messages')
+          .where('is_read', isEqualTo: false)
+          .where('sender_id', isNotEqualTo: userId)
+          .count()
+          .get();
+      return snapshot.count ?? 0;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  // Helper: get unread count for channel
+  Future<int> _getUnreadCountFromChannel(String channelId, String userId) async {
+    try {
+      final snapshot = await _firestore
+          .collection('channels')
+          .doc(channelId)
+          .collection('messages')
+          .where('read_by', arrayContains: userId)
+          .count()
+          .get();
+      // For channels, unread = total messages - read messages (simplified)
+      // Or track last_read_at per user
+      return 0; // Channels typically don't have unread counts, or track differently
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SUBSCRIBE TO ALL COLLECTIONS (real-time updates)
+  // ═══════════════════════════════════════════════════════════════════════════
+  void _subscribeToAll() {
     final userId = _currentUserId;
     if (userId == null) return;
 
     _chatsSubscription?.cancel();
+    _groupsSubscription?.cancel();
+    _channelsSubscription?.cancel();
+
+    // Listen to private chats
     _chatsSubscription = _firestore
         .collection('chats')
         .where('participants', arrayContains: userId)
         .snapshots()
-        .listen((snapshot) {
-          loadChats();
-        });
+        .listen((_) => loadChats());
+
+    // Listen to groups
+    _groupsSubscription = _firestore
+        .collection('groups')
+        .where('members', arrayContains: userId)
+        .snapshots()
+        .listen((_) => loadChats());
+
+    // Listen to channels
+    _channelsSubscription = _firestore
+        .collection('channels')
+        .where('subscribers', arrayContains: userId)
+        .snapshots()
+        .listen((_) => loadChats());
   }
 
   Future<void> loadContacts() async {
     _setLoading(true);
 
     try {
-      // ═══════════════════════════════════════════════════════════════════════
-      // FIX: Use _currentUserId
-      // ═══════════════════════════════════════════════════════════════════════
       final userId = _currentUserId;
       if (userId == null) {
         _setLoading(false);
@@ -225,13 +354,9 @@ class ChatProvider extends ChangeNotifier {
 
   Future<Map<String, dynamic>?> startDirectChat(String otherUserId) async {
     try {
-      // ═══════════════════════════════════════════════════════════════════════
-      // FIX: Use _currentUserId
-      // ═══════════════════════════════════════════════════════════════════════
       final userId = _currentUserId;
       if (userId == null) return null;
 
-      // Check if blocked
       if (_blockedUsers.contains(otherUserId)) {
         _error = 'You have blocked this user';
         notifyListeners();
@@ -266,19 +391,28 @@ class ChatProvider extends ChangeNotifier {
 
   Future<void> markMessagesAsRead(String chatId) async {
     try {
-      // ═══════════════════════════════════════════════════════════════════════
-      // FIX: Use _currentUserId
-      // ═══════════════════════════════════════════════════════════════════════
       final userId = _currentUserId;
       if (userId == null) return;
 
-      final unreadSnapshot = await _firestore
+      // Try private chat first
+      var unreadSnapshot = await _firestore
           .collection('chats')
           .doc(chatId)
           .collection('messages')
           .where('is_read', isEqualTo: false)
           .where('sender_id', isNotEqualTo: userId)
           .get();
+
+      if (unreadSnapshot.docs.isEmpty) {
+        // Try group
+        unreadSnapshot = await _firestore
+            .collection('groups')
+            .doc(chatId)
+            .collection('messages')
+            .where('is_read', isEqualTo: false)
+            .where('sender_id', isNotEqualTo: userId)
+            .get();
+      }
 
       final batch = _firestore.batch();
       for (final doc in unreadSnapshot.docs) {
@@ -298,19 +432,34 @@ class ChatProvider extends ChangeNotifier {
 
   Future<void> deleteChat(String chatId) async {
     try {
-      // ═══════════════════════════════════════════════════════════════════════
-      // FIX: Use _currentUserId
-      // ═══════════════════════════════════════════════════════════════════════
       final userId = _currentUserId;
       if (userId == null) return;
 
-      await _firestore
-          .collection('chats')
-          .doc(chatId)
-          .update({
-            'participants': FieldValue.arrayRemove([userId]),
-            'participants_data.$userId': FieldValue.delete(),
+      // Try private chat first
+      var doc = await _firestore.collection('chats').doc(chatId).get();
+      if (doc.exists) {
+        await _firestore.collection('chats').doc(chatId).update({
+          'participants': FieldValue.arrayRemove([userId]),
+          'participants_data.$userId': FieldValue.delete(),
+        });
+      } else {
+        // Try group
+        doc = await _firestore.collection('groups').doc(chatId).get();
+        if (doc.exists) {
+          await _firestore.collection('groups').doc(chatId).update({
+            'members': FieldValue.arrayRemove([userId]),
+            'members_data.$userId': FieldValue.delete(),
+            'member_count': FieldValue.increment(-1),
           });
+        } else {
+          // Try channel
+          await _firestore.collection('channels').doc(chatId).update({
+            'subscribers': FieldValue.arrayRemove([userId]),
+            'subscribers_data.$userId': FieldValue.delete(),
+            'subscriber_count': FieldValue.increment(-1),
+          });
+        }
+      }
 
       await loadChats();
     } catch (e) {
@@ -354,13 +503,30 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
-  /// Leave a group or channel
   Future<void> leaveChat(String chatId) async {
     try {
       final userId = _currentUserId;
       if (userId == null) return;
 
-      final chatDoc = await _firestore.collection('chats').doc(chatId).get();
+      // Try group first
+      var chatDoc = await _firestore.collection('groups').doc(chatId).get();
+      var collection = 'groups';
+      var memberField = 'members';
+
+      if (!chatDoc.exists) {
+        // Try channel
+        chatDoc = await _firestore.collection('channels').doc(chatId).get();
+        collection = 'channels';
+        memberField = 'subscribers';
+      }
+
+      if (!chatDoc.exists) {
+        // Try private chat
+        chatDoc = await _firestore.collection('chats').doc(chatId).get();
+        collection = 'chats';
+        memberField = 'participants';
+      }
+
       if (!chatDoc.exists) return;
 
       final chatData = chatDoc.data()!;
@@ -372,16 +538,15 @@ class ChatProvider extends ChangeNotifier {
         return;
       }
 
-      await _firestore.collection('chats').doc(chatId).update({
-        'participants': FieldValue.arrayRemove([userId]),
-        'participants_data.$userId': FieldValue.delete(),
+      await _firestore.collection(collection).doc(chatId).update({
+        memberField: FieldValue.arrayRemove([userId]),
+        '${memberField}_data.$userId': FieldValue.delete(),
         'member_count': FieldValue.increment(-1),
       });
 
-      // Add system message
-      await _firestore.collection('chats').doc(chatId).collection('messages').add({
+      await _firestore.collection(collection).doc(chatId).collection('messages').add({
         'type': 'system',
-        'content': 'A member left the ${chatData['type']}',
+        'content': 'A member left',
         'created_at': FieldValue.serverTimestamp(),
       });
 
@@ -392,17 +557,16 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
-  /// Kick a member (owner/admin only)
   Future<void> kickMember(String chatId, String memberId) async {
     try {
       final userId = _currentUserId;
       if (userId == null) return;
 
-      final chatDoc = await _firestore.collection('chats').doc(chatId).get();
+      final chatDoc = await _firestore.collection('groups').doc(chatId).get();
       if (!chatDoc.exists) return;
 
       final chatData = chatDoc.data()!;
-      final myRole = (chatData['participants_data']?[userId]?['role'] ?? 'member') as String;
+      final myRole = (chatData['members_data']?[userId]?['role'] ?? 'member') as String;
 
       if (myRole != 'owner' && myRole != 'admin') {
         _error = 'Only owners and admins can kick members';
@@ -410,7 +574,7 @@ class ChatProvider extends ChangeNotifier {
         return;
       }
 
-      final memberRole = (chatData['participants_data']?[memberId]?['role'] ?? 'member') as String;
+      final memberRole = (chatData['members_data']?[memberId]?['role'] ?? 'member') as String;
       if (memberRole == 'owner') {
         _error = 'Cannot kick the owner';
         notifyListeners();
@@ -422,18 +586,17 @@ class ChatProvider extends ChangeNotifier {
         return;
       }
 
-      await _firestore.collection('chats').doc(chatId).update({
-        'participants': FieldValue.arrayRemove([memberId]),
-        'participants_data.$memberId': FieldValue.delete(),
+      await _firestore.collection('groups').doc(chatId).update({
+        'members': FieldValue.arrayRemove([memberId]),
+        'members_data.$memberId': FieldValue.delete(),
         'member_count': FieldValue.increment(-1),
       });
 
-      // Add system message
       final userDoc = await _firestore.collection('users').doc(memberId).get();
       final userName = userDoc.data()?['username'] ?? 'A member';
-      await _firestore.collection('chats').doc(chatId).collection('messages').add({
+      await _firestore.collection('groups').doc(chatId).collection('messages').add({
         'type': 'system',
-        'content': '$userName was removed from the ${chatData['type']}',
+        'content': '$userName was removed',
         'created_at': FieldValue.serverTimestamp(),
       });
 
@@ -444,17 +607,16 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
-  /// Ban a member (owner/admin only)
   Future<void> banMember(String chatId, String memberId) async {
     try {
       final userId = _currentUserId;
       if (userId == null) return;
 
-      final chatDoc = await _firestore.collection('chats').doc(chatId).get();
+      final chatDoc = await _firestore.collection('groups').doc(chatId).get();
       if (!chatDoc.exists) return;
 
       final chatData = chatDoc.data()!;
-      final myRole = (chatData['participants_data']?[userId]?['role'] ?? 'member') as String;
+      final myRole = (chatData['members_data']?[userId]?['role'] ?? 'member') as String;
 
       if (myRole != 'owner' && myRole != 'admin') {
         _error = 'Only owners and admins can ban members';
@@ -462,26 +624,25 @@ class ChatProvider extends ChangeNotifier {
         return;
       }
 
-      final memberRole = (chatData['participants_data']?[memberId]?['role'] ?? 'member') as String;
+      final memberRole = (chatData['members_data']?[memberId]?['role'] ?? 'member') as String;
       if (memberRole == 'owner') {
         _error = 'Cannot ban the owner';
         notifyListeners();
         return;
       }
 
-      await _firestore.collection('chats').doc(chatId).update({
-        'participants': FieldValue.arrayRemove([memberId]),
-        'participants_data.$memberId': FieldValue.delete(),
+      await _firestore.collection('groups').doc(chatId).update({
+        'members': FieldValue.arrayRemove([memberId]),
+        'members_data.$memberId': FieldValue.delete(),
         'banned_users': FieldValue.arrayUnion([memberId]),
         'member_count': FieldValue.increment(-1),
       });
 
-      // Add system message
       final userDoc = await _firestore.collection('users').doc(memberId).get();
       final userName = userDoc.data()?['username'] ?? 'A member';
-      await _firestore.collection('chats').doc(chatId).collection('messages').add({
+      await _firestore.collection('groups').doc(chatId).collection('messages').add({
         'type': 'system',
-        'content': '$userName was banned from the ${chatData['type']}',
+        'content': '$userName was banned',
         'created_at': FieldValue.serverTimestamp(),
       });
 
@@ -492,17 +653,16 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
-  /// Promote member to admin (owner only)
   Future<void> promoteToAdmin(String chatId, String memberId) async {
     try {
       final userId = _currentUserId;
       if (userId == null) return;
 
-      final chatDoc = await _firestore.collection('chats').doc(chatId).get();
+      final chatDoc = await _firestore.collection('groups').doc(chatId).get();
       if (!chatDoc.exists) return;
 
       final chatData = chatDoc.data()!;
-      final myRole = (chatData['participants_data']?[userId]?['role'] ?? 'member') as String;
+      final myRole = (chatData['members_data']?[userId]?['role'] ?? 'member') as String;
 
       if (myRole != 'owner') {
         _error = 'Only the owner can promote members';
@@ -510,14 +670,13 @@ class ChatProvider extends ChangeNotifier {
         return;
       }
 
-      await _firestore.collection('chats').doc(chatId).update({
-        'participants_data.$memberId.role': 'admin',
+      await _firestore.collection('groups').doc(chatId).update({
+        'members_data.$memberId.role': 'admin',
       });
 
-      // Add system message
       final userDoc = await _firestore.collection('users').doc(memberId).get();
       final userName = userDoc.data()?['username'] ?? 'A member';
-      await _firestore.collection('chats').doc(chatId).collection('messages').add({
+      await _firestore.collection('groups').doc(chatId).collection('messages').add({
         'type': 'system',
         'content': '$userName was promoted to admin',
         'created_at': FieldValue.serverTimestamp(),
@@ -530,17 +689,16 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
-  /// Toggle group settings (owner/admin only)
   Future<void> toggleSetting(String chatId, String settingKey, bool value) async {
     try {
       final userId = _currentUserId;
       if (userId == null) return;
 
-      final chatDoc = await _firestore.collection('chats').doc(chatId).get();
+      final chatDoc = await _firestore.collection('groups').doc(chatId).get();
       if (!chatDoc.exists) return;
 
       final chatData = chatDoc.data()!;
-      final myRole = (chatData['participants_data']?[userId]?['role'] ?? 'member') as String;
+      final myRole = (chatData['members_data']?[userId]?['role'] ?? 'member') as String;
 
       if (myRole != 'owner' && myRole != 'admin') {
         _error = 'Only owners and admins can change settings';
@@ -548,7 +706,7 @@ class ChatProvider extends ChangeNotifier {
         return;
       }
 
-      await _firestore.collection('chats').doc(chatId).update({
+      await _firestore.collection('groups').doc(chatId).update({
         'settings.$settingKey': value,
       });
 
@@ -572,6 +730,8 @@ class ChatProvider extends ChangeNotifier {
   @override
   void dispose() {
     _chatsSubscription?.cancel();
+    _groupsSubscription?.cancel();
+    _channelsSubscription?.cancel();
     super.dispose();
   }
 }
