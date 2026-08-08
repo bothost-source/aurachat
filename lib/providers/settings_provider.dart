@@ -130,19 +130,54 @@ class SettingsProvider extends ChangeNotifier {
     _syncFromFirebase();
   }
 
+  String? _mockUserId;
+
+  void setMockUserId(String? id) {
+    _mockUserId = id;
+  }
+
   Future<void> _syncFromFirebase() async {
     try {
-      final user = _auth.currentUser;
-      if (user == null) return;
+      final userId = _auth.currentUser?.uid ?? _mockUserId;
+      if (userId == null) return;
 
-      final doc = await _firestore.collection('user_settings').doc(user.uid).get();
+      final doc = await _firestore.collection('user_settings').doc(userId).get();
 
       if (doc.exists) {
         final data = doc.data()!;
+        // Security
         _twoStepVerification = data['two_step_verification'] ?? _twoStepVerification;
+        _appPasscode = data['app_passcode'] ?? _appPasscode;
+        _biometricLock = data['biometric_lock'] ?? _biometricLock;
+        _passcode = data['passcode'] ?? _passcode;
+        _autoLockTimeout = data['auto_lock_timeout'] ?? _autoLockTimeout;
+        // Notifications
+        _messageTones = data['message_tones'] ?? _messageTones;
+        _groupNotifications = data['group_notifications'] ?? _groupNotifications;
+        _channelNotifications = data['channel_notifications'] ?? _channelNotifications;
+        _voiceVideoCalls = data['voice_video_calls'] ?? _voiceVideoCalls;
+        _inAppSounds = data['in_app_sounds'] ?? _inAppSounds;
+        _inAppVibrate = data['in_app_vibrate'] ?? _inAppVibrate;
+        _showPreview = data['show_preview'] ?? _showPreview;
+        // Privacy
         _phoneNumberVisible = data['phone_number_visible'] ?? _phoneNumberVisible;
         _lastSeenVisible = data['last_seen_visible'] ?? _lastSeenVisible;
         _profilePhotoVisible = data['profile_photo_visible'] ?? _profilePhotoVisible;
+        _forwardedMessages = data['forwarded_messages'] ?? _forwardedMessages;
+        _addToGroups = data['add_to_groups'] ?? _addToGroups;
+        _voiceVideoCallsVisible = data['voice_video_calls_visible'] ?? _voiceVideoCallsVisible;
+        _findByPhone = data['find_by_phone'] ?? _findByPhone;
+        _findByUsername = data['find_by_username'] ?? _findByUsername;
+        // Theme
+        final themeString = data['theme_mode'] ?? 'dark';
+        _themeMode = themeString == 'light' ? ThemeMode.light : 
+                     themeString == 'system' ? ThemeMode.system : ThemeMode.dark;
+        // Language
+        _language = data['language'] ?? _language;
+        // Data
+        _autoDownloadMedia = data['auto_download_media'] ?? _autoDownloadMedia;
+        _autoDownloadDocuments = data['auto_download_documents'] ?? _autoDownloadDocuments;
+        _saveToGallery = data['save_to_gallery'] ?? _saveToGallery;
         notifyListeners();
       }
     } catch (e) {
@@ -152,11 +187,11 @@ class SettingsProvider extends ChangeNotifier {
 
   Future<void> _saveToFirebase() async {
   try {
-    final user = _auth.currentUser;
-    if (user == null) return;
+    final userId = _auth.currentUser?.uid ?? _mockUserId;
+    if (userId == null) return;
 
-    await _firestore.collection('user_settings').doc(user.uid).set({
-      'user_id': user.uid,
+    await _firestore.collection('user_settings').doc(userId).set({
+      'user_id': userId,
       // Security
       'two_step_verification': _twoStepVerification,
       // Privacy
