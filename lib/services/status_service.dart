@@ -7,7 +7,7 @@ class StatusService {
   static final FirebaseStorage _storage = FirebaseStorage.instance;
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  // Upload image/video status
+  // Upload image/video status media
   static Future<String?> uploadStatusMedia(File file, String userId, String type) async {
     try {
       final ext = path.extension(file.path);
@@ -37,6 +37,7 @@ class StatusService {
         'type': 'text',
         'created_at': Timestamp.now(),
         'expires_at': Timestamp.fromDate(expiresAt),
+        'viewed_by': [],
       });
       return true;
     } catch (e) {
@@ -57,6 +58,7 @@ class StatusService {
         'type': type,
         'created_at': Timestamp.now(),
         'expires_at': Timestamp.fromDate(expiresAt),
+        'viewed_by': [],
       });
       return true;
     } catch (e) {
@@ -66,27 +68,25 @@ class StatusService {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // NEW: Get statuses from saved contacts only
+  // FIXED: Get statuses from saved contacts + user's own status (works for mock users)
   // ═══════════════════════════════════════════════════════════════════════════
   static Future<List<Map<String, dynamic>>> getContactStatuses(String userId) async {
     try {
-      // 1. Get saved contacts for this user
+      // Get saved contacts for this user
       final contactsSnapshot = await _firestore
           .collection('users')
           .doc(userId)
           .collection('contacts')
           .get();
 
-      if (contactsSnapshot.docs.isEmpty) return [];
-
       final contactIds = contactsSnapshot.docs.map((d) => d.id).toList();
-
-      // 2. Get active statuses from those contacts + user's own
-      final now = Timestamp.now();
+      // Always include userId so YOUR status shows even with no contacts
       final allUserIds = [...contactIds, userId];
 
-      // Firestore 'in' query max 10 items — batch if needed
+      if (allUserIds.isEmpty) return [];
+
       final statuses = <Map<String, dynamic>>[];
+      final now = Timestamp.now();
 
       for (int i = 0; i < allUserIds.length; i += 10) {
         final batch = allUserIds.sublist(
@@ -98,7 +98,7 @@ class StatusService {
             .collection('statuses')
             .where('user_id', whereIn: batch)
             .where('expires_at', isGreaterThan: now)
-            .orderBy('expires_at', descending: true)
+            .orderBy('created_at', descending: true)
             .get();
 
         for (final doc in snapshot.docs) {
@@ -114,12 +114,19 @@ class StatusService {
             ...data,
             'is_mine': statusUserId == userId,
             'users': {
-              'username': userData?['username'],
+              'username': userData?['username'] ?? 'Unknown',
               'avatar_url': userData?['avatar_url'],
             },
           });
         }
       }
+
+      // Sort by created_at descending so newest appears first
+      statuses.sort((a, b) {
+        final aTime = (a['created_at'] as Timestamp).toDate();
+        final bTime = (b['created_at'] as Timestamp).toDate();
+        return bTime.compareTo(aTime);
+      });
 
       return statuses;
     } catch (e) {
@@ -128,9 +135,7 @@ class StatusService {
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // NEW: Mark a status as viewed by current user
-  // ═══════════════════════════════════════════════════════════════════════════
+  // Mark a status as viewed by current user
   static Future<void> markAsViewed(String statusId, String userId) async {
     try {
       await _firestore
@@ -146,9 +151,7 @@ class StatusService {
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // NEW: Check if a user is in current user's contacts
-  // ═══════════════════════════════════════════════════════════════════════════
+  // Check if a user is in current user's contacts
   static Future<bool> isContact(String currentUserId, String contactUserId) async {
     try {
       final doc = await _firestore
@@ -164,9 +167,7 @@ class StatusService {
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // NEW: Save a contact to current user's contacts list
-  // ═══════════════════════════════════════════════════════════════════════════
+  // Save a contact to current user's contacts list
   static Future<bool> saveContact(String currentUserId, String contactUserId) async {
     try {
       await _firestore
@@ -184,7 +185,7 @@ class StatusService {
     }
   }
 
-  // Get active statuses (not expired)
+  // Get active statuses (not expired) — all users
   static Future<List<Map<String, dynamic>>> getActiveStatuses() async {
     try {
       final now = Timestamp.now();
@@ -200,7 +201,6 @@ class StatusService {
         final data = doc.data();
         final userId = data['user_id'] as String;
         
-        // Get user info
         final userDoc = await _firestore.collection('users').doc(userId).get();
         final userData = userDoc.data();
         
@@ -221,7 +221,7 @@ class StatusService {
     }
   }
 
-  // Get my statuses
+  // Get my statuses — works for both Firebase and mock users
   static Future<List<Map<String, dynamic>>> getMyStatuses(String userId) async {
     try {
       final now = Timestamp.now();
@@ -229,7 +229,7 @@ class StatusService {
           .collection('statuses')
           .where('user_id', isEqualTo: userId)
           .where('expires_at', isGreaterThan: now)
-          .orderBy('expires_at', descending: true)
+          .orderBy('created_at', descending: true)
           .get();
 
       return snapshot.docs.map((doc) => {
@@ -252,7 +252,6 @@ class StatusService {
           .get();
 
       for (final doc in snapshot.docs) {
-        // Delete associated media if exists
         final data = doc.data();
         if (data['media_url'] != null) {
           try {
@@ -263,7 +262,6 @@ class StatusService {
             print('Delete media error: $e');
           }
         }
-        
         await doc.reference.delete();
       }
     } catch (e) {
