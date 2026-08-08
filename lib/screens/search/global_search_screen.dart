@@ -19,6 +19,8 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
   final _searchFocusNode = FocusNode();
   bool _isLoading = false;
   List<Map<String, dynamic>> _users = [];
+  List<Map<String, dynamic>> _groups = [];
+  List<Map<String, dynamic>> _channels = [];
   String? _error;
   List<String> _recentSearches = [];
   final String _recentSearchesKey = 'global_search_recent';
@@ -134,16 +136,40 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
 
       debugPrint('Search response: ${snapshot.docs.length} users found');
 
-      final filtered = snapshot.docs
-          .map((doc) => {
-                'id': doc.id,
-                ...doc.data(),
-              })
+      final filtered = allUserDocs.values
           .where((u) => u['id'] != currentUserId)
+          .toList();
+
+      // Search groups
+      final groupsSnapshot = await firestore
+          .collection('chats')
+          .where('type', isEqualTo: 'group')
+          .where('name', isGreaterThanOrEqualTo: searchTerm)
+          .where('name', isLessThanOrEqualTo: '$searchTerm\uf8ff')
+          .limit(10)
+          .get();
+
+      final groups = groupsSnapshot.docs
+          .map((doc) => {'id': doc.id, ...doc.data(), 'search_type': 'group'})
+          .toList();
+
+      // Search channels
+      final channelsSnapshot = await firestore
+          .collection('chats')
+          .where('type', isEqualTo: 'channel')
+          .where('name', isGreaterThanOrEqualTo: searchTerm)
+          .where('name', isLessThanOrEqualTo: '$searchTerm\uf8ff')
+          .limit(10)
+          .get();
+
+      final channels = channelsSnapshot.docs
+          .map((doc) => {'id': doc.id, ...doc.data(), 'search_type': 'channel'})
           .toList();
 
       setState(() {
         _users = filtered;
+        _groups = groups;
+        _channels = channels;
         _isLoading = false;
       });
 
@@ -246,6 +272,60 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
       }
     } finally {
       setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _joinGroup(Map<String, dynamic> group) async {
+    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+    final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+    if (userId == null) return;
+
+    final groupId = group['id'];
+    final firestore = FirebaseFirestore.instance;
+
+    await firestore.collection('chats').doc(groupId).update({
+      'participants': FieldValue.arrayUnion([userId]),
+      'participants_data.$userId': {
+        'role': 'member',
+        'joined_at': FieldValue.serverTimestamp(),
+      },
+      'member_count': FieldValue.increment(1),
+    });
+
+    await firestore.collection('chats').doc(groupId).collection('messages').add({
+      'type': 'system',
+      'content': 'A new member joined',
+      'created_at': FieldValue.serverTimestamp(),
+    });
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Joined ${group['name'] ?? 'group'}')),
+      );
+    }
+  }
+
+  Future<void> _joinChannel(Map<String, dynamic> channel) async {
+    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+    final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+    if (userId == null) return;
+
+    final channelId = channel['id'];
+    final firestore = FirebaseFirestore.instance;
+
+    await firestore.collection('chats').doc(channelId).update({
+      'participants': FieldValue.arrayUnion([userId]),
+      'participants_data.$userId': {
+        'role': 'subscriber',
+        'joined_at': FieldValue.serverTimestamp(),
+      },
+      'member_count': FieldValue.increment(1),
+    });
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Subscribed to ${channel['name'] ?? 'channel'}')),
+      );
     }
   }
 
@@ -549,24 +629,79 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
     }
 
     // Results list
+    final totalResults = _users.length + _groups.length + _channels.length;
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 20),
-      itemCount: _users.length + 1,
+      itemCount: totalResults + (_users.isNotEmpty ? 1 : 0) + (_groups.isNotEmpty ? 1 : 0) + (_channels.isNotEmpty ? 1 : 0),
       itemBuilder: (context, index) {
-        if (index == 0) {
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 16, left: 4),
-            child: Text(
-              '${_users.length} result${_users.length != 1 ? 's' : ''}',
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.4),
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
+        int currentIndex = 0;
+
+        // Users section
+        if (_users.isNotEmpty) {
+          if (index == currentIndex) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 16, left: 4, top: 8),
+              child: Text(
+                'Users',
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.5),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-            ),
-          );
+            );
+          }
+          currentIndex++;
+          if (index >= currentIndex && index < currentIndex + _users.length) {
+            return _buildGlowingUserCard(_users[index - currentIndex]);
+          }
+          currentIndex += _users.length;
         }
-        return _buildGlowingUserCard(_users[index - 1]);
+
+        // Groups section
+        if (_groups.isNotEmpty) {
+          if (index == currentIndex) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 16, left: 4, top: 16),
+              child: Text(
+                'Groups',
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.5),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            );
+          }
+          currentIndex++;
+          if (index >= currentIndex && index < currentIndex + _groups.length) {
+            return _buildGroupChannelCard(_groups[index - currentIndex], isGroup: true);
+          }
+          currentIndex += _groups.length;
+        }
+
+        // Channels section
+        if (_channels.isNotEmpty) {
+          if (index == currentIndex) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 16, left: 4, top: 16),
+              child: Text(
+                'Channels',
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.5),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            );
+          }
+          currentIndex++;
+          if (index >= currentIndex && index < currentIndex + _channels.length) {
+            return _buildGroupChannelCard(_channels[index - currentIndex], isGroup: false);
+          }
+        }
+
+        return const SizedBox.shrink();
       },
     );
   }
@@ -901,6 +1036,147 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
                       isPrimary: true,
                     ),
                   ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGroupChannelCard(Map<String, dynamic> item, {required bool isGroup}) {
+    final name = item['name'] ?? 'Unknown';
+    final description = item['description'] ?? '';
+    final avatarUrl = item['avatar_url'] as String?;
+    final memberCount = item['member_count'] ?? (item['participants'] as List?)?.length ?? 0;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Colors.white.withOpacity(0.08),
+                  Colors.white.withOpacity(0.02),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: isGroup 
+                    ? const Color(0xFF8B5CF6).withOpacity(0.3)
+                    : Colors.orange.withOpacity(0.3),
+                width: 1,
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: avatarUrl != null && avatarUrl.isNotEmpty
+                        ? null
+                        : LinearGradient(
+                            colors: isGroup 
+                                ? [const Color(0xFF8B5CF6), const Color(0xFF06B6D4)]
+                                : [Colors.orange, Colors.red],
+                          ),
+                  ),
+                  child: ClipOval(
+                    child: avatarUrl != null && avatarUrl.isNotEmpty
+                        ? Image.network(avatarUrl, width: 56, height: 56, fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => _buildAvatarFallback(name))
+                        : _buildAvatarFallback(name),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: isGroup 
+                                  ? const Color(0xFF8B5CF6).withOpacity(0.2)
+                                  : Colors.orange.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              isGroup ? 'GROUP' : 'CHANNEL',
+                              style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                                color: isGroup ? const Color(0xFF8B5CF6) : Colors.orange,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            name,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 15,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '$memberCount members',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.white.withOpacity(0.4),
+                        ),
+                      ),
+                      if (description.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          description,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.white.withOpacity(0.4),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                GestureDetector(
+                  onTap: () => isGroup ? _joinGroup(item) : _joinChannel(item),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: isGroup 
+                            ? [const Color(0xFF8B5CF6), const Color(0xFF06B6D4)]
+                            : [Colors.orange, Colors.red],
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      isGroup ? 'Join' : 'Subscribe',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
                 ),
               ],
             ),
