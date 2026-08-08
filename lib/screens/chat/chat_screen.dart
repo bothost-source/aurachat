@@ -1441,7 +1441,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     }
   }
 
-  Future<void> _uploadAndSendMedia({
+    Future<void> _uploadAndSendMedia({
     required File file,
     required String type,
     String? fileName,
@@ -1464,10 +1464,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
         ),
       );
 
-      final mediaUrl = await CloudinaryService.uploadImage(file, 'aurachat/chats/$_chatId');
+      String? mediaUrl;
+      
+      // FIX: Use appropriate upload method for each file type
+      if (type == 'image') {
+        mediaUrl = await CloudinaryService.uploadImage(file, 'aurachat/chats/$_chatId');
+      } else if (type == 'video') {
+        mediaUrl = await CloudinaryService.uploadVideo(file, 'aurachat/chats/$_chatId');
+      } else if (type == 'audio') {
+        mediaUrl = await CloudinaryService.uploadAudio(file, 'aurachat/chats/$_chatId');
+      } else {
+        // file/document
+        mediaUrl = await CloudinaryService.uploadFile(file, 'aurachat/chats/$_chatId');
+      }
+
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
 
-      if (mediaUrl == null) throw Exception('Upload failed');
+      if (mediaUrl == null) throw Exception('Upload failed - no URL returned');
 
       await _sendMessage(
         type: type,
@@ -1608,12 +1621,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     }
   }
 
-  Future<void> _downloadMedia(String url, String fileName) async {
+    Future<void> _downloadMedia(String url, String fileName) async {
     try {
-      final status = await Permission.storage.request();
-      if (status != PermissionStatus.granted) {
+      // FIX: Request photos permission for images/videos
+      final isImage = fileName.endsWith('.jpg') || fileName.endsWith('.jpeg') || fileName.endsWith('.png');
+      final isVideo = fileName.endsWith('.mp4') || fileName.endsWith('.mov');
+      
+      PermissionStatus status;
+      if (isImage || isVideo) {
+        status = await Permission.photos.request();
+      } else {
+        status = await Permission.storage.request();
+      }
+      
+      if (!status.isGranted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Storage permission required to download')),
+          const SnackBar(content: Text('Permission denied. Enable in settings.')),
         );
         return;
       }
@@ -1623,19 +1646,28 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
       );
 
       final response = await http.get(Uri.parse(url));
-      if (response.statusCode == 200) {
-        final dir = await getTemporaryDirectory();
-        final path = '${dir.path}/$fileName';
-        final file = File(path);
-        await file.writeAsBytes(response.bodyBytes);
+      if (response.statusCode != 200) throw Exception('Download failed');
 
-        ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Downloaded')),
-        );
+      // FIX: Save to public Downloads directory
+      Directory? saveDir;
+      if (Platform.isAndroid) {
+        saveDir = Directory('/storage/emulated/0/Download/AURA');
       } else {
-        throw Exception('Failed to download');
+        saveDir = await getApplicationDocumentsDirectory();
       }
+      
+      if (!await saveDir.exists()) {
+        await saveDir.create(recursive: true);
+      }
+
+      final filePath = '${saveDir.path}/$fileName';
+      final file = File(filePath);
+      await file.writeAsBytes(response.bodyBytes);
+
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Saved to Downloads/AURA/$fileName')),
+      );
     } catch (e) {
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
       ScaffoldMessenger.of(context).showSnackBar(
