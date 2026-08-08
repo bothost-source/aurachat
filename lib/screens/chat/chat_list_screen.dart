@@ -5,14 +5,21 @@ import 'package:timeago/timeago.dart' as timeago;
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../providers/chat_provider.dart';
 import '../../utils/verified_badge.dart';
+import '../../services/call_service.dart';
+import '../call/call_screen.dart';
 import 'chat_screen.dart';
 import '../channel/channel_screen.dart';
 import '../channel/channel_info_screen.dart';
 import '../groups/group_info_screen.dart';
 
-class ChatListScreen extends StatelessWidget {
+class ChatListScreen extends StatefulWidget {
   const ChatListScreen({super.key});
 
+  @override
+  State<ChatListScreen> createState() => _ChatListScreenState();
+}
+
+class _ChatListScreenState extends State<ChatListScreen> {
   @override
   Widget build(BuildContext context) {
     final chatProvider = Provider.of<ChatProvider>(context);
