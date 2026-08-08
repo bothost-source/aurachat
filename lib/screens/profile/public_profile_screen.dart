@@ -3,6 +3,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
+import '../../providers/chat_provider.dart';
 
 class PublicProfileScreen extends StatefulWidget {
   const PublicProfileScreen({super.key});
@@ -163,17 +164,21 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                                               ),
                                             );
                                           }
-                                        : () {
-                                            Navigator.pushNamed(
-                                              context,
-                                              '/chat',
-                                              arguments: {
-                                                'chatId': 'direct_$userId',
-                                                'chatName': username,
-                                                'chatAvatar': avatarUrl,
-                                                'isGroup': false,
-                                              },
-                                            );
+                                        : () async {
+                                            final chatProvider = Provider.of<ChatProvider>(context, listen: false);
+                                            final chat = await chatProvider.startDirectChat(userId);
+                                            if (chat != null && mounted) {
+                                              Navigator.pushNamed(
+                                                context,
+                                                '/chat',
+                                                arguments: {
+                                                  'chatId': chat['id'],
+                                                  'chatName': username,
+                                                  'chatAvatar': avatarUrl,
+                                                  'isGroup': false,
+                                                },
+                                              );
+                                            }
                                           },
                                   ),
                                 ),
