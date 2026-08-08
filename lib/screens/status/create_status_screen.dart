@@ -1,8 +1,9 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:provider/provider.dart';
+import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../services/cloudinary_service.dart';
 
 class CreateStatusScreen extends StatefulWidget {
@@ -17,7 +18,6 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
   File? _selectedImage;
   bool _isLoading = false;
 
-  // Theme colors matching SetupProfileScreen
   static const Color _bgDark = Color(0xFF0A0A0F);
   static const Color _bgCard = Color(0xFF1a103c);
   static const Color _purple = Color(0xFF8B5CF6);
@@ -35,7 +35,6 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
       source: ImageSource.gallery,
       imageQuality: 80,
     );
-
     if (pickedFile != null) {
       setState(() => _selectedImage = File(pickedFile.path));
     }
@@ -47,7 +46,6 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
       source: ImageSource.camera,
       imageQuality: 80,
     );
-
     if (pickedFile != null) {
       setState(() => _selectedImage = File(pickedFile.path));
     }
@@ -62,35 +60,40 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final user = FirebaseAuth.instance.currentUser;
-      final userId = user?.uid;
+      // FIX: Support both Firebase and mock users
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+      final userId = authProvider.user?.uid ?? authProvider.mockUserId;
 
       if (userId == null) {
         throw Exception('Not authenticated');
       }
 
       String? mediaUrl;
+      String type = 'text';
 
       // Upload image via Cloudinary if selected
       if (_selectedImage != null) {
+        type = 'image';
         mediaUrl = await CloudinaryService.uploadImage(
           _selectedImage!,
-          'aurachat/statuses/$userId'
+          'aurachat/statuses/$userId',
         );
-
         if (mediaUrl == null) {
           throw Exception('Failed to upload image to Cloudinary');
         }
       }
 
-      // Create status with 24h expiry
+      // FIX: Use same field names as StatusService and status_screen expects
       final now = DateTime.now();
       final expiresAt = now.add(const Duration(hours: 24));
 
       await FirebaseFirestore.instance.collection('statuses').add({
         'user_id': userId,
-        'text': _textController.text.trim().isNotEmpty ? _textController.text.trim() : null,
+        // FIX: Use 'caption' not 'text' — matches status_screen.dart and StatusService
+        'caption': _textController.text.trim().isNotEmpty ? _textController.text.trim() : null,
         'media_url': mediaUrl,
+        // FIX: Add 'type' field so status_screen knows how to render it
+        'type': type,
         'created_at': Timestamp.fromDate(now),
         'expires_at': Timestamp.fromDate(expiresAt),
         'viewed_by': [],
@@ -131,11 +134,7 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [
-              _bgDark,
-              _bgCard,
-              Color(0xFF0f172a),
-            ],
+            colors: [_bgDark, _bgCard, Color(0xFF0f172a)],
           ),
         ),
         child: SafeArea(
