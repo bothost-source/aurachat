@@ -28,6 +28,9 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
   late AnimationController _animController;
   late Animation<double> _fadeAnimation;
 
+  String? _existingUsername;
+  bool _isExistingUser = false;
+
   @override
   void initState() {
     super.initState();
@@ -39,6 +42,35 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
       CurvedAnimation(parent: _animController, curve: Curves.easeOut),
     );
     _animController.forward();
+    _loadExistingProfile();
+  }
+
+  /// Load existing profile data for returning users
+  Future<void> _loadExistingProfile() async {
+    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+    final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+    if (userId == null) return;
+
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .get();
+
+      if (doc.exists && mounted) {
+        final data = doc.data()!;
+        setState(() {
+          _isExistingUser = true;
+          _existingUsername = data['username'] as String?;
+          _nameController.text = data['display_name'] as String? ?? '';
+          _usernameController.text = _existingUsername ?? '';
+          _bioController.text = data['bio'] as String? ?? '';
+          // Note: avatar_url can't be loaded into File, user can re-pick if they want to change
+        });
+      }
+    } catch (e) {
+      debugPrint('Load existing profile error: $e');
+    }
   }
 
   void _validateUsername(String value) {
@@ -208,6 +240,10 @@ Future<String?> _uploadProfileImage(String userId) async {
 }
 
   Future<bool> _isUsernameTaken(String username) async {
+    // Skip check if user is keeping their own username
+    if (_isExistingUser && _existingUsername != null && _existingUsername == username) {
+      return false;
+    }
     try {
       final query = await FirebaseFirestore.instance
           .collection('users')
@@ -528,7 +564,9 @@ Future<String?> _uploadProfileImage(String userId) async {
                                 ),
                               )
                             : Text(
-                                AppLocalizations.get('complete_setup'),
+                                _isExistingUser 
+                                    ? 'Update Profile'
+                                    : AppLocalizations.get('complete_setup'),
                                 style: const TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.w700,
@@ -606,4 +644,3 @@ Future<String?> _uploadProfileImage(String userId) async {
     );
   }
 }
-
