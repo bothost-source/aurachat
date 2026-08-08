@@ -40,15 +40,23 @@ class _ChannelChatScreenState extends State<ChannelChatScreen> {
       .orderBy('timestamp', descending: true)
       .snapshots();
 
-  Future<void> _sendMessage() async {
+    Future<void> _sendMessage() async {
     final text = _messageController.text.trim();
     if (text.isEmpty && _selectedImage == null) return;
 
     setState(() => _isLoading = true);
 
     try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) throw Exception('Not authenticated');
+      // FIX: Support mock users
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+      final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+      if (userId == null) throw Exception('Not authenticated');
+
+      // FIX: Get user data for sender name/avatar
+      final userDoc = await FirebaseFirestore.instance.collection('users').doc(userId).get();
+      final userData = userDoc.data() ?? {};
+      final senderName = userData['username'] ?? 'Admin';
+      final senderAvatar = userData['avatar_url'];
 
       String? imageUrl;
       if (_selectedImage != null) {
@@ -66,12 +74,12 @@ class _ChannelChatScreenState extends State<ChannelChatScreen> {
           .add({
         'text': text.isNotEmpty ? text : null,
         'image_url': imageUrl,
-        'sender_id': user.uid,
-        'sender_name': user.displayName ?? 'Anonymous',
+        'sender_id': userId,
+        'sender_name': senderName,      // FIX: Store sender name
+        'sender_avatar': senderAvatar,    // FIX: Store sender avatar
         'timestamp': FieldValue.serverTimestamp(),
       });
 
-      // Update last message
       await FirebaseFirestore.instance
           .collection('chats')
           .doc(widget.channelId)
@@ -102,10 +110,28 @@ class _ChannelChatScreenState extends State<ChannelChatScreen> {
       SnackBar(content: Text(msg), backgroundColor: Colors.red),
     );
   }
-
+  
   String _formatTime(Timestamp? timestamp) {
     if (timestamp == null) return '';
     return DateFormat('HH:mm').format(timestamp.toDate());
+  }
+  
+  Widget _buildMessageAvatar(String? avatarUrl, String? username) {
+    if (avatarUrl != null && avatarUrl.isNotEmpty) {
+      return CircleAvatar(
+        radius: 14,
+        backgroundImage: NetworkImage(avatarUrl),
+        onBackgroundImageError: (_, __) {},
+      );
+    }
+    return CircleAvatar(
+      radius: 14,
+      backgroundColor: _purple.withOpacity(0.3),
+      child: Text(
+        (username ?? 'A')[0].toUpperCase(),
+        style: const TextStyle(color: Colors.white, fontSize: 10),
+      ),
+    );
   }
 
   @override
@@ -173,7 +199,7 @@ class _ChannelChatScreenState extends State<ChannelChatScreen> {
                 ),
               ),
 
-              // Messages
+                            // Messages — FIXED: All left-aligned like Telegram channels
               Expanded(
                 child: StreamBuilder<QuerySnapshot>(
                   stream: _messagesStream,
@@ -233,38 +259,50 @@ class _ChannelChatScreenState extends State<ChannelChatScreen> {
                       itemCount: messages.length,
                       itemBuilder: (context, index) {
                         final msg = messages[index].data() as Map<String, dynamic>;
-                        final isMe = msg['sender_id'] == FirebaseAuth.instance.currentUser?.uid;
                         final hasImage = msg['image_url'] != null;
 
+                        // FIX: All messages left-aligned, no "isMe" check for alignment
                         return Align(
-                          alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                          alignment: Alignment.centerLeft,  // FIX: Always left
                           child: Container(
                             margin: const EdgeInsets.only(bottom: 12),
                             constraints: BoxConstraints(
-                              maxWidth: MediaQuery.of(context).size.width * 0.75,
+                              maxWidth: MediaQuery.of(context).size.width * 0.85,  // FIX: Wider like Telegram
                             ),
                             decoration: BoxDecoration(
-                              gradient: isMe
-                                  ? const LinearGradient(
-                                      colors: [_purple, Color(0xFF7c3aed)],
-                                    )
-                                  : null,
-                              color: isMe ? null : Colors.white.withOpacity(0.05),
+                              color: Colors.white.withOpacity(0.05),  // FIX: Same style for all
                               borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: Colors.white.withOpacity(0.08)),
                             ),
                             padding: const EdgeInsets.all(12),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                if (!isMe)
-                                  Text(
-                                    msg['sender_name'] ?? 'Unknown',
-                                    style: TextStyle(
-                                      color: Colors.white.withOpacity(0.6),
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w500,
+                                // FIX: Always show sender name (admin name)
+                                Row(
+                                  children: [
+                                    _buildMessageAvatar(msg['sender_avatar'], msg['sender_name']),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        msg['sender_name'] ?? 'Admin',
+                                        style: TextStyle(
+                                          color: Colors.white.withOpacity(0.7),
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
                                     ),
-                                  ),
+                                    Text(
+                                      _formatTime(msg['timestamp'] as Timestamp?),
+                                      style: TextStyle(
+                                        color: Colors.white.withOpacity(0.3),
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
                                 if (hasImage) ...[
                                   ClipRRect(
                                     borderRadius: BorderRadius.circular(12),
@@ -294,14 +332,6 @@ class _ChannelChatScreenState extends State<ChannelChatScreen> {
                                       height: 1.4,
                                     ),
                                   ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  _formatTime(msg['timestamp'] as Timestamp?),
-                                  style: TextStyle(
-                                    color: Colors.white.withOpacity(0.4),
-                                    fontSize: 11,
-                                  ),
-                                ),
                               ],
                             ),
                           ),
