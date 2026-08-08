@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
+import 'package:provider/provider.dart';
+import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../services/call_service.dart';
 import '../../services/call_signaling_service.dart';
 
@@ -16,6 +18,7 @@ class CallScreen extends StatefulWidget {
   final bool? isVideoCall;
   final CallSignal? incomingSignal;
   final String? channelName;
+  final bool showOptions; // NEW: Show bottom sheet options instead of contact list
 
   const CallScreen.pick({super.key})
       : targetUserId = null,
@@ -23,7 +26,17 @@ class CallScreen extends StatefulWidget {
         targetUserAvatar = null,
         isVideoCall = null,
         incomingSignal = null,
-        channelName = null;
+        channelName = null,
+        showOptions = false;
+
+  const CallScreen.options({super.key}) // NEW: Show the 4-option bottom sheet
+      : targetUserId = null,
+        targetUserName = null,
+        targetUserAvatar = null,
+        isVideoCall = null,
+        incomingSignal = null,
+        channelName = null,
+        showOptions = true;
 
   const CallScreen.outgoing({
     super.key,
@@ -32,7 +45,8 @@ class CallScreen extends StatefulWidget {
     this.targetUserAvatar,
     required this.isVideoCall,
   })  : incomingSignal = null,
-        channelName = null;
+        channelName = null,
+        showOptions = false;
 
   const CallScreen.incoming({
     super.key,
@@ -41,7 +55,8 @@ class CallScreen extends StatefulWidget {
         targetUserName = null,
         targetUserAvatar = null,
         isVideoCall = null,
-        channelName = null;
+        channelName = null,
+        showOptions = false;
 
   const CallScreen.active({
     super.key,
@@ -50,7 +65,8 @@ class CallScreen extends StatefulWidget {
     required this.targetUserId,
     required this.targetUserName,
   })  : targetUserAvatar = null,
-        incomingSignal = null;
+        incomingSignal = null,
+        showOptions = false;
 
   @override
   State<CallScreen> createState() => _CallScreenState();
@@ -82,7 +98,9 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    if (widget.incomingSignal != null) {
+    if (widget.showOptions) {
+      _callState = CallState.options;
+    } else if (widget.incomingSignal != null) {
       _callState = CallState.incoming;
       _startIncomingCallTimer();
     } else if (widget.targetUserId != null && widget.channelName == null) {
@@ -97,41 +115,342 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
   }
 
   // ═══════════════════════════════════════════════════════════
+  // CALL OPTIONS (Bottom Sheet)
+  // ═══════════════════════════════════════════════════════════
+
+  void _showCallOptions() {
+    // Generate a shareable code for this call
+    final callCode = CallService.generateChannelName();
+    
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1a103c),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 24),
+            
+            // Shareable code
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.05),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: const Color(0xFF8B5CF6).withOpacity(0.3)),
+              ),
+              child: Column(
+                children: [
+                  Text(
+                    'Share this code to join',
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.5),
+                      fontSize: 13,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  SelectableText(
+                    callCode,
+                    style: const TextStyle(
+                      color: Color(0xFF8B5CF6),
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 2,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            
+            const SizedBox(height: 32),
+            
+            // Call from Contacts
+            _buildOptionTile(
+              icon: Icons.contacts,
+              label: 'Call from Contacts',
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(builder: (_) => const CallScreen.pick()),
+                );
+              },
+            ),
+            
+            const SizedBox(height: 12),
+            
+            // Start Voice Call
+            _buildOptionTile(
+              icon: Icons.call,
+              label: 'Start Voice Call',
+              color: Colors.green,
+              onTap: () {
+                Navigator.pop(context);
+                _startGroupCall(callCode, false);
+              },
+            ),
+            
+            const SizedBox(height: 12),
+            
+            // Start Video Call
+            _buildOptionTile(
+              icon: Icons.videocam,
+              label: 'Start Video Call',
+              color: const Color(0xFF8B5CF6),
+              onTap: () {
+                Navigator.pop(context);
+                _startGroupCall(callCode, true);
+              },
+            ),
+            
+            const SizedBox(height: 12),
+            
+            // Join by Code
+            _buildOptionTile(
+              icon: Icons.dialpad,
+              label: 'Join by Code',
+              color: Colors.orange,
+              onTap: () {
+                Navigator.pop(context);
+                _showJoinByCodeDialog();
+              },
+            ),
+            
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOptionTile({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    Color color = const Color(0xFF8B5CF6),
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: color.withOpacity(0.3)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.2),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: color, size: 20),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+            Icon(Icons.arrow_forward_ios, color: Colors.white.withOpacity(0.3), size: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _startGroupCall(String code, bool isVideo) {
+    // Start as active call with the generated code
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CallScreen.active(
+          channelName: code,
+          isVideoCall: isVideo,
+          targetUserId: 'group_call',
+          targetUserName: 'Group Call',
+        ),
+      ),
+    );
+  }
+
+  void _showJoinByCodeDialog() {
+    final codeController = TextEditingController();
+    bool isVideo = false;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            backgroundColor: const Color(0xFF1a103c),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: const Text('Join Call by Code', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: codeController,
+                  style: const TextStyle(color: Colors.white, fontSize: 18, letterSpacing: 4),
+                  textAlign: TextAlign.center,
+                  decoration: InputDecoration(
+                    hintText: 'ENTER CODE',
+                    hintStyle: TextStyle(color: Colors.white.withOpacity(0.2), letterSpacing: 4),
+                    filled: true,
+                    fillColor: Colors.white.withOpacity(0.05),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: Border.none,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                  ),
+                  textCapitalization: TextCapitalization.characters,
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => setDialogState(() => isVideo = false),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          decoration: BoxDecoration(
+                            color: !isVideo ? const Color(0xFF8B5CF6).withOpacity(0.3) : Colors.white.withOpacity(0.05),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: !isVideo ? const Color(0xFF8B5CF6) : Colors.white.withOpacity(0.1),
+                            ),
+                          ),
+                          child: Column(
+                            children: [
+                              Icon(Icons.call, color: !isVideo ? const Color(0xFF8B5CF6) : Colors.white54),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Voice',
+                                style: TextStyle(
+                                  color: !isVideo ? const Color(0xFF8B5CF6) : Colors.white54,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => setDialogState(() => isVideo = true),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          decoration: BoxDecoration(
+                            color: isVideo ? const Color(0xFF8B5CF6).withOpacity(0.3) : Colors.white.withOpacity(0.05),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: isVideo ? const Color(0xFF8B5CF6) : Colors.white.withOpacity(0.1),
+                            ),
+                          ),
+                          child: Column(
+                            children: [
+                              Icon(Icons.videocam, color: isVideo ? const Color(0xFF8B5CF6) : Colors.white54),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Video',
+                                style: TextStyle(
+                                  color: isVideo ? const Color(0xFF8B5CF6) : Colors.white54,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text('Cancel', style: TextStyle(color: Colors.white.withOpacity(0.5))),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  final code = codeController.text.trim();
+                  if (code.isEmpty) return;
+                  
+                  Navigator.pop(context);
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => CallScreen.active(
+                        channelName: code,
+                        isVideoCall: isVideo,
+                        targetUserId: 'unknown',
+                        targetUserName: 'Call Room',
+                      ),
+                    ),
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF8B5CF6),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: const Text('Join', style: TextStyle(color: Colors.white)),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
   // CALL LIST
   // ═══════════════════════════════════════════════════════════
 
   Future<void> _loadChatUsers() async {
-    final currentUser = FirebaseAuth.instance.currentUser;
-    if (currentUser == null) {
+    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+    final currentUserId = authProvider.user?.uid ?? authProvider.mockUserId;
+    
+    if (currentUserId == null) {
       setState(() => _loading = false);
       return;
     }
 
     try {
-      final messages = await FirebaseFirestore.instance
-          .collection('messages')
-          .where('sender_id', isEqualTo: currentUser.uid)
-          .orderBy('created_at', descending: true)
+      final chatsSnapshot = await FirebaseFirestore.instance
+          .collection('chats')
+          .where('participants', arrayContains: currentUserId)
           .get();
 
       final Set<String> chatUserIds = {};
-      for (final msg in messages.docs) {
-        final data = msg.data();
-        final senderId = data['sender_id'] as String;
-        final receiverId = data['receiver_id'] as String;
-        if (senderId != currentUser.uid) chatUserIds.add(senderId);
-        if (receiverId != currentUser.uid) chatUserIds.add(receiverId);
-      }
-
-      final receivedMessages = await FirebaseFirestore.instance
-          .collection('messages')
-          .where('receiver_id', isEqualTo: currentUser.uid)
-          .orderBy('created_at', descending: true)
-          .get();
-
-      for (final msg in receivedMessages.docs) {
-        final senderId = msg.data()['sender_id'] as String;
-        if (senderId != currentUser.uid) chatUserIds.add(senderId);
+      for (final chat in chatsSnapshot.docs) {
+        final participants = List<String>.from(chat.data()['participants'] ?? []);
+        for (final pid in participants) {
+          if (pid != currentUserId) chatUserIds.add(pid);
+        }
       }
 
       if (chatUserIds.isEmpty) {
@@ -139,13 +458,20 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
         return;
       }
 
-      final profiles = await FirebaseFirestore.instance
-          .collection('users')
-          .where(FieldPath.documentId, whereIn: chatUserIds.toList())
-          .get();
+      final List<Map<String, dynamic>> users = [];
+      final ids = chatUserIds.toList();
+      for (int i = 0; i < ids.length; i += 10) {
+        final batch = ids.sublist(i, i + 10 > ids.length ? ids.length : i + 10);
+        final profiles = await FirebaseFirestore.instance
+            .collection('users')
+            .where(FieldPath.documentId, whereIn: batch)
+            .get();
+        
+        users.addAll(profiles.docs.map((doc) => {'id': doc.id, ...doc.data()}));
+      }
 
       setState(() {
-        _users = profiles.docs.map((doc) => {'id': doc.id, ...doc.data()}).toList();
+        _users = users;
         _loading = false;
       });
     } catch (e) {
@@ -210,21 +536,21 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              _buildActionButton(
+              _buildProfileActionButton(
                 icon: Icons.videocam,
                 color: const Color(0xFF8B5CF6),
                 label: 'Video',
                 onTap: () { Navigator.pop(context); _startCall(user, true); },
               ),
               const SizedBox(width: 24),
-              _buildActionButton(
+              _buildProfileActionButton(
                 icon: Icons.call,
                 color: Colors.green,
                 label: 'Voice',
                 onTap: () { Navigator.pop(context); _startCall(user, false); },
               ),
               const SizedBox(width: 24),
-              _buildActionButton(
+              _buildProfileActionButton(
                 icon: Icons.message,
                 color: Colors.blue,
                 label: 'Message',
@@ -244,7 +570,7 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildActionButton({
+  Widget _buildProfileActionButton({
     required IconData icon,
     required Color color,
     required String label,
@@ -292,17 +618,18 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _sendCallInvitation() async {
-    final currentUser = FirebaseAuth.instance.currentUser;
-    if (currentUser == null) return;
+    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+    final currentUserId = authProvider.user?.uid ?? authProvider.mockUserId;
+    if (currentUserId == null) return;
 
     try {
-      final profile = await FirebaseFirestore.instance.collection('users').doc(currentUser.uid).get();
+      final profile = await FirebaseFirestore.instance.collection('users').doc(currentUserId).get();
       final data = profile.data();
 
       await CallSignalingService.sendCallInvitation(
         targetUserId: widget.targetUserId!,
         callId: _callId!,
-        callerId: currentUser.uid,
+        callerId: currentUserId,
         callerName: data?['username'] ?? 'Unknown',
         callerAvatar: data?['avatar_url'],
         channelName: _channelName!,
@@ -339,8 +666,9 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
 
   Future<void> _cancelCall() async {
     _timeoutTimer?.cancel();
-    final currentUser = FirebaseAuth.instance.currentUser;
-    if (currentUser != null && _callId != null) {
+    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+    final currentUserId = authProvider.user?.uid ?? authProvider.mockUserId;
+    if (currentUserId != null && _callId != null) {
       await CallSignalingService.endCall(targetUserId: widget.targetUserId!, callId: _callId!);
     }
   }
@@ -433,7 +761,7 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
       },
       onUserJoined: (connection, remoteUid, elapsed) {
         setState(() => _remoteUid = remoteUid);
-        _startDurationTimer(); // Start timer when connected
+        _startDurationTimer();
       },
       onUserOffline: (connection, remoteUid, reason) {
         setState(() => _remoteUid = null);
@@ -484,11 +812,12 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _saveCallLog() async {
-    final currentUser = FirebaseAuth.instance.currentUser;
-    if (currentUser == null || widget.targetUserId == null) return;
+    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+    final currentUserId = authProvider.user?.uid ?? authProvider.mockUserId;
+    if (currentUserId == null || widget.targetUserId == null) return;
 
     await FirebaseFirestore.instance.collection('call_logs').add({
-      'caller_id': currentUser.uid,
+      'caller_id': currentUserId,
       'receiver_id': widget.targetUserId,
       'call_type': widget.isVideoCall! ? 'video' : 'voice',
       'duration_seconds': _callDurationSeconds,
@@ -542,12 +871,20 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0F),
       body: switch (_callState) {
+        CallState.options => _buildCallOptions(), // NEW
         CallState.list => _buildCallList(),
         CallState.outgoing => _buildOutgoingCall(),
         CallState.incoming => _buildIncomingCall(),
         CallState.active => _buildActiveCall(),
       },
     );
+  }
+
+  // ─── Call Options UI (Bottom Sheet style) ───
+  Widget _buildCallOptions() {
+    // This is shown when CallScreen.options() is used
+    // The actual bottom sheet is shown via _showCallOptions()
+    return const SizedBox.shrink();
   }
 
   // ─── Call List UI ───
@@ -855,4 +1192,4 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
   }
 }
 
-enum CallState { list, outgoing, incoming, active }
+enum CallState { options, list, outgoing, incoming, active }
