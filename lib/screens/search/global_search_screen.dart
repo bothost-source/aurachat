@@ -136,9 +136,14 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
 
       debugPrint('Search response: ${snapshot.docs.length} users found');
 
-      final filtered = allUserDocs.values
+      final users = snapshot.docs
+          .map((doc) => {'id': doc.id, ...doc.data(), 'search_type': 'user'})
+          .toList();
+
+      final filtered = users
           .where((u) => u['id'] != currentUserId)
           .toList();
+
 
       // Search groups
       final groupsSnapshot = await firestore
