@@ -2857,6 +2857,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
                               fileName: message['file_name'], 
                               fileSize: message['file_size'], 
                               isMe: isMe,
+                            )
+                          else if (type == 'link_preview' && mediaUrl != null)
+                            _buildLinkPreviewBubble(
+                              link: content,
+                              previewData: message['preview_data'] ?? {},
+                              isMe: isMe,
                             ),
 
                           const SizedBox(height: 4),
@@ -3074,6 +3080,168 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
       ),
     );
   }
+  
+  Widget _buildLinkPreviewBubble({
+  required String link,
+  required Map<String, dynamic> previewData,
+  required bool isMe,
+}) {
+  final title = previewData['title'] ?? 'Join Group';
+  final description = previewData['description'] ?? '';
+  final imageUrl = previewData['image_url'] as String?;
+  final memberCount = previewData['member_count'] ?? 0;
+  final chatType = previewData['type'] ?? 'group';
+
+  return GestureDetector(
+    onTap: () {
+      // Handle link tap
+      final uri = Uri.parse(link);
+      final code = uri.pathSegments.last;
+      Navigator.pushNamed(context, '/invitation', arguments: {
+        'code': code,
+      });
+    },
+    child: Container(
+      width: 260,
+      decoration: BoxDecoration(
+        color: isMe ? Colors.white.withOpacity(0.15) : Colors.white.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withOpacity(0.1)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Group image
+          if (imageUrl != null)
+            ClipRRect(
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+              child: CachedNetworkImage(
+                imageUrl: imageUrl,
+                width: 260,
+                height: 140,
+                fit: BoxFit.cover,
+                placeholder: (_, __) => Container(
+                  width: 260,
+                  height: 140,
+                  color: Colors.white.withOpacity(0.05),
+                  child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                ),
+                errorWidget: (_, __, ___) => Container(
+                  width: 260,
+                  height: 140,
+                  color: const Color(0xFF1a103c),
+                  child: Icon(
+                    chatType == 'channel' ? Icons.campaign : Icons.group,
+                    size: 50,
+                    color: const Color(0xFF8B5CF6),
+                  ),
+                ),
+              ),
+            )
+          else
+            Container(
+              width: 260,
+              height: 140,
+              decoration: BoxDecoration(
+                color: const Color(0xFF1a103c),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+              ),
+              child: Icon(
+                chatType == 'channel' ? Icons.campaign : Icons.group,
+                size: 50,
+                color: const Color(0xFF8B5CF6),
+              ),
+            ),
+          
+          // Content
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF8B5CF6).withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        chatType.toUpperCase(),
+                        style: const TextStyle(
+                          color: Color(0xFF8B5CF6),
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '$memberCount members',
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.5),
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (description.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    description,
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.6),
+                      fontSize: 12,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
+                    ),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.login, color: Colors.white, size: 16),
+                      SizedBox(width: 6),
+                      Text(
+                        'Join Group',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
 
   Widget _buildFileMessage({required String content, required String? mediaUrl, required String? fileName, required String? fileSize, required bool isMe}) {
     return GestureDetector(
