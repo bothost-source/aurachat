@@ -2728,7 +2728,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
             Flexible(
               child: GestureDetector(
                 // FIX: Double-tap shows quick reaction bar instead of full picker
-                onDoubleTap: () => _showQuickReactions(message['id']),
+                onDoubleTap: () => _showReactionPicker(message['id']),
                 onLongPress: () => _showMessageOptions(message, isMe),
                 child: Stack(
                   clipBehavior: Clip.none,
