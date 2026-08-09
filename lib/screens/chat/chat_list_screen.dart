@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_slidable/flutter_slidable.dart';
-import 'package:timeago/timeago.dart' as timeago;
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../providers/chat_provider.dart';
 import '../../utils/verified_badge.dart';
@@ -65,11 +65,16 @@ class _ChatListScreenState extends State<ChatListScreen> {
         final chatType = chat['type'] as String? ?? 'direct';
         final unreadCount = chat['unread_count'] ?? 0;
         final lastMessage = chat['last_message'];
+
+        // FIX: Properly handle Firestore Timestamp, DateTime, and String
         final lastMessageAt = chat['last_message_at'] != null
             ? (chat['last_message_at'] is DateTime 
                 ? chat['last_message_at'] as DateTime
-                : DateTime.tryParse(chat['last_message_at'].toString()))
+                : chat['last_message_at'] is Timestamp
+                    ? (chat['last_message_at'] as Timestamp).toDate()
+                    : DateTime.tryParse(chat['last_message_at'].toString()))
             : null;
+
         final memberCount = chat['participants_count'] ?? 0;
         final createdByPhone = chat['created_by_phone'] as String?;
         final role = chat['role'] as String? ?? 'member';
@@ -145,9 +150,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
                         overflow: TextOverflow.ellipsis,
                       ),
                 ),
+                // FIX: Use custom time formatting instead of timeago
                 if (lastMessageAt != null)
                   Text(
-                    timeago.format(lastMessageAt),
+                    _formatChatListTime(lastMessageAt),
                     style: TextStyle(
                       fontSize: 12,
                       color: unreadCount > 0
@@ -281,6 +287,53 @@ class _ChatListScreenState extends State<ChatListScreen> {
         );
       },
     );
+  }
+
+  // ============================================
+  // NEW: Custom time formatting for chat list
+  // ============================================
+  String _formatChatListTime(DateTime dateTime) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final messageDate = DateTime(dateTime.year, dateTime.month, dateTime.day);
+    final diffDays = today.difference(messageDate).inDays;
+    final diffMinutes = now.difference(dateTime).inMinutes;
+    final diffHours = now.difference(dateTime).inHours;
+
+    if (diffDays == 0) {
+      // Today
+      if (diffMinutes < 1) {
+        return 'Now';
+      } else if (diffMinutes < 60) {
+        return '${diffMinutes}m ago';
+      } else {
+        return '${diffHours}h ago';
+      }
+    } else if (diffDays == 1) {
+      return 'Yesterday';
+    } else if (diffDays < 7) {
+      // Within last week - show day name
+      return _getDayName(dateTime.weekday);
+    } else if (dateTime.year == now.year) {
+      // Same year - show "Aug 8"
+      return '${_getMonthName(dateTime.month)} ${dateTime.day}';
+    } else {
+      // Different year - show "Aug 8, 2024"
+      return '${_getMonthName(dateTime.month)} ${dateTime.day}, ${dateTime.year}';
+    }
+  }
+
+  String _getDayName(int weekday) {
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    return days[weekday - 1];
+  }
+
+  String _getMonthName(int month) {
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    return months[month - 1];
   }
 
   Widget _buildAvatar(Map<String, dynamic> chat) {
