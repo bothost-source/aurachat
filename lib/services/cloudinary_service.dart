@@ -1,12 +1,17 @@
 import 'dart:io';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 import 'package:cloudinary_public/cloudinary_public.dart';
 
 class CloudinaryService {
   static final _cloudinary = CloudinaryPublic(
-    'dn2mwp1lc',    // Your cloud name
-    'aura_chat',     // Your unsigned upload preset
+    'dn2mwp1lc',
+    'aura_chat',
     cache: false,
   );
+
+  // Backend delete endpoint
+  static const String _deleteEndpoint = 'https://aurachat-backend-5utu.onrender.com/delete-cloudinary';
 
   static Future<String?> uploadImage(File file, String folder) async {
     try {
@@ -26,7 +31,6 @@ class CloudinaryService {
     }
   }
 
-  // NEW: Upload video files
   static Future<String?> uploadVideo(File file, String folder) async {
     try {
       final response = await _cloudinary.uploadFile(
@@ -45,14 +49,13 @@ class CloudinaryService {
     }
   }
 
-  // NEW: Upload audio/voice note files
   static Future<String?> uploadAudio(File file, String folder) async {
     try {
       final response = await _cloudinary.uploadFile(
         CloudinaryFile.fromFile(
           file.path,
           folder: folder,
-          resourceType: CloudinaryResourceType.Video, // Cloudinary uses Video type for audio
+          resourceType: CloudinaryResourceType.Video,
         ),
       );
       print('Cloudinary audio upload successful: ${response.secureUrl}');
@@ -64,14 +67,13 @@ class CloudinaryService {
     }
   }
 
-  // NEW: Upload any file (documents, PDFs, etc.)
   static Future<String?> uploadFile(File file, String folder) async {
     try {
       final response = await _cloudinary.uploadFile(
         CloudinaryFile.fromFile(
           file.path,
           folder: folder,
-          resourceType: CloudinaryResourceType.Auto, // Auto-detect file type
+          resourceType: CloudinaryResourceType.Auto,
         ),
       );
       print('Cloudinary file upload successful: ${response.secureUrl}');
@@ -83,38 +85,61 @@ class CloudinaryService {
     }
   }
 
-  // NEW: Delete file from Cloudinary by URL
-  static Future<bool> deleteFile(String? url) async {
-    if (url == null || url.isEmpty) return false;
-    
+  /// Extract public_id from Cloudinary URL
+  static String? extractPublicId(String url) {
     try {
-      // Extract public_id from Cloudinary URL
-      // URL format: https://res.cloudinary.com/{cloud}/image/upload/v{version}/{folder}/{filename}
       final uri = Uri.parse(url);
-      final pathSegments = uri.pathSegments;
-      
-      // Find 'upload' index and get everything after it
-      final uploadIndex = pathSegments.indexOf('upload');
-      if (uploadIndex == -1 || uploadIndex + 1 >= pathSegments.length) return false;
-      
-      // Skip version number and get the rest as public_id
-      final publicId = pathSegments.sublist(uploadIndex + 2).join('/');
-      final publicIdWithoutExt = publicId.contains('.') 
+      final segments = uri.pathSegments;
+      final uploadIndex = segments.indexOf('upload');
+      if (uploadIndex == -1 || uploadIndex + 2 >= segments.length) return null;
+
+      final publicId = segments.sublist(uploadIndex + 2).join('/');
+      return publicId.contains('.') 
         ? publicId.substring(0, publicId.lastIndexOf('.')) 
         : publicId;
-      
-      // Note: Deleting requires signed API or admin API
-      // For unsigned uploads, you need to enable "Allow deletion of assets" in upload preset settings
-      // Or use Cloudinary admin API with API key/secret (server-side only)
-      print('Would delete: $publicIdWithoutExt');
-      
-      // For now, log it. To actually delete, you need server-side API:
-      // await _cloudinary.destroy(publicIdWithoutExt);
-      
-      return true;
     } catch (e) {
-      print('Delete file error: $e');
+      print('Extract public_id error: $e');
+      return null;
+    }
+  }
+
+  /// Delete file from Cloudinary via backend
+  static Future<bool> deleteFile(String? url) async {
+    if (url == null || url.isEmpty) return false;
+
+    final publicId = extractPublicId(url);
+    if (publicId == null) {
+      print('Could not extract public_id from: $url');
       return false;
     }
+
+    try {
+      print('Deleting from Cloudinary: $publicId');
+      final response = await http.post(
+        Uri.parse(_deleteEndpoint),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'public_id': publicId}),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        print('Delete result: ${data['message'] ?? data['error']}');
+        return data['success'] == true;
+      }
+      print('Delete failed: ${response.statusCode} - ${response.body}');
+      return false;
+    } catch (e) {
+      print('Delete request error: $e');
+      return false;
+    }
+  }
+
+  /// Delete multiple files at once
+  static Future<Map<String, bool>> deleteMultiple(List<String> urls) async {
+    final results = <String, bool>{};
+    for (final url in urls) {
+      results[url] = await deleteFile(url);
+    }
+    return results;
   }
 }
