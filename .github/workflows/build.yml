@@ -84,14 +84,7 @@ jobs:
           # 3. Replace buildTypes with minification + ProGuard
           content = re.sub(
               r'buildTypes\s*\{[^}]*release\s*\{[^}]*\}[^}]*\}',
-              '''buildTypes {
-                  release {
-                      minifyEnabled true
-                      shrinkResources true
-                      proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-                      signingConfig = signingConfigs.debug
-                  }
-              }''',
+              "buildTypes {\n        release {\n            minifyEnabled true\n            shrinkResources true\n            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'\n            signingConfig = signingConfigs.debug\n        }\n    }",
               content,
               flags=re.DOTALL
           )
@@ -111,29 +104,29 @@ jobs:
           -keep class io.flutter.** { *; }
           -keep class io.flutter.plugins.** { *; }
           -keep class androidx.lifecycle.** { *; }
-          
+
           # Firebase
           -keep class com.google.firebase.** { *; }
           -keep class com.google.android.gms.** { *; }
-          
+
           # Agora
           -keep class io.agora.** { *; }
           -dontwarn io.agora.**
-          
+
           # Cloudinary
           -keep class com.cloudinary.** { *; }
           -dontwarn com.cloudinary.**
-          
+
           # HTTP clients
           -keep class okhttp3.** { *; }
           -keep class retrofit2.** { *; }
           -dontwarn retrofit2.**
-          
+
           # Prevent stripping of JSON models
           -keepclassmembers class * {
               @com.google.gson.annotations.SerializedName <fields>;
           }
-          
+
           # Keep stack traces readable
           -keepattributes SourceFile,LineNumberTable
           -renamesourcefileattribute SourceFile
@@ -143,7 +136,7 @@ jobs:
         run: |
           cat > android/app/src/main/AndroidManifest.xml << 'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              
+
               <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -159,7 +152,7 @@ jobs:
               <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
               <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
               <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
-              
+
               <application
                   android:label="AURA Chat"
                   android:name="${applicationName}"
@@ -170,7 +163,7 @@ jobs:
                   android:largeHeap="true"
                   android:hardwareAccelerated="true"
                   android:extractNativeLibs="true">
-                  
+
                   <activity
                       android:name=".MainActivity"
                       android:exported="true"
@@ -187,7 +180,7 @@ jobs:
                           <action android:name="android.intent.action.MAIN"/>
                           <category android:name="android.intent.category.LAUNCHER"/>
                       </intent-filter>
-                      
+
                       <!-- Deep Link: Invitation Links -->
                       <intent-filter android:autoVerify="true">
                           <action android:name="android.intent.action.VIEW"/>
@@ -197,7 +190,7 @@ jobs:
                                 android:host="aurachat.app"
                                 android:pathPrefix="/invite"/>
                       </intent-filter>
-                      
+
                       <intent-filter>
                           <action android:name="android.intent.action.VIEW"/>
                           <category android:name="android.intent.category.DEFAULT"/>
@@ -206,11 +199,11 @@ jobs:
                                 android:host="invite"/>
                       </intent-filter>
                   </activity>
-                  
+
                   <meta-data
                       android:name="flutterEmbedding"
                       android:value="2" />
-                      
+
                   <meta-data
                       android:name="com.google.firebase.messaging.default_notification_channel_id"
                       android:value="aura_chat_channel"/>
