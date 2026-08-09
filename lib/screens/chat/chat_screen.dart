@@ -1246,9 +1246,30 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     _scrollToMessage(_searchResults[_currentSearchIndex]['id']);
   }
 
-  Future<void> _deleteMessageForEveryone(String messageId) async {
+     Future<void> _deleteMessageForEveryone(String messageId) async {
     try {
       final firestore = FirebaseFirestore.instance;
+      
+      // ── GET MESSAGE DATA TO CHECK FOR MEDIA ──
+      final messageDoc = await firestore
+          .collection('chats')
+          .doc(_chatId!)
+          .collection('messages')
+          .doc(messageId)
+          .get();
+      
+      final messageData = messageDoc.data();
+      final mediaUrl = messageData?['media_url'] as String?;
+      final messageType = messageData?['type'] as String?;
+
+      // ── DELETE MEDIA FROM CLOUDINARY IF EXISTS ──
+      if (mediaUrl != null && mediaUrl.isNotEmpty && 
+          (messageType == 'image' || messageType == 'video' || messageType == 'audio' || messageType == 'file')) {
+        await CloudinaryService.deleteFile(mediaUrl);
+      }
+      // ── END CLOUDINARY DELETE ──
+
+      // ── MARK MESSAGE AS DELETED ──
       await firestore
           .collection('chats')
           .doc(_chatId!)
