@@ -1,5 +1,5 @@
-import 'dart:io';
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:cloudinary_public/cloudinary_public.dart';
 
@@ -12,6 +12,9 @@ class CloudinaryService {
 
   // Backend delete endpoint
   static const String _deleteEndpoint = 'https://aurachat-backend-5utu.onrender.com/delete-cloudinary';
+  
+  // Backend API key for delete authentication
+  static const String _backendApiKey = 'aura_chat_secret_2026_xyz';
 
   static Future<String?> uploadImage(File file, String folder) async {
     try {
@@ -117,7 +120,10 @@ class CloudinaryService {
       print('Deleting from Cloudinary: $publicId');
       final response = await http.post(
         Uri.parse(_deleteEndpoint),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': _backendApiKey,
+        },
         body: jsonEncode({'public_id': publicId}),
       );
 
