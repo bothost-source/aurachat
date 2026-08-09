@@ -111,6 +111,13 @@ cloudinary.config({
 
 app.post('/delete-cloudinary', async (req, res) => {
   try {
+    // ── API KEY AUTH CHECK ──
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== process.env.BACKEND_API_KEY) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+    // ── END AUTH CHECK ──
+
     const { public_id } = req.body;
     
     if (!public_id) {
@@ -259,6 +266,103 @@ function formatMessageBody(message) {
 }
 
 startPushNotificationListener();
+
+// ============================================================================
+// MONTHLY AUTO-CLEANUP — Delete old media from Cloudinary (keeps messages)
+// ============================================================================
+function startMonthlyCleanup() {
+  console.log('Starting monthly media cleanup scheduler...');
+
+  // Run every 30 days
+  setInterval(async () => {
+    try {
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      
+      console.log(`[Cleanup] Running cleanup for media older than ${thirtyDaysAgo.toISOString()}`);
+
+      // Get messages older than 30 days that still have media
+      const oldMessagesSnapshot = await db.collectionGroup('messages')
+        .where('created_at', '<', admin.firestore.Timestamp.fromDate(thirtyDaysAgo))
+        .where('media_url', '!=', null)
+        .limit(500) // Process in batches
+        .get();
+
+      let deletedCount = 0;
+      let errorCount = 0;
+
+      for (const doc of oldMessagesSnapshot.docs) {
+        const data = doc.data();
+        const mediaUrl = data.media_url;
+        const messageType = data.type || 'unknown';
+
+        if (mediaUrl && mediaUrl.includes('cloudinary.com')) {
+          try {
+            // Extract public_id from Cloudinary URL
+            // URL format: https://res.cloudinary.com/dn2mwp1lc/image/upload/v1234567890/folder/filename.jpg
+            const urlParts = mediaUrl.split('/upload/');
+            if (urlParts.length > 1) {
+              // Remove version number (v1234567890) and get public_id
+              const afterUpload = urlParts[1];
+              const pathParts = afterUpload.split('/');
+              // Skip version number if present
+              const startIndex = pathParts[0].startsWith('v') ? 1 : 0;
+              const publicIdWithExt = pathParts.slice(startIndex).join('/');
+              const publicId = publicIdWithExt.replace(/\.[^/.]+$/, ''); // Remove file extension
+
+              if (publicId) {
+                const result = await cloudinary.uploader.destroy(publicId);
+                
+                if (result.result === 'ok') {
+                  // Remove media_url from message but keep the message text
+                  await doc.ref.update({ 
+                    media_url: null,
+                    file_name: null,
+                    file_size: null,
+                    duration: null,
+                    updated_at: admin.firestore.FieldValue.serverTimestamp(),
+                  });
+                  deletedCount++;
+                  console.log(`[Cleanup] Deleted: ${publicId}`);
+                } else {
+                  console.log(`[Cleanup] Cloudinary result for ${publicId}: ${result.result}`);
+                }
+              }
+            }
+          } catch (e) {
+            errorCount++;
+            console.error(`[Cleanup] Failed to delete media: ${e.message}`);
+          }
+        }
+      }
+
+      console.log(`[Cleanup] Complete. Deleted: ${deletedCount}, Errors: ${errorCount}, Total scanned: ${oldMessagesSnapshot.docs.length}`);
+
+    } catch (error) {
+      console.error('[Cleanup] Monthly cleanup error:', error);
+    }
+  }, 30 * 24 * 60 * 60 * 1000); // Every 30 days
+
+  console.log('Monthly cleanup scheduled. Next run in 30 days.');
+}
+
+// Start the monthly cleanup
+startMonthlyCleanup();
+
+// Optional: Also run cleanup once on startup (after 10 seconds delay)
+setTimeout(async () => {
+  console.log('[Cleanup] Running initial cleanup check...');
+  try {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const snapshot = await db.collectionGroup('messages')
+      .where('created_at', '<', admin.firestore.Timestamp.fromDate(thirtyDaysAgo))
+      .where('media_url', '!=', null)
+      .limit(10)
+      .get();
+    console.log(`[Cleanup] Initial check: ${snapshot.docs.length} old media files found`);
+  } catch (e) {
+    console.error('[Cleanup] Initial check error:', e.message);
+  }
+}, 10000);
 
 // Error handling
 app.use(errorHandler);
