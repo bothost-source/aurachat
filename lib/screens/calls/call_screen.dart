@@ -320,7 +320,7 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
                     fillColor: Colors.white.withOpacity(0.05),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
-                      borderSide: Border.none,
+                      borderSide: BorderSide.none,
                     ),
                     contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                   ),
