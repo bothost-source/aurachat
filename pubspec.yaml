@@ -55,7 +55,7 @@ dependencies:
   record: ^4.4.4
   video_player: ^2.8.2
   dio: ^5.7.0
-  gallery_saver_updated: ^3.0.0
+  # gallery_saver_updated: ^3.0.0
   path: ^1.8.3
   
   # Calls
