@@ -44,10 +44,10 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     final memberCount = preview['member_count'] ?? 0;
     final link = preview['link'] ?? '';
 
-    final text = 'Join $chatName on AURA Chat!\n' // Fixed: was \$chatName
-        '${widget.isChannel ? "Channel" : "Group"}: $chatType\n' // Fixed: was \${widget...
-        'Members: $memberCount\n\n' // Fixed: was \$memberCount
-        'Tap to join: $link'; // Fixed: was \$link
+    final text = 'Join $chatName on AURA Chat!\n'
+        '${widget.isChannel ? "Channel" : "Group"}: $chatType\n'
+        'Members: $memberCount\n\n'
+        'Tap to join: $link';
 
     await Share.share(text);
   }
@@ -160,7 +160,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1a103c),
-        title: Text('Kick $memberName?', style: const TextStyle(color: Colors.white)), // Fixed: was \$memberName
+        title: Text('Kick $memberName?', style: const TextStyle(color: Colors.white)),
         content: const Text('They will be removed from this group.', style: TextStyle(color: Colors.white70)),
         actions: [
           TextButton(
@@ -185,7 +185,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1a103c),
-        title: Text('Ban $memberName?', style: const TextStyle(color: Colors.white)), // Fixed: was \$memberName
+        title: Text('Ban $memberName?', style: const TextStyle(color: Colors.white)),
         content: const Text('They will be removed and banned from rejoining.', style: TextStyle(color: Colors.white70)),
         actions: [
           TextButton(
@@ -226,8 +226,8 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1a103c),
-        title: Text('Leave ${widget.isChannel ? "Channel" : "Group"}?', style: const TextStyle(color: Colors.white)), // Fixed: was \${widget...
-        content: Text('You will no longer receive messages from this ${widget.isChannel ? "channel" : "group"}.', style: const TextStyle(color: Colors.white70)), // Fixed: was \${widget...
+        title: Text('Leave ${widget.isChannel ? "Channel" : "Group"}?', style: const TextStyle(color: Colors.white)),
+        content: Text('You will no longer receive messages from this ${widget.isChannel ? "channel" : "group"}.', style: const TextStyle(color: Colors.white70)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -336,7 +336,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                       ],
                       const SizedBox(height: 4),
                       Text(
-                        '$memberCount members • ${widget.isChannel ? "Channel" : "Group"}', // Fixed: was \$memberCount and \${widget...
+                        '$memberCount members \u2022 ${widget.isChannel ? "Channel" : "Group"}',
                         style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 13),
                       ),
                     ],
@@ -393,7 +393,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
 
                 // Members
                 Text(
-                  'Members ($memberCount)', // Fixed: was \$memberCount
+                  'Members ($memberCount)',
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
@@ -425,7 +425,6 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                     }
 
                     final users = snapshot.data!;
-                    // Sort: owner first, then admins, then members
                     users.sort((a, b) {
                       final roleOrder = {'owner': 0, 'admin': 1, 'member': 2};
                       return (roleOrder[a['role']] ?? 3).compareTo(roleOrder[b['role']] ?? 3);
@@ -542,9 +541,9 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                   ),
                 ),
                 const SizedBox(height: 20),
-                Text(
+                const Text(
                   'Add Members',
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: Colors.white,
                     fontSize: 18,
                     fontWeight: FontWeight.w600,
@@ -570,7 +569,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                     final snapshot = await FirebaseFirestore.instance
                         .collection('users')
                         .where('username', isGreaterThanOrEqualTo: value)
-                        .where('username', isLessThanOrEqualTo: '\$value\uf8ff')
+                        .where('username', isLessThanOrEqualTo: '$value\uf8ff')
                         .limit(10)
                         .get();
                     setModalState(() {
@@ -603,7 +602,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                             final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
                             final currentUserId = authProvider.user?.uid ?? authProvider.mockUserId;
 
-                           // Check if user allows being added to groups
+                            // Check if user allows being added to groups
                             final userDoc = await FirebaseFirestore.instance
                                 .collection('users')
                                 .doc(user['id'])
@@ -630,10 +629,92 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                                       ElevatedButton(
                                         onPressed: () async {
                                           Navigator.pop(context);
+
+                                          // 1. Get or create invitation link
                                           final preview = await InvitationService.getInvitationPreview(widget.chatId);
-                                          final link = preview?['link'] ?? '';
+                                          String link = preview?['link'] ?? '';
+
+                                          if (link.isEmpty) {
+                                            final result = await InvitationService.createInvitation(
+                                              chatId: widget.chatId,
+                                              chatName: widget.chatName,
+                                              chatType: widget.isChannel ? 'channel' : 'group',
+                                              createdBy: currentUserId!,
+                                            );
+                                            link = result['link'] as String;
+                                          }
+
+                                          if (!context.mounted) return;
+
+                                          // 2. CONFIRMATION DIALOG - Ask before sending
+                                          final shouldSend = await showDialog<bool>(
+                                            context: context,
+                                            builder: (context) => AlertDialog(
+                                              backgroundColor: const Color(0xFF1a103c),
+                                              title: Text("Send Invite to ${user['username']}?", style: const TextStyle(color: Colors.white)),
+                                              content: Text(
+                                                "This will open a chat with ${user['username']} and send them the invitation link for \"${widget.chatName}\".",
+                                                style: const TextStyle(color: Colors.white70),
+                                              ),
+                                              actions: [
+                                                TextButton(
+                                                  onPressed: () => Navigator.pop(context, false),
+                                                  child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+                                                ),
+                                                ElevatedButton(
+                                                  onPressed: () => Navigator.pop(context, true),
+                                                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF8B5CF6)),
+                                                  child: const Text('Send'),
+                                                ),
+                                              ],
+                                            ),
+                                          );
+
+                                          if (shouldSend != true) return;
+
+                                          // 3. Open DM with this user
                                           final dmChat = await chatProvider.startDirectChat(user['id']);
+
                                           if (dmChat != null && context.mounted) {
+                                            // 4. Get rich preview data for Telegram-style card
+                                            final previewData = await InvitationService.getChatPreviewData(widget.chatId);
+
+                                            // 5. Send rich preview message
+                                            await FirebaseFirestore.instance
+                                                .collection('chats')
+                                                .doc(dmChat['id'])
+                                                .collection('messages')
+                                                .add({
+                                              'chat_id': dmChat['id'],
+                                              'sender_id': currentUserId,
+                                              'type': 'link_preview',
+                                              'content': link,
+                                              'preview_data': {
+                                                'title': previewData['name'] ?? widget.chatName,
+                                                'description': previewData['description'] ?? 'Join us on AURA Chat',
+                                                'image_url': previewData['avatar_url'],
+                                                'member_count': previewData['member_count'] ?? 0,
+                                                'type': previewData['type'] ?? 'group',
+                                                'source_chat_id': widget.chatId,
+                                              },
+                                              'created_at': FieldValue.serverTimestamp(),
+                                              'is_read': false,
+                                              'deleted_for_everyone': false,
+                                              'deleted_for': [],
+                                              'reactions': {},
+                                              'is_edited': false,
+                                            });
+
+                                            // 6. Update last message
+                                            await FirebaseFirestore.instance
+                                                .collection('chats')
+                                                .doc(dmChat['id'])
+                                                .update({
+                                              'last_message': link,
+                                              'last_message_at': FieldValue.serverTimestamp(),
+                                            });
+
+                                            // 7. Navigate to the DM
                                             Navigator.pushNamed(
                                               context,
                                               '/chat',
@@ -644,8 +725,9 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                                                 'isGroup': false,
                                               },
                                             );
+
                                             ScaffoldMessenger.of(context).showSnackBar(
-                                              SnackBar(content: Text("Opening chat with ${user['username']}. Send the invite link: $link")),
+                                              SnackBar(content: Text("Invite link sent to ${user['username']}")),
                                             );
                                           }
                                         },
@@ -659,7 +741,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                               return;
                             }
 
-                            // Add user to group
+                            // Add user to group directly
                             await FirebaseFirestore.instance
                                 .collection('chats')
                                 .doc(widget.chatId)
