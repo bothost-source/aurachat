@@ -64,11 +64,159 @@ jobs:
         run: |
           sed -i 's/id "org.jetbrains.kotlin.android" version "1.8.22" apply false/id "org.jetbrains.kotlin.android" version "1.8.22" apply false\n    id "com.google.gms.google-services" version "4.3.15" apply false/' android/settings.gradle
 
-      - name: Fix minSdkVersion and enable code shrinking
+      - name: Fix build.gradle for ALL phones
         run: |
-          sed -i 's/flutter.minSdkVersion/23/g' android/app/build.gradle
-          # Enable code shrinking for smaller APK
-          sed -i 's/buildTypes {/buildTypes {\n        release {\n            minifyEnabled true\n            shrinkResources true\n        }/' android/app/build.gradle
+          python3 << 'PYEOF'
+          import re
+
+          with open('android/app/build.gradle', 'r') as f:
+              content = f.read()
+
+          # 1. Lower minSdk to Android 5.0 (API 21) for maximum phone coverage
+          content = content.replace('minSdk = flutter.minSdkVersion', 'minSdk = 21')
+
+          # 2. Add ABI filters for PHONES ONLY (ARMv7 + ARM64)
+          content = content.replace(
+              'defaultConfig {',
+              'defaultConfig {\n        ndk { abiFilters "armeabi-v7a", "arm64-v8a" }'
+          )
+
+          # 3. Replace buildTypes with minification + ProGuard
+          content = re.sub(
+              r'buildTypes\s*\{[^}]*release\s*\{[^}]*\}[^}]*\}',
+              '''buildTypes {
+                  release {
+                      minifyEnabled true
+                      shrinkResources true
+                      proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+                      signingConfig = signingConfigs.debug
+                  }
+              }''',
+              content,
+              flags=re.DOTALL
+          )
+
+          with open('android/app/build.gradle', 'w') as f:
+              f.write(content)
+          PYEOF
+
+      - name: Create ProGuard rules
+        run: |
+          cat > android/app/proguard-rules.pro << 'EOF'
+          # Flutter
+          -keep class io.flutter.app.** { *; }
+          -keep class io.flutter.plugin.** { *; }
+          -keep class io.flutter.util.** { *; }
+          -keep class io.flutter.view.** { *; }
+          -keep class io.flutter.** { *; }
+          -keep class io.flutter.plugins.** { *; }
+          -keep class androidx.lifecycle.** { *; }
+          
+          # Firebase
+          -keep class com.google.firebase.** { *; }
+          -keep class com.google.android.gms.** { *; }
+          
+          # Agora
+          -keep class io.agora.** { *; }
+          -dontwarn io.agora.**
+          
+          # Cloudinary
+          -keep class com.cloudinary.** { *; }
+          -dontwarn com.cloudinary.**
+          
+          # HTTP clients
+          -keep class okhttp3.** { *; }
+          -keep class retrofit2.** { *; }
+          -dontwarn retrofit2.**
+          
+          # Prevent stripping of JSON models
+          -keepclassmembers class * {
+              @com.google.gson.annotations.SerializedName <fields>;
+          }
+          
+          # Keep stack traces readable
+          -keepattributes SourceFile,LineNumberTable
+          -renamesourcefileattribute SourceFile
+          EOF
+
+      - name: Create AndroidManifest.xml
+        run: |
+          cat > android/app/src/main/AndroidManifest.xml << 'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+              <uses-permission android:name="android.permission.RECORD_AUDIO" />
+              <uses-permission android:name="android.permission.CAMERA" />
+              <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+              <uses-permission android:name="android.permission.BLUETOOTH" />
+              <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+              <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+              <uses-permission android:name="android.permission.VIBRATE" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" 
+                  android:maxSdkVersion="32" />
+              <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+              <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+              <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+              
+              <application
+                  android:label="AURA Chat"
+                  android:name="${applicationName}"
+                  android:icon="@mipmap/ic_launcher"
+                  android:roundIcon="@mipmap/ic_launcher_round"
+                  android:allowBackup="true"
+                  android:fullBackupContent="true"
+                  android:largeHeap="true"
+                  android:hardwareAccelerated="true"
+                  android:extractNativeLibs="true">
+                  
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:launchMode="singleTop"
+                      android:theme="@style/LaunchTheme"
+                      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+                      android:hardwareAccelerated="true"
+                      android:windowSoftInputMode="adjustResize">
+                      <meta-data
+                        android:name="io.flutter.embedding.android.NormalTheme"
+                        android:resource="@style/NormalTheme"
+                        />
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                      
+                      <!-- Deep Link: Invitation Links -->
+                      <intent-filter android:autoVerify="true">
+                          <action android:name="android.intent.action.VIEW"/>
+                          <category android:name="android.intent.category.DEFAULT"/>
+                          <category android:name="android.intent.category.BROWSABLE"/>
+                          <data android:scheme="https"
+                                android:host="aurachat.app"
+                                android:pathPrefix="/invite"/>
+                      </intent-filter>
+                      
+                      <intent-filter>
+                          <action android:name="android.intent.action.VIEW"/>
+                          <category android:name="android.intent.category.DEFAULT"/>
+                          <category android:name="android.intent.category.BROWSABLE"/>
+                          <data android:scheme="aura"
+                                android:host="invite"/>
+                      </intent-filter>
+                  </activity>
+                  
+                  <meta-data
+                      android:name="flutterEmbedding"
+                      android:value="2" />
+                      
+                  <meta-data
+                      android:name="com.google.firebase.messaging.default_notification_channel_id"
+                      android:value="aura_chat_channel"/>
+              </application>
+          </manifest>
+          EOF
 
       - name: Setup MainActivity
         run: |
@@ -89,9 +237,9 @@ jobs:
       - name: Generate app icons
         run: flutter pub run flutter_launcher_icons
 
-      - name: Build APK (ARM64 only - smaller size)
+      - name: Build ONE APK for ALL phones
         run: |
-          flutter build apk --release --target-platform android-arm64
+          flutter build apk --release
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -105,7 +253,7 @@ jobs:
           artifacts: "build/app/outputs/flutter-apk/app-release.apk"
           tag: v${{ github.run_number }}
           name: "AURA CHAT v${{ github.run_number }}"
-          body: "AURA CHAT Release"
+          body: "AURA CHAT Release - Works on all Android 5.0+ phones"
           token: ${{ secrets.GITHUB_TOKEN }}
           allowUpdates: true
 
