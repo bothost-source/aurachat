@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../utils/verified_badge.dart';
+import '../../services/cloudinary_service.dart';
 
 // ─── YOUR CLOUDINARY CONFIG ────────────────────────────────────────
 const String _cloudName = 'dn2mwp1lc';
@@ -218,6 +219,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final userId = authProvider.user?.uid ?? authProvider.mockUserId;
       if (userId == null) return;
 
+      // ── DELETE OLD AVATAR FROM CLOUDINARY ──
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .get();
+      final currentAvatarUrl = userDoc.data()?['avatar_url'] as String?;
+      
+      if (currentAvatarUrl != null && currentAvatarUrl.isNotEmpty) {
+        await CloudinaryService.deleteFile(currentAvatarUrl);
+      }
+      // ── END DELETE ──
+
       final fileBytes = await _newProfileImage!.readAsBytes();
       final fileName = 'profile_${DateTime.now().millisecondsSinceEpoch}.jpg';
 
@@ -281,6 +294,100 @@ class _SettingsScreenState extends State<SettingsScreen> {
         );
       }
     }
+  }
+
+  Future<void> _backupChats() async {
+    try {
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+      final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+      
+      if (userId == null) {
+        _showBackupError('Not authenticated');
+        return;
+      }
+
+      setState(() => _isUploading = true);
+
+      // Fetch all user's chats
+      final chatsSnapshot = await FirebaseFirestore.instance
+          .collection('chats')
+          .where('participants', arrayContains: userId)
+          .get();
+
+      final backupData = <Map<String, dynamic>>[];
+
+      for (final chatDoc in chatsSnapshot.docs) {
+        final chatId = chatDoc.id;
+        final messagesSnapshot = await FirebaseFirestore.instance
+            .collection('chats')
+            .doc(chatId)
+            .collection('messages')
+            .orderBy('timestamp')
+            .get();
+
+        final messages = messagesSnapshot.docs.map((m) => {
+          'id': m.id,
+          'sender_id': m.data()['sender_id'],
+          'text': m.data()['text'],
+          'timestamp': m.data()['timestamp']?.toDate()?.toIso8601String(),
+          'type': m.data()['type'] ?? 'text',
+          'media_url': m.data()['media_url'],
+        }).toList();
+
+        backupData.add({
+          'chat_id': chatId,
+          'participants': chatDoc.data()['participants'],
+          'messages': messages,
+        });
+      }
+
+      final jsonString = jsonEncode({
+        'exported_at': DateTime.now().toIso8601String(),
+        'user_id': userId,
+        'chats': backupData,
+      });
+
+      // Write to temp file
+      final tempDir = Directory.systemTemp;
+      final file = File('${tempDir.path}/aura_backup_${DateTime.now().millisecondsSinceEpoch}.json');
+      await file.writeAsString(jsonString);
+
+      // Share via email (using share_plus or url_launcher)
+      // For now, show success with file path
+      setState(() => _isUploading = false);
+
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            backgroundColor: const Color(0xFF1a103c),
+            title: const Text('Backup Ready', style: TextStyle(color: Colors.white)),
+            content: Text(
+              'Chat backup saved locally.\n\nFile: ${file.path}\n\n${backupData.length} chats backed up.',
+              style: TextStyle(color: Colors.white.withOpacity(0.7)),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK', style: TextStyle(color: Color(0xFF8B5CF6))),
+              ),
+            ],
+          ),
+        );
+      }
+    } catch (e) {
+      setState(() => _isUploading = false);
+      _showBackupError('Backup failed: $e');
+    }
+  }
+
+  void _showBackupError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+      ),
+    );
   }
 
   void _showLanguagePicker() {
@@ -636,6 +743,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   title: AppLocalizations.get('app_language'),
                   subtitle: currentLang['name']!,
                   onTap: _showLanguagePicker,
+                ),
+                _buildSettingTile(
+                  icon: Icons.backup_outlined,
+                  iconColor: const Color(0xFF10B981),
+                  title: 'Backup Chats',
+                  subtitle: 'Export chat history to email',
+                  onTap: _backupChats,
                 ),
                 _buildSectionTitle(AppLocalizations.get('help')),
                 _buildSettingTile(
