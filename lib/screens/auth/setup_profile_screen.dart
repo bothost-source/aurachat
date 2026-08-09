@@ -204,6 +204,19 @@ Future<String?> _uploadProfileImage(String userId) async {
   if (_profileImage == null) return null;
 
   try {
+    // ── DELETE OLD AVATAR FROM CLOUDINARY ──
+    // Get the current avatar URL from Firestore
+    final userDoc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(userId)
+        .get();
+    final currentAvatarUrl = userDoc.data()?['avatar_url'] as String?;
+    
+    if (currentAvatarUrl != null && currentAvatarUrl.isNotEmpty) {
+      await CloudinaryService.deleteFile(currentAvatarUrl);
+    }
+    // ── END DELETE ──
+
     // Upload to Cloudinary instead of Firebase Storage
     final imageUrl = await CloudinaryService.uploadImage(
       _profileImage!,
