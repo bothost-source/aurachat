@@ -34,7 +34,7 @@ class InvitationService {
     }
 
     final invitationId = _firestore.collection('invitations').doc().id;
-    final link = 'https://aurachat.page.link/join/$code'; // Fixed: was \$code
+    final link = 'https://aurachat.page.link/join/$code';
 
     await _firestore.collection('invitations').doc(invitationId).set({
       'id': invitationId,
@@ -163,7 +163,7 @@ class InvitationService {
     // Add user to chat
     await _firestore.collection('chats').doc(chatId).update({
       'participants': FieldValue.arrayUnion([userId]),
-      'participants_data.$userId': { // Fixed: was .\$userId
+      'participants_data.$userId': {
         'role': 'member',
         'joined_at': FieldValue.serverTimestamp(),
         'joined_via': 'invitation',
@@ -186,7 +186,7 @@ class InvitationService {
     final welcomeMessage = chatData['settings']?['welcome_message'] ?? 'Welcome to the group!';
     await _firestore.collection('chats').doc(chatId).collection('messages').add({
       'type': 'system',
-      'content': '$userName joined via invitation link', // Fixed: was \$userName
+      'content': '$userName joined via invitation link',
       'created_at': FieldValue.serverTimestamp(),
       'is_read': false,
     });
@@ -233,6 +233,23 @@ class InvitationService {
       'member_count': data['member_count'] ?? 0,
       'code': invitation['code'],
       'link': invitation['link'],
+    };
+  }
+
+  /// Get rich preview data for a chat (NEW - for Telegram-style link preview)
+  static Future<Map<String, dynamic>> getChatPreviewData(String chatId) async {
+    final chatDoc = await _firestore.collection('chats').doc(chatId).get();
+    if (!chatDoc.exists) return {};
+
+    final data = chatDoc.data()!;
+    final participants = List<String>.from(data['participants'] ?? []);
+
+    return {
+      'name': data['name'] ?? 'Unknown',
+      'description': data['description'] ?? '',
+      'avatar_url': data['avatar_url'],
+      'member_count': participants.length,
+      'type': data['type'] ?? 'group',
     };
   }
 }
