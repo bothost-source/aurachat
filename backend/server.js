@@ -98,6 +98,37 @@ app.use('/api/bot', botRoutes);
 app.use('/api/moderation', moderationRoutes);
 app.use('/api/user', userRoutes);
 
+// ============================================================================
+// CLOUDINARY DELETE ENDPOINT - Delete old files when user changes profile pic
+// ============================================================================
+const cloudinary = require('cloudinary').v2;
+
+cloudinary.config({
+  cloud_name: 'dn2mwp1lc',
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
+
+app.post('/delete-cloudinary', async (req, res) => {
+  try {
+    const { public_id } = req.body;
+    
+    if (!public_id) {
+      return res.status(400).json({ success: false, error: 'public_id required' });
+    }
+
+    const result = await cloudinary.uploader.destroy(public_id);
+    
+    if (result.result === 'ok') {
+      res.json({ success: true, message: 'File deleted' });
+    } else {
+      res.json({ success: false, error: result.result });
+    }
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Socket.IO setup
 setupSocketHandlers(io);
 
