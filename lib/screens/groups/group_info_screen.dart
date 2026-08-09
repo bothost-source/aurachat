@@ -603,7 +603,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                             final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
                             final currentUserId = authProvider.user?.uid ?? authProvider.mockUserId;
 
-                            // Check if user allows being added to groups
+                           // Check if user allows being added to groups
                             final userDoc = await FirebaseFirestore.instance
                                 .collection('users')
                                 .doc(user['id'])
@@ -617,9 +617,9 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                                   context: context,
                                   builder: (context) => AlertDialog(
                                     backgroundColor: const Color(0xFF1a103c),
-                                    title: const Text('Can't Add User', style: TextStyle(color: Colors.white)),
+                                    title: const Text("Cannot Add User", style: TextStyle(color: Colors.white)),
                                     content: Text(
-                                      '${user['username']} doesn't allow being added to groups. Send them the invite link instead?',
+                                      "${user['username']} does not allow being added to groups. Send them the invite link instead?",
                                       style: const TextStyle(color: Colors.white70),
                                     ),
                                     actions: [
@@ -630,10 +630,8 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                                       ElevatedButton(
                                         onPressed: () async {
                                           Navigator.pop(context);
-                                          // Get or create invite link
                                           final preview = await InvitationService.getInvitationPreview(widget.chatId);
                                           final link = preview?['link'] ?? '';
-                                          // Start DM with invite
                                           final dmChat = await chatProvider.startDirectChat(user['id']);
                                           if (dmChat != null && context.mounted) {
                                             Navigator.pushNamed(
@@ -646,9 +644,8 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                                                 'isGroup': false,
                                               },
                                             );
-                                            // Send link as first message (user will paste it)
                                             ScaffoldMessenger.of(context).showSnackBar(
-                                              SnackBar(content: Text('Opening chat with ${user['username']}. Send the invite link: $link')),
+                                              SnackBar(content: Text("Opening chat with ${user['username']}. Send the invite link: $link")),
                                             );
                                           }
                                         },
