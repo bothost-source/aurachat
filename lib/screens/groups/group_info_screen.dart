@@ -1,9 +1,12 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../providers/chat_provider.dart';
+import '../../services/cloudinary_service.dart';
 import '../../services/invitation_service.dart';
 import '../../utils/verified_badge.dart';
 
@@ -27,6 +30,19 @@ class GroupInfoScreen extends StatefulWidget {
 
 class _GroupInfoScreenState extends State<GroupInfoScreen> {
   bool _isLoading = false;
+  bool _isEditing = false;
+
+  // Edit controllers
+  final _editNameController = TextEditingController();
+  final _editDescriptionController = TextEditingController();
+  String? _editPhotoUrl;
+
+  @override
+  void dispose() {
+    _editNameController.dispose();
+    _editDescriptionController.dispose();
+    super.dispose();
+  }
 
   Future<void> _shareInvitationLink() async {
     final preview = await InvitationService.getInvitationPreview(widget.chatId);
@@ -50,6 +66,96 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
         'Tap to join: $link';
 
     await Share.share(text);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // FIX #15: Edit profile photo, name, and description
+  // ═══════════════════════════════════════════════════════════════════════════
+  Future<void> _pickEditPhoto() async {
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+    if (pickedFile == null) return;
+
+    setState(() => _isLoading = true);
+
+    try {
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+      final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+      if (userId == null) throw Exception('Not authenticated');
+
+      // FIX #14: Use permanent folder
+      final imageUrl = await CloudinaryService.uploadImage(
+        File(pickedFile.path),
+        'aurachat/permanent/avatars/${widget.isChannel ? "channels" : "groups"}/$userId'
+      );
+
+      if (imageUrl != null) {
+        setState(() => _editPhotoUrl = imageUrl);
+      }
+    } catch (e) {
+      debugPrint('Photo upload failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Upload failed: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _saveEdit() async {
+    final name = _editNameController.text.trim();
+    if (name.isEmpty) {
+      _showError('Name cannot be empty');
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final updates = <String, dynamic>{
+        'name': name,
+        'description': _editDescriptionController.text.trim().isNotEmpty
+            ? _editDescriptionController.text.trim()
+            : null,
+        'updated_at': FieldValue.serverTimestamp(),
+      };
+
+      if (_editPhotoUrl != null) {
+        updates['avatar_url'] = _editPhotoUrl;
+      }
+
+      await FirebaseFirestore.instance
+          .collection('chats')
+          .doc(widget.chatId)
+          .update(updates);
+
+      setState(() {
+        _isEditing = false;
+        _isLoading = false;
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Updated successfully'), backgroundColor: Colors.green),
+        );
+      }
+    } catch (e) {
+      setState(() => _isLoading = false);
+      _showError('Update failed: $e');
+    }
+  }
+
+  void _startEdit(Map<String, dynamic> data) {
+    _editNameController.text = data['name'] ?? '';
+    _editDescriptionController.text = data['description'] ?? '';
+    _editPhotoUrl = data['avatar_url'];
+    setState(() => _isEditing = true);
+  }
+
+  void _cancelEdit() {
+    setState(() => _isEditing = false);
   }
 
   Future<void> _showMemberOptions(String memberId, String memberName, String memberRole, bool isMe, bool canManage) async {
@@ -250,6 +356,17 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     }
   }
 
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red.withOpacity(0.9),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuraAuthProvider>(context);
@@ -269,18 +386,35 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
               final data = snapshot.data!.data() as Map<String, dynamic>?;
               final myRole = (data?['participants_data']?[userId]?['role'] ?? 'member') as String;
               final canManage = myRole == 'owner' || myRole == 'admin';
+              final isOwner = myRole == 'owner';
 
               return Row(
                 children: [
-                  if (canManage)
+                  if (canManage && !_isEditing)
+                    IconButton(
+                      icon: const Icon(Icons.edit, color: Colors.white70),
+                      onPressed: () => _startEdit(data!),
+                    ),
+                  if (_isEditing)
+                    IconButton(
+                      icon: const Icon(Icons.check, color: Colors.green),
+                      onPressed: _saveEdit,
+                    ),
+                  if (_isEditing)
+                    IconButton(
+                      icon: const Icon(Icons.close, color: Colors.red),
+                      onPressed: _cancelEdit,
+                    ),
+                  if (canManage && !_isEditing)
                     IconButton(
                       icon: const Icon(Icons.settings, color: Colors.white70),
                       onPressed: () => _showSettings(myRole),
                     ),
-                  IconButton(
-                    icon: const Icon(Icons.share, color: Colors.white70),
-                    onPressed: _shareInvitationLink,
-                  ),
+                  if (!_isEditing)
+                    IconButton(
+                      icon: const Icon(Icons.share, color: Colors.white70),
+                      onPressed: _shareInvitationLink,
+                    ),
                 ],
               );
             },
@@ -313,20 +447,93 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                 Center(
                   child: Column(
                     children: [
-                      _buildAvatar(data['avatar_url']),
-                      const SizedBox(height: 12),
-                      VerifiedUsername(
-                        username: data['name'] ?? 'Unknown',
-                        phoneNumber: createdByPhone,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
+                      // Avatar with edit overlay when editing
+                      GestureDetector(
+                        onTap: _isEditing ? _pickEditPhoto : null,
+                        child: Stack(
+                          children: [
+                            _buildAvatar(_isEditing ? (_editPhotoUrl ?? data['avatar_url']) : data['avatar_url']),
+                            if (_isEditing)
+                              Positioned(
+                                bottom: 0,
+                                right: 0,
+                                child: Container(
+                                  padding: const EdgeInsets.all(6),
+                                  decoration: const BoxDecoration(
+                                    gradient: LinearGradient(colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)]),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(Icons.camera_alt, color: Colors.white, size: 18),
+                                ),
+                              ),
+                          ],
                         ),
-                        badgeSize: 16,
-                        spacing: 6,
                       ),
-                      if (description.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+
+                      // Name - editable or display
+                      if (_isEditing)
+                        Container(
+                          margin: const EdgeInsets.symmetric(horizontal: 32),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.05),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.white.withOpacity(0.1)),
+                          ),
+                          child: TextField(
+                            controller: _editNameController,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            decoration: const InputDecoration(
+                              border: InputBorder.none,
+                              contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            ),
+                          ),
+                        )
+                      else
+                        VerifiedUsername(
+                          username: data['name'] ?? 'Unknown',
+                          phoneNumber: createdByPhone,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          badgeSize: 16,
+                          spacing: 6,
+                        ),
+
+                      // Description - editable or display
+                      if (_isEditing) ...[
+                        const SizedBox(height: 12),
+                        Container(
+                          margin: const EdgeInsets.symmetric(horizontal: 32),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.05),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.white.withOpacity(0.1)),
+                          ),
+                          child: TextField(
+                            controller: _editDescriptionController,
+                            textAlign: TextAlign.center,
+                            maxLines: 3,
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.8),
+                              fontSize: 14,
+                            ),
+                            decoration: InputDecoration(
+                              hintText: 'Add a description...',
+                              hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+                              border: InputBorder.none,
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            ),
+                          ),
+                        ),
+                      ] else if (description.isNotEmpty) ...[
                         const SizedBox(height: 4),
                         Text(
                           description,
@@ -334,6 +541,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                           style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 14),
                         ),
                       ],
+
                       const SizedBox(height: 4),
                       Text(
                         '$memberCount members \u2022 ${widget.isChannel ? "Channel" : "Group"}',
@@ -345,38 +553,39 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                 const SizedBox(height: 24),
 
                 // Actions
-                Row(
-                  children: [
-                    Expanded(
-                      child: _buildActionButton(
-                        icon: Icons.person_add,
-                        label: 'Add',
-                        onTap: () => _showAddMembersSheet(context),
+                if (!_isEditing)
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildActionButton(
+                          icon: Icons.person_add,
+                          label: 'Add',
+                          onTap: () => _showAddMembersSheet(context),
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _buildActionButton(
-                        icon: Icons.share,
-                        label: 'Invite',
-                        onTap: _shareInvitationLink,
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _buildActionButton(
+                          icon: Icons.share,
+                          label: 'Invite',
+                          onTap: _shareInvitationLink,
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _buildActionButton(
-                        icon: Icons.exit_to_app,
-                        label: 'Leave',
-                        color: Colors.red,
-                        onTap: _leaveGroup,
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _buildActionButton(
+                          icon: Icons.exit_to_app,
+                          label: 'Leave',
+                          color: Colors.red,
+                          onTap: _leaveGroup,
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 24),
+                    ],
+                  ),
+                if (!_isEditing) const SizedBox(height: 24),
 
                 // Settings preview (if admin)
-                if (canManage) ...[
+                if (canManage && !_isEditing) ...[
                   Text(
                     'Settings',
                     style: TextStyle(
