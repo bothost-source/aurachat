@@ -188,21 +188,43 @@ setupAIModeration();
 
 // ============================================================================
 // PUSH NOTIFICATIONS - Listen for new messages and send FCM pushes
+// FIX #12: Simplified approach - no composite index needed
 // ============================================================================
 const db = admin.firestore();
 const messaging = admin.messaging();
 
+// Track processed messages to avoid duplicates
+const processedMessages = new Set();
+const PROCESSED_MAX_SIZE = 1000;
+
 function startPushNotificationListener() {
   console.log('Starting push notification listener...');
 
+  // FIX #12: Use timestamp-based query instead of sent_to_fcm boolean
+  // This avoids needing a composite index on collectionGroup
+  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+
   db.collectionGroup('messages')
-    .where('sent_to_fcm', '==', false)
+    .where('created_at', '>', admin.firestore.Timestamp.fromDate(fiveMinutesAgo))
+    .orderBy('created_at', 'desc')
+    .limit(50)
     .onSnapshot(async (snapshot) => {
       for (const change of snapshot.docChanges()) {
         if (change.type !== 'added') continue;
 
         const message = change.doc.data();
         const messageId = change.doc.id;
+
+        // Skip if already processed (memory-based dedup)
+        if (processedMessages.has(messageId)) continue;
+        processedMessages.add(messageId);
+
+        // Keep set size bounded
+        if (processedMessages.size > PROCESSED_MAX_SIZE) {
+          const iterator = processedMessages.values();
+          processedMessages.delete(iterator.next().value);
+        }
+
         const chatId = message.chat_id;
         const senderId = message.sender_id;
 
@@ -244,7 +266,10 @@ function startPushNotificationListener() {
 
             const userData = userDoc.data();
             const token = userData?.fcmToken;
-            if (!token) continue;
+            if (!token) {
+              console.log(`No FCM token for user ${userId}`);
+              continue;
+            }
 
             const mutedChats = userData?.muted_chats || [];
             if (mutedChats.includes(chatId)) continue;
@@ -252,7 +277,10 @@ function startPushNotificationListener() {
             tokens.push(token);
           }
 
-          if (tokens.length === 0) continue;
+          if (tokens.length === 0) {
+            console.log(`No valid tokens for chat ${chatId}`);
+            continue;
+          }
 
           const sendPromises = tokens.map(token => 
             messaging.send({
@@ -281,10 +309,16 @@ function startPushNotificationListener() {
               },
             }).catch(err => {
               console.error('Failed to send to token:', token, err.message);
+              // If token is invalid, remove it
+              if (err.code === 'messaging/registration-token-not-registered') {
+                _removeInvalidToken(token);
+              }
             })
           );
 
           await Promise.all(sendPromises);
+
+          // Mark as sent
           await change.doc.ref.update({ sent_to_fcm: true });
 
           console.log(`Push sent to ${tokens.length} users for chat ${chatId}`);
@@ -293,7 +327,25 @@ function startPushNotificationListener() {
           console.error('Push notification error:', error);
         }
       }
+    }, (error) => {
+      console.error('Push listener error:', error);
     });
+}
+
+async function _removeInvalidToken(token) {
+  try {
+    const usersSnapshot = await db.collection('users')
+      .where('fcmToken', '==', token)
+      .limit(1)
+      .get();
+
+    usersSnapshot.forEach(doc => {
+      doc.ref.update({ fcmToken: null });
+      console.log(`Removed invalid token for user ${doc.id}`);
+    });
+  } catch (e) {
+    console.error('Error removing invalid token:', e);
+  }
 }
 
 function formatMessageBody(message) {
