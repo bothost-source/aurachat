@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
+import '../../utils/verified_badge.dart';
 
 class GlobalSearchScreen extends StatefulWidget {
   const GlobalSearchScreen({super.key});
@@ -224,15 +225,15 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
       if (existingChatId != null) {
         if (mounted) {
           Navigator.pushNamed(
-            context,
-            '/chat',
-            arguments: {
-              'chatId': existingChatId,
-              'chatName': user['username'] ?? 'Chat',
-              'chatAvatar': user['avatar_url'],
-              'isGroup': false,
-            },
-          );
+          context,
+          '/chat',
+          arguments: {
+            'chatId': existingChatId,
+            'chatName': user['display_name'] ?? user['username'] ?? 'Chat',
+            'chatAvatar': user['avatar_url'],
+            'isGroup': false,
+          },
+        );
         }
         setState(() => _isLoading = false);
         return;
@@ -263,7 +264,7 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
           '/chat',
           arguments: {
             'chatId': chatId,
-            'chatName': user['username'] ?? 'Chat',
+            'chatName': user['display_name'] ?? user['username'] ?? 'Chat',
             'chatAvatar': user['avatar_url'],
             'isGroup': false,
           },
@@ -334,13 +335,15 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
     }
   }
 
-  void _viewPublicProfile(Map<String, dynamic> user) {
+    void _viewPublicProfile(Map<String, dynamic> user) {
     Navigator.pushNamed(
       context,
       '/public_profile',
       arguments: {
         'userId': user['id'],
         'username': user['username'],
+        'display_name': user['display_name'],
+        'avatar_url': user['avatar_url'],
         'avatarUrl': user['avatar_url'],
         'bio': user['bio'],
       },
@@ -829,12 +832,13 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
     );
   }
 
-  Widget _buildGlowingUserCard(Map<String, dynamic> user) {
+    Widget _buildGlowingUserCard(Map<String, dynamic> user) {
     final userId = user['id'] as String? ?? '';
     final username = user['username'] as String? ?? 'Unknown';
     final displayName = user['display_name'] as String? ?? username;
     final avatarUrl = user['avatar_url'] as String?;
     final bio = user['bio'] as String?;
+    final phone = user['phone'] as String?;
     final isOnline = _isUserOnline(userId);
 
     return Container(
@@ -914,7 +918,6 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
                             : _buildAvatarFallback(username),
                       ),
                     ),
-                    // Online status dot
                     if (isOnline)
                       Positioned(
                         right: 2,
@@ -947,58 +950,17 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        children: [
-                          Text(
-                            displayName,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 15,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          if (isOnline)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF06B6D4).withOpacity(0.15),
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(
-                                  color: const Color(0xFF06B6D4).withOpacity(0.3),
-                                ),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Container(
-                                    width: 5,
-                                    height: 5,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: const Color(0xFF06B6D4),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: const Color(0xFF06B6D4).withOpacity(0.5),
-                                          blurRadius: 4,
-                                          spreadRadius: 1,
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  const Text(
-                                    'Online',
-                                    style: TextStyle(
-                                      color: Color(0xFF06B6D4),
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                        ],
+                      // FIX: Use VerifiedUsername instead of plain Text
+                      VerifiedUsername(
+                        username: displayName,
+                        phoneNumber: phone,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 15,
+                        ),
+                        badgeSize: 14,
+                        spacing: 6,
                       ),
                       const SizedBox(height: 4),
                       Text(
