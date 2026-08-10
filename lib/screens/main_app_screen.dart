@@ -28,14 +28,10 @@ class _MainAppScreenState extends State<MainAppScreen>
       setState(() => _currentIndex = _tabController.index);
     });
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // FIX: Tell ChatProvider about mock users
-    // ═══════════════════════════════════════════════════════════════════════
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
       final chatProvider = Provider.of<ChatProvider>(context, listen: false);
 
-      // If using mock user, tell ChatProvider about it
       if (authProvider.mockUserId != null) {
         chatProvider.setMockUser(authProvider.mockUserId!);
       } else {
@@ -54,9 +50,6 @@ class _MainAppScreenState extends State<MainAppScreen>
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuraAuthProvider>(context);
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // FIX: Intercept system back button — minimize app instead of popping route
-    // ═══════════════════════════════════════════════════════════════════════
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
@@ -294,6 +287,9 @@ class _MainAppScreenState extends State<MainAppScreen>
     final lastMessage = chat['last_message'] ?? '';
     final time = chat['updated_at'];
     final unread = chat['unread_count'] ?? 0;
+    final chatType = chat['type'] as String? ?? 'direct';
+    final isGroup = chatType == 'group';
+    final isChannel = chatType == 'channel';
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -321,24 +317,68 @@ class _MainAppScreenState extends State<MainAppScreen>
             backgroundColor: const Color(0xFF1a103c),
             backgroundImage: avatar != null ? NetworkImage(avatar) : null,
             child: avatar == null
-                ? Text(
-                    name.isNotEmpty ? name[0].toUpperCase() : '?',
-                    style: const TextStyle(
-                      color: Color(0xFF8B5CF6),
-                      fontWeight: FontWeight.bold,
-                      fontSize: 18,
-                    ),
+                ? Icon(
+                    isChannel ? Icons.campaign : isGroup ? Icons.group : Icons.person,
+                    color: const Color(0xFF8B5CF6),
+                    size: 20,
                   )
                 : null,
           ),
         ),
-        title: Text(
-          name,
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.w600,
-            fontSize: 15,
-          ),
+        title: Row(
+          children: [
+            Flexible(
+              child: Text(
+                name,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 15,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (isChannel)
+              Padding(
+                padding: const EdgeInsets.only(left: 6),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF8B5CF6).withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Text(
+                    'CHANNEL',
+                    style: TextStyle(
+                      color: Color(0xFF8B5CF6),
+                      fontSize: 8,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
+              ),
+            if (isGroup)
+              Padding(
+                padding: const EdgeInsets.only(left: 6),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF06B6D4).withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Text(
+                    'GROUP',
+                    style: TextStyle(
+                      color: Color(0xFF06B6D4),
+                      fontSize: 8,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
+              ),
+          ],
         ),
         subtitle: Text(
           lastMessage,
@@ -384,16 +424,27 @@ class _MainAppScreenState extends State<MainAppScreen>
           ],
         ),
         onTap: () {
-          Navigator.pushNamed(
-            context,
-            '/chat',
-            arguments: {
-              'chatId': chat['id'],
-              'chatName': name,
-              'chatAvatar': avatar,
-              'isGroup': chat['type'] != 'direct',
-            },
-          );
+          if (isChannel) {
+            Navigator.pushNamed(
+              context,
+              '/channel',
+              arguments: {
+                'channelId': chat['id'],
+                'channelName': name,
+              },
+            );
+          } else {
+            Navigator.pushNamed(
+              context,
+              '/chat',
+              arguments: {
+                'chatId': chat['id'],
+                'chatName': name,
+                'chatAvatar': avatar,
+                'isGroup': isGroup,
+              },
+            );
+          }
         },
       ),
     );
@@ -463,12 +514,13 @@ class _MainAppScreenState extends State<MainAppScreen>
                 Navigator.pushNamed(context, '/create_group');
               },
             ),
+            // FIX #17: Separate route for channel creation
             _buildOptionTile(
               icon: Icons.campaign,
               label: AppLocalizations.get('new_channel'),
               onTap: () {
                 Navigator.pop(context);
-                Navigator.pushNamed(context, '/create_group');
+                Navigator.pushNamed(context, '/create_channel');
               },
             ),
           ],
