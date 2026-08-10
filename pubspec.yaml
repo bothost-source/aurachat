@@ -57,6 +57,7 @@ dependencies:
   dio: ^5.7.0
   # gallery_saver_updated: ^3.0.0
   path: ^1.8.3
+  url_launcher: ^6.2.5
   
   # Calls
   agora_rtc_engine: ^6.3.0
