@@ -26,10 +26,8 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
   bool _isLoading = false;
   List<Map<String, dynamic>> _selectedMembers = [];
   List<Map<String, dynamic>> _searchResults = [];
-  bool _isChannel = false;
   String? _generatedLink;
 
-  // Theme colors matching SetupProfileScreen
   static const Color _bgDark = Color(0xFF0A0A0F);
   static const Color _bgCard = Color(0xFF1a103c);
   static const Color _purple = Color(0xFF8B5CF6);
@@ -60,9 +58,10 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
         throw Exception('Not authenticated');
       }
 
+      // FIX #14: Use permanent folder so cleanup doesn't delete avatars
       final imageUrl = await CloudinaryService.uploadImage(
         File(pickedFile.path),
-        'aurachat/groups/$userId'
+        'aurachat/permanent/avatars/groups/$userId'
       );
 
       if (imageUrl == null) {
@@ -130,7 +129,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
 
   Future<void> _createGroup() async {
     if (_nameController.text.trim().isEmpty) {
-      _showError('Please enter a ${_isChannel ? "channel" : "group"} name');
+      _showError('Please enter a group name');
       return;
     }
 
@@ -159,6 +158,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
 
       final chatId = const Uuid().v4();
 
+      // FIX #16: Always create as 'group' — no channel toggle here
       await firestore.collection('chats').doc(chatId).set({
         'id': chatId,
         'name': _nameController.text.trim(),
@@ -166,7 +166,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
             ? _descriptionController.text.trim()
             : null,
         'avatar_url': _groupPhotoUrl,
-        'type': _isChannel ? 'channel' : 'group',
+        'type': 'group',
         'created_by': userId,
         'created_by_phone': phoneNumber,
         'participants': participants,
@@ -191,7 +191,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
         'created_at': FieldValue.serverTimestamp(),
         'updated_at': FieldValue.serverTimestamp(),
         'last_message_at': FieldValue.serverTimestamp(),
-        'last_message': _isChannel ? 'Channel created' : 'Group created',
+        'last_message': 'Group created',
       });
 
       // Create invitation link
@@ -199,7 +199,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
         final inviteResult = await InvitationService.createInvitation(
           chatId: chatId,
           chatName: _nameController.text.trim(),
-          chatType: _isChannel ? 'channel' : 'group',
+          chatType: 'group',
           createdBy: userId,
           customName: _inviteNameController.text.trim().isNotEmpty
               ? _inviteNameController.text.trim()
@@ -216,8 +216,8 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('${_isChannel ? "Channel" : "Group"} created successfully!'),
+          const SnackBar(
+            content: Text('Group created successfully!'),
           ),
         );
         Navigator.pop(context);
@@ -273,9 +273,9 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                         shaderCallback: (bounds) => const LinearGradient(
                           colors: [_purple, _cyan],
                         ).createShader(bounds),
-                        child: Text(
-                          _isChannel ? 'New Channel' : 'New Group',
-                          style: const TextStyle(
+                        child: const Text(
+                          'New Group',
+                          style: TextStyle(
                             fontSize: 24,
                             fontWeight: FontWeight.w900,
                             color: Colors.white,
@@ -338,8 +338,8 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
 
                       // Name field
                       _buildGlassInput(
-                        label: _isChannel ? 'Channel Name' : 'Group Name',
-                        hint: _isChannel ? 'Enter channel name' : 'Enter group name',
+                        label: 'Group Name',
+                        hint: 'Enter group name',
                         icon: Icons.edit,
                         controller: _nameController,
                       ),
@@ -363,49 +363,6 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                         controller: _inviteNameController,
                       ),
                       const SizedBox(height: 16),
-
-                      // Channel toggle
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.05),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: Colors.white.withOpacity(0.08)),
-                        ),
-                        child: Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color: _purple.withOpacity(0.2),
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(Icons.campaign, color: _purple, size: 20),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text(
-                                    'Create as Channel',
-                                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-                                  ),
-                                  Text(
-                                    'One-way messaging (only admins can post)',
-                                    style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 12),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Switch(
-                              value: _isChannel,
-                              onChanged: (v) => setState(() => _isChannel = v),
-                              activeColor: _purple,
-                            ),
-                          ],
-                        ),
-                      ),
 
                       if (_generatedLink != null) ...[
                         const SizedBox(height: 16),
@@ -538,8 +495,8 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
     return CircleAvatar(
       radius: 50,
       backgroundColor: _purple.withOpacity(0.2),
-      child: Icon(
-        _isChannel ? Icons.campaign : Icons.group,
+      child: const Icon(
+        Icons.group,
         size: 50,
         color: _purple,
       ),
