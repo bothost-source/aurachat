@@ -93,7 +93,13 @@ void main() async {
 
     // Initialize push notifications (FCM for chat)
     final pushService = PushNotificationService();
-    await pushService.initialize();
+    await pushService.initialize(
+      onChatOpenCallback: (chatId) {
+        Navigator.of(context).pushNamed('/chat', arguments: {
+          'chatId': chatId,
+        });
+      },
+    );
 
     // FIX #1: Removed await since initialize() returns void
     ConnectivityService().initialize();
