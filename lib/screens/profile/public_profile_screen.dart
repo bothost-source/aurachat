@@ -21,7 +21,10 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
 
     final userId = args?['userId'] as String?;
-    final username = args?['username'] as String? ?? 'Unknown';
+    final username = args?['username'] as String? ?? 
+               args?['display_name'] as String? ?? 
+               args?['name'] as String? ?? 
+               'Unknown';
     final passedAvatarUrl = args?['avatarUrl'] as String? ?? args?['avatar_url'] as String?;
     final bio = args?['bio'] as String?;
 
@@ -94,8 +97,10 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
 
                           const SizedBox(height: 24),
 
-                          // Username
+                          // Username - use live data if available
                           Text(
+                            liveData?['display_name'] as String? ?? 
+                            liveData?['username'] as String? ?? 
                             username,
                             style: const TextStyle(
                               color: Colors.white,
@@ -105,17 +110,6 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                           ),
 
                           const SizedBox(height: 8),
-
-                          // User ID
-                          Text(
-                            'ID: $userId',
-                            style: TextStyle(
-                              color: Colors.white.withOpacity(0.4),
-                              fontSize: 14,
-                            ),
-                          ),
-
-                          const SizedBox(height: 24),
 
                           // Bio
                           if (bio != null && bio.isNotEmpty)
