@@ -12,7 +12,7 @@ class CloudinaryService {
 
   // Backend delete endpoint
   static const String _deleteEndpoint = 'https://aurachat-backend-5utu.onrender.com/delete-cloudinary';
-  
+
   // Backend API key for delete authentication
   static const String _backendApiKey = 'aura_chat_secret_2026_xyz';
 
@@ -138,6 +138,11 @@ class CloudinaryService {
       print('Delete request error: $e');
       return false;
     }
+  }
+
+  /// Alias for deleteFile - deletes an image from Cloudinary
+  static Future<bool> deleteImage(String? url) async {
+    return deleteFile(url);
   }
 
   /// Delete multiple files at once
