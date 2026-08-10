@@ -45,6 +45,7 @@ import 'screens/moderation/ban_guard.dart';
 import 'screens/ai/ai_chatbot_screen.dart';
 import 'screens/ai/ai_studio_screen.dart';
 import 'screens/channel/channel_screen.dart';
+import 'screens/groups/create_channel_screen.dart';
 import 'screens/calls/call_screen.dart';
 import 'screens/search/global_search_screen.dart';
 import 'screens/contacts/contacts_screen.dart';
@@ -590,6 +591,7 @@ class _AuraChatAppState extends State<AuraChatApp>
               '/public_profile': (context) => const PublicProfileScreen(),
               '/profile': (context) => const ProfileScreen(),
               '/create_group': (context) => const CreateGroupScreen(),
+              '/create_channel': (context) => const CreateChannelScreen(),
               '/status': (context) => const StatusScreen(),
               '/create_status': (context) => const CreateStatusScreen(),
               '/report': (context) => const ReportScreen(),
