@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../providers/chat_provider.dart';
@@ -26,14 +27,14 @@ class _MainAppScreenState extends State<MainAppScreen>
     _tabController.addListener(() {
       setState(() => _currentIndex = _tabController.index);
     });
-    
+
     // ═══════════════════════════════════════════════════════════════════════
     // FIX: Tell ChatProvider about mock users
     // ═══════════════════════════════════════════════════════════════════════
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
       final chatProvider = Provider.of<ChatProvider>(context, listen: false);
-      
+
       // If using mock user, tell ChatProvider about it
       if (authProvider.mockUserId != null) {
         chatProvider.setMockUser(authProvider.mockUserId!);
@@ -53,96 +54,107 @@ class _MainAppScreenState extends State<MainAppScreen>
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuraAuthProvider>(context);
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF0A0A0F),
-      body: NestedScrollView(
-        headerSliverBuilder: (context, innerBoxIsScrolled) {
-          return [
-            SliverAppBar(
-              expandedHeight: 120,
-              floating: true,
-              pinned: true,
-              elevation: 0,
-              backgroundColor: const Color(0xFF0A0A0F),
-              flexibleSpace: FlexibleSpaceBar(
-                titlePadding: const EdgeInsets.only(left: 20, bottom: 60),
-                title: ShaderMask(
-                  shaderCallback: (bounds) => const LinearGradient(
-                    colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
-                  ).createShader(bounds),
-                  child: const Text(
-                    'AURA',
-                    style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 4,
-                      color: Colors.white,
+    // ═══════════════════════════════════════════════════════════════════════
+    // FIX: Intercept system back button — minimize app instead of popping route
+    // ═══════════════════════════════════════════════════════════════════════
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) {
+          SystemNavigator.pop();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFF0A0A0F),
+        body: NestedScrollView(
+          headerSliverBuilder: (context, innerBoxIsScrolled) {
+            return [
+              SliverAppBar(
+                expandedHeight: 120,
+                floating: true,
+                pinned: true,
+                elevation: 0,
+                backgroundColor: const Color(0xFF0A0A0F),
+                flexibleSpace: FlexibleSpaceBar(
+                  titlePadding: const EdgeInsets.only(left: 20, bottom: 60),
+                  title: ShaderMask(
+                    shaderCallback: (bounds) => const LinearGradient(
+                      colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
+                    ).createShader(bounds),
+                    child: const Text(
+                      'AURA',
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 4,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                  background: Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          const Color(0xFF8B5CF6).withOpacity(0.1),
+                          const Color(0xFF06B6D4).withOpacity(0.05),
+                          Colors.transparent,
+                        ],
+                      ),
                     ),
                   ),
                 ),
-                background: Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        const Color(0xFF8B5CF6).withOpacity(0.1),
-                        const Color(0xFF06B6D4).withOpacity(0.05),
-                        Colors.transparent,
-                      ],
-                    ),
+                actions: [
+                  IconButton(
+                    icon: const Icon(Icons.search, color: Colors.white70),
+                    onPressed: () => Navigator.pushNamed(context, '/global_search'),
                   ),
-                ),
-              ),
-              actions: [
-                IconButton(
-                  icon: const Icon(Icons.search, color: Colors.white70),
-                  onPressed: () => Navigator.pushNamed(context, '/global_search'),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.more_vert, color: Colors.white70),
-                  onPressed: () => _showMenu(context),
-                ),
-              ],
-              bottom: TabBar(
-                controller: _tabController,
-                indicator: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
+                  IconButton(
+                    icon: const Icon(Icons.more_vert, color: Colors.white70),
+                    onPressed: () => _showMenu(context),
                   ),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                indicatorSize: TabBarIndicatorSize.tab,
-                indicatorPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                labelColor: Colors.white,
-                unselectedLabelColor: Colors.white.withOpacity(0.4),
-                labelStyle: const TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 14,
-                ),
-                unselectedLabelStyle: const TextStyle(
-                  fontWeight: FontWeight.w400,
-                  fontSize: 14,
-                ),
-                tabs: [
-                  Tab(text: AppLocalizations.get('chats')),
-                  Tab(text: AppLocalizations.get('status')),
-                  Tab(text: AppLocalizations.get('calls')),
                 ],
+                bottom: TabBar(
+                  controller: _tabController,
+                  indicator: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
+                    ),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  indicatorSize: TabBarIndicatorSize.tab,
+                  indicatorPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  labelColor: Colors.white,
+                  unselectedLabelColor: Colors.white.withOpacity(0.4),
+                  labelStyle: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                  unselectedLabelStyle: const TextStyle(
+                    fontWeight: FontWeight.w400,
+                    fontSize: 14,
+                  ),
+                  tabs: [
+                    Tab(text: AppLocalizations.get('chats')),
+                    Tab(text: AppLocalizations.get('status')),
+                    Tab(text: AppLocalizations.get('calls')),
+                  ],
+                ),
               ),
-            ),
-          ];
-        },
-        body: TabBarView(
-          controller: _tabController,
-          children: [
-            _buildChatsTab(),
-            _buildStatusTab(),
-            _buildCallsTab(),
-          ],
+            ];
+          },
+          body: TabBarView(
+            controller: _tabController,
+            children: [
+              _buildChatsTab(),
+              _buildStatusTab(),
+              _buildCallsTab(),
+            ],
+          ),
         ),
+        floatingActionButton: _buildFAB(),
       ),
-      floatingActionButton: _buildFAB(),
     );
   }
 
@@ -170,7 +182,7 @@ class _MainAppScreenState extends State<MainAppScreen>
             child: const Icon(Icons.chat_bubble, color: Colors.white),
           ),
         );
-      
+
       case 1:
         return Container(
           decoration: BoxDecoration(
@@ -193,7 +205,7 @@ class _MainAppScreenState extends State<MainAppScreen>
             child: const Icon(Icons.camera_alt, color: Colors.white),
           ),
         );
-      
+
       case 2:
         return Container(
           decoration: BoxDecoration(
@@ -216,7 +228,7 @@ class _MainAppScreenState extends State<MainAppScreen>
             child: const Icon(Icons.add_call, color: Colors.white),
           ),
         );
-      
+
       default:
         return null;
     }
@@ -515,7 +527,7 @@ class _MainAppScreenState extends State<MainAppScreen>
 
   void _showNewCallOptions(BuildContext context) {
     final channelName = CallService.generateChannelName();
-    
+
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF1a103c),
@@ -536,7 +548,7 @@ class _MainAppScreenState extends State<MainAppScreen>
               ),
             ),
             const SizedBox(height: 20),
-            
+
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -564,7 +576,7 @@ class _MainAppScreenState extends State<MainAppScreen>
                 ],
               ),
             ),
-            
+
             const SizedBox(height: 20),
             _buildOptionTile(
               icon: Icons.person_search,
@@ -631,7 +643,7 @@ class _MainAppScreenState extends State<MainAppScreen>
 
   void _showCallCodeDialog(BuildContext context) {
     final codeController = TextEditingController();
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
