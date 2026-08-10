@@ -119,17 +119,61 @@ app.post('/delete-cloudinary', async (req, res) => {
     // ── END AUTH CHECK ──
 
     const { public_id } = req.body;
-    
+
     if (!public_id) {
       return res.status(400).json({ success: false, error: 'public_id required' });
     }
 
     const result = await cloudinary.uploader.destroy(public_id);
-    
+
     if (result.result === 'ok') {
       res.json({ success: true, message: 'File deleted' });
     } else {
       res.json({ success: false, error: result.result });
+    }
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ============================================================================
+// NEW: Delete old avatar endpoint - called when group/channel/user changes photo
+// ============================================================================
+app.post('/delete-avatar', async (req, res) => {
+  try {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== process.env.BACKEND_API_KEY) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+
+    const { imageUrl } = req.body;
+
+    if (!imageUrl || !imageUrl.includes('cloudinary.com')) {
+      return res.status(400).json({ success: false, error: 'Valid Cloudinary URL required' });
+    }
+
+    // Extract public_id from Cloudinary URL
+    const urlParts = imageUrl.split('/upload/');
+    if (urlParts.length <= 1) {
+      return res.status(400).json({ success: false, error: 'Invalid Cloudinary URL format' });
+    }
+
+    const afterUpload = urlParts[1];
+    const pathParts = afterUpload.split('/');
+    const startIndex = pathParts[0].startsWith('v') ? 1 : 0;
+    const publicIdWithExt = pathParts.slice(startIndex).join('/');
+    const publicId = publicIdWithExt.replace(/\.[^/.]+$/, '');
+
+    if (!publicId) {
+      return res.status(400).json({ success: false, error: 'Could not extract public_id' });
+    }
+
+    const result = await cloudinary.uploader.destroy(publicId);
+
+    if (result.result === 'ok' || result.result === 'not found') {
+      res.json({ success: true, message: 'Old avatar deleted', publicId });
+    } else {
+      res.json({ success: false, error: result.result, publicId });
     }
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -270,7 +314,28 @@ startPushNotificationListener();
 // ============================================================================
 // MONTHLY AUTO-CLEANUP — Delete old media from Cloudinary (keeps messages)
 // Runs every 20 days, processes 50 files max per run
+// FIX #14: Skips permanent folder AND active avatar URLs
 // ============================================================================
+async function getActiveAvatarUrls() {
+  const urls = new Set();
+
+  // Get all user avatars
+  const usersSnapshot = await db.collection('users').get();
+  usersSnapshot.forEach(doc => {
+    const avatar = doc.data().avatar_url;
+    if (avatar && avatar.includes('cloudinary.com')) urls.add(avatar);
+  });
+
+  // Get all chat avatars
+  const chatsSnapshot = await db.collection('chats').get();
+  chatsSnapshot.forEach(doc => {
+    const avatar = doc.data().avatar_url;
+    if (avatar && avatar.includes('cloudinary.com')) urls.add(avatar);
+  });
+
+  return urls;
+}
+
 function startMonthlyCleanup() {
   console.log('Starting monthly media cleanup scheduler...');
 
@@ -278,8 +343,12 @@ function startMonthlyCleanup() {
   setInterval(async () => {
     try {
       const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      
+
       console.log(`[Cleanup] Running cleanup for media older than ${thirtyDaysAgo.toISOString()}`);
+
+      // Get all active avatar URLs for double protection
+      const activeAvatarUrls = await getActiveAvatarUrls();
+      console.log(`[Cleanup] Found ${activeAvatarUrls.size} active avatar URLs to protect`);
 
       // Process only 50 at a time to save Firebase quota
       const oldMessagesSnapshot = await db.collectionGroup('messages')
@@ -290,6 +359,7 @@ function startMonthlyCleanup() {
 
       let deletedCount = 0;
       let errorCount = 0;
+      let skippedCount = 0;
 
       for (const doc of oldMessagesSnapshot.docs) {
         const data = doc.data();
@@ -297,6 +367,20 @@ function startMonthlyCleanup() {
 
         if (mediaUrl && mediaUrl.includes('cloudinary.com')) {
           try {
+            // FIX #14: Skip permanent folder files (avatars, profile pictures)
+            if (mediaUrl.includes('/permanent/')) {
+              skippedCount++;
+              console.log(`[Cleanup] SKIPPED permanent file: ${mediaUrl}`);
+              continue;
+            }
+
+            // FIX #14: Skip any URL that is currently an active avatar
+            if (activeAvatarUrls.has(mediaUrl)) {
+              skippedCount++;
+              console.log(`[Cleanup] SKIPPED active avatar: ${mediaUrl}`);
+              continue;
+            }
+
             // Extract public_id from Cloudinary URL
             const urlParts = mediaUrl.split('/upload/');
             if (urlParts.length > 1) {
@@ -308,7 +392,7 @@ function startMonthlyCleanup() {
 
               if (publicId) {
                 const result = await cloudinary.uploader.destroy(publicId);
-                
+
                 if (result.result === 'ok') {
                   await doc.ref.update({ 
                     media_url: null,
@@ -331,7 +415,7 @@ function startMonthlyCleanup() {
         }
       }
 
-      console.log(`[Cleanup] Complete. Deleted: ${deletedCount}, Errors: ${errorCount}, Total scanned: ${oldMessagesSnapshot.docs.length}`);
+      console.log(`[Cleanup] Complete. Deleted: ${deletedCount}, Skipped: ${skippedCount}, Errors: ${errorCount}, Total scanned: ${oldMessagesSnapshot.docs.length}`);
 
     } catch (error) {
       console.error('[Cleanup] Monthly cleanup error:', error.message);
