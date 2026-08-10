@@ -31,9 +31,13 @@ class AuraAuthProvider extends ChangeNotifier {
   String? get displayName => _displayName;
   String? get userBio => _userBio;
   String? get userPhotoUrl => _userPhotoUrl;
-  String? get mockUserId => _mockUserId;
 
-  set mockUserId(String? value) {
+  // FIX: Removed public mockUserId getter. Use currentUserId instead.
+  // Never expose mock IDs to UI.
+  String? get currentUserId => _user?.uid ?? _mockUserId;
+
+  // FIX: Private setter only - no external code can set mock ID
+  set _mockUserIdValue(String? value) {
     _mockUserId = value;
     notifyListeners();
   }
@@ -72,6 +76,30 @@ class AuraAuthProvider extends ChangeNotifier {
       debugPrint('Auth init error: $e');
     } finally {
       _setLoading(false);
+    }
+  }
+
+  // FIX: New method - fetch any user's public profile by ID
+  // Use this in chat_screen, search_screen, etc. to get real names
+  Future<Map<String, dynamic>?> getUserProfile(String userId) async {
+    try {
+      final doc = await _firestore.collection('users').doc(userId).get();
+      if (doc.exists) {
+        final data = doc.data()!;
+        return {
+          'id': userId,
+          'username': data['username'] ?? data['display_name'] ?? 'Unknown',
+          'display_name': data['display_name'],
+          'avatar_url': data['avatar_url'],
+          'bio': data['bio'],
+          'phone': data['phone'],
+          'is_verified': data['is_verified'] == true,
+        };
+      }
+      return null;
+    } catch (e) {
+      debugPrint('Get user profile error: $e');
+      return null;
     }
   }
 
@@ -281,7 +309,8 @@ class AuraAuthProvider extends ChangeNotifier {
   }
 
   Future<bool> _loadUserProfile() async {
-    final userId = _user?.uid ?? _mockUserId;
+    // FIX: Use currentUserId instead of _user?.uid ?? _mockUserId
+    final userId = currentUserId;
     if (userId == null) return false;
     try {
       final doc = await _firestore.collection('users').doc(userId).get();
@@ -334,7 +363,8 @@ class AuraAuthProvider extends ChangeNotifier {
   }) async {
     _setLoading(true);
     try {
-      final userId = _user?.uid ?? _mockUserId ?? 'mock_${DateTime.now().millisecondsSinceEpoch}';
+      // FIX: Use currentUserId instead of direct _mockUserId
+      final userId = currentUserId ?? 'mock_${DateTime.now().millisecondsSinceEpoch}';
 
       if (_user == null && _mockUserId == null) {
         _mockUserId = userId;
@@ -387,7 +417,8 @@ class AuraAuthProvider extends ChangeNotifier {
   }) async {
     _setLoading(true);
     try {
-      final userId = _user?.uid ?? _mockUserId;
+      // FIX: Use currentUserId
+      final userId = currentUserId;
       if (userId == null) {
         _error = 'Not authenticated';
         _setLoading(false);
@@ -432,7 +463,8 @@ class AuraAuthProvider extends ChangeNotifier {
   Future<bool> changePhoneNumber(String newPhone) async {
     _setLoading(true);
     try {
-      final userId = _user?.uid ?? _mockUserId;
+      // FIX: Use currentUserId
+      final userId = currentUserId;
       if (userId == null) {
         _error = 'Not authenticated';
         _setLoading(false);
@@ -473,7 +505,8 @@ class AuraAuthProvider extends ChangeNotifier {
   Future<bool> changeEmail(String newEmail) async {
     _setLoading(true);
     try {
-      final userId = _user?.uid ?? _mockUserId;
+      // FIX: Use currentUserId
+      final userId = currentUserId;
       if (userId == null) {
         _error = 'Not authenticated';
         _setLoading(false);
@@ -537,7 +570,8 @@ class AuraAuthProvider extends ChangeNotifier {
   Future<bool> deleteAccount() async {
     _setLoading(true);
     try {
-      final userId = _user?.uid ?? _mockUserId;
+      // FIX: Use currentUserId
+      final userId = currentUserId;
       if (userId == null) {
         _error = 'Not authenticated';
         _setLoading(false);
