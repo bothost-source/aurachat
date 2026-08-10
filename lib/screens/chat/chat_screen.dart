@@ -788,13 +788,27 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
         'sent_to_fcm': false,
       };
 
-      await Future.wait([
-        firestore.collection('chats').doc(_chatId!).collection('messages').doc(messageId).set(serverMessage),
-        firestore.collection('chats').doc(_chatId!).update({
-          'last_message': content,
-          'last_message_at': FieldValue.serverTimestamp(),
-        }),
-      ]);
+      try {
+        await Future.wait([
+          firestore.collection('chats').doc(_chatId!).collection('messages').doc(messageId).set(serverMessage),
+          firestore.collection('chats').doc(_chatId!).update({
+            'last_message': content,
+            'last_message_at': FieldValue.serverTimestamp(),
+          }),
+        ]);
+      } catch (e) {
+        debugPrint('Firestore write error: $e');
+        setState(() {
+          _messages.removeWhere((m) => m['id'] == messageId);
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to send message: $e')),
+          );
+        }
+        return;
+      }
+
     } catch (e) {
       debugPrint('Send message error: $e');
       if (mounted) {
@@ -3761,4 +3775,4 @@ class _FullScreenVideoPlayerState extends State<_FullScreenVideoPlayer> {
       ),
     );
   }
-}
+}  
