@@ -104,6 +104,17 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     }
   }
 
+  Future<void> _deleteOldAvatar(String? oldUrl) async {
+    if (oldUrl == null || oldUrl.isEmpty) return;
+    if (!oldUrl.contains('cloudinary.com')) return;
+
+    try {
+      await CloudinaryService.deleteImage(oldUrl);
+    } catch (e) {
+      debugPrint('Failed to delete old avatar: $e');
+    }
+  }
+
   Future<void> _saveEdit() async {
     final name = _editNameController.text.trim();
     if (name.isEmpty) {
@@ -114,6 +125,13 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     setState(() => _isLoading = true);
 
     try {
+      // Get current avatar before updating
+      final chatDoc = await FirebaseFirestore.instance
+          .collection('chats')
+          .doc(widget.chatId)
+          .get();
+      final oldAvatarUrl = chatDoc.data()?['avatar_url'] as String?;
+
       final updates = <String, dynamic>{
         'name': name,
         'description': _editDescriptionController.text.trim().isNotEmpty
@@ -122,8 +140,10 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
         'updated_at': FieldValue.serverTimestamp(),
       };
 
-      if (_editPhotoUrl != null) {
+      if (_editPhotoUrl != null && _editPhotoUrl != oldAvatarUrl) {
         updates['avatar_url'] = _editPhotoUrl;
+        // Delete old avatar from Cloudinary
+        await _deleteOldAvatar(oldAvatarUrl);
       }
 
       await FirebaseFirestore.instance
