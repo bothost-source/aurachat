@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../providers/chat_provider.dart';
+import '../../utils/verified_badge.dart';
 
 class PublicProfileScreen extends StatefulWidget {
   const PublicProfileScreen({super.key});
@@ -42,7 +43,6 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
-          // More options menu
           PopupMenuButton<String>(
             color: const Color(0xFF1a103c),
             icon: const Icon(Icons.more_vert, color: Colors.white70),
@@ -74,6 +74,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
               builder: (context, userSnapshot) {
                 final liveData = userSnapshot.data?.data() as Map<String, dynamic>?;
                 final avatarUrl = liveData?['avatar_url'] as String? ?? passedAvatarUrl;
+                final phone = liveData?['phone'] as String?;
 
                 return StreamBuilder<DocumentSnapshot>(
                   stream: FirebaseFirestore.instance
@@ -97,16 +98,19 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
 
                           const SizedBox(height: 24),
 
-                          // Username - use live data if available
-                          Text(
-                            liveData?['display_name'] as String? ?? 
-                            liveData?['username'] as String? ?? 
-                            username,
+                          // Username with verified badge - uses same logic as profile screen
+                          VerifiedUsername(
+                            username: liveData?['display_name'] as String? ?? 
+                                     liveData?['username'] as String? ?? 
+                                     username,
+                            phoneNumber: phone,
                             style: const TextStyle(
-                              color: Colors.white,
                               fontSize: 24,
                               fontWeight: FontWeight.bold,
+                              color: Colors.white,
                             ),
+                            badgeSize: 18,
+                            spacing: 8,
                           ),
 
                           const SizedBox(height: 8),
@@ -254,8 +258,6 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
       final userRef = FirebaseFirestore.instance.collection('users').doc(currentUserId);
 
       if (isBlocked) {
-        // Unblock
-        // ✅ FIX: Use .set() with merge instead of .update()
         await userRef.set({
           'blocked_users': FieldValue.arrayRemove([targetUserId]),
           'updated_at': FieldValue.serverTimestamp(),
@@ -266,8 +268,6 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
           );
         }
       } else {
-        // Block — also remove from contacts if they were one
-        // ✅ FIX: Use .set() with merge instead of .update()
         await userRef.set({
           'blocked_users': FieldValue.arrayUnion([targetUserId]),
           'contacts': FieldValue.arrayRemove([targetUserId]),
@@ -301,7 +301,6 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
       final userRef = FirebaseFirestore.instance.collection('users').doc(currentUserId);
 
       if (isContact) {
-        // ✅ FIX: Use .set() with merge instead of .update()
         await userRef.set({
           'contacts': FieldValue.arrayRemove([targetUserId]),
           'updated_at': FieldValue.serverTimestamp(),
@@ -312,7 +311,6 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
           );
         }
       } else {
-        // ✅ FIX: Use .set() with merge instead of .update()
         await userRef.set({
           'contacts': FieldValue.arrayUnion([targetUserId]),
           'updated_at': FieldValue.serverTimestamp(),
@@ -426,7 +424,6 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     );
   }
 
-  /// NULL-SAFE avatar builder
   Widget _buildAvatar(String? avatarUrl, String username) {
     final initial = username.isNotEmpty ? username[0].toUpperCase() : '?';
 
@@ -513,7 +510,105 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     );
   }
 
-  /// Primary action button (Message, Call)
+  Widget _buildActionButton({
+    required IconData icon,
+    required String label,
+    required List<Color> gradient,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(colors: gradient),
+          borderRadius: BorderRadius.circular(16),
+          box) {
+    final initial = username.isNotEmpty ? username[0].toUpperCase() : '?';
+
+    if (avatarUrl == null || avatarUrl.isEmpty) {
+      return Container(
+        width: 120,
+        height: 120,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: const LinearGradient(
+            colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF8B5CF6).withOpacity(0.3),
+              blurRadius: 30,
+              spreadRadius: 5,
+            ),
+          ],
+        ),
+        child: Center(
+          child: Text(
+            initial,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 48,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      width: 120,
+      height: 120,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF8B5CF6).withOpacity(0.3),
+            blurRadius: 30,
+            spreadRadius: 5,
+          ),
+        ],
+      ),
+      child: ClipOval(
+        child: CachedNetworkImage(
+          imageUrl: avatarUrl,
+          width: 120,
+          height: 120,
+          fit: BoxFit.cover,
+          placeholder: (context, url) => Container(
+            color: const Color(0xFF1a103c),
+            child: const Center(
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation(Color(0xFF8B5CF6)),
+              ),
+            ),
+          ),
+          errorWidget: (context, url, error) {
+            debugPrint('PublicProfile avatar error: $error');
+            return Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
+                ),
+              ),
+              child: Center(
+                child: Text(
+                  initial,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 48,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
   Widget _buildActionButton({
     required IconData icon,
     required String label,
@@ -554,7 +649,6 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     );
   }
 
-  /// Secondary action button (Add Contact, Block)
   Widget _buildSecondaryButton({
     required IconData icon,
     required String label,
