@@ -25,6 +25,9 @@ import '../../services/cloudinary_service.dart';
 import '../../services/ai_moderation_service.dart';
 import '../../utils/verified_badge.dart';
 import '../groups/group_info_screen.dart';
+import 'package:flutter/gestures.dart';
+import 'package:url_launcher/url_launcher.dart';
+
 
 class ChatScreen extends StatefulWidget {
   final String? chatId;
@@ -110,6 +113,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
   String? _otherUserStatus;
   Timer? _typingTimer;
   Timer? _statusTimer;
+  final Map<String, Map<String, dynamic>> _userCache = {};
+
 
   @override
   void initState() {
@@ -482,7 +487,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
   }
 
   Future<void> _loadMessages() async {
-    if (_chatId == null) {
+        if (_chatId == null) {
       setState(() => _isLoading = false);
       return;
     }
@@ -497,24 +502,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
           .orderBy('created_at', descending: false)
           .get();
 
+      final Set<String> userIds = {};
       final List<Map<String, dynamic>> loadedMessages = [];
+
       for (final doc in snapshot.docs) {
         final data = doc.data();
         final senderId = data['sender_id'] as String?;
-
-        if (senderId != null) {
-          final userDoc = await firestore.collection('users').doc(senderId).get();
-          if (userDoc.exists) {
-            final userData = userDoc.data()!;
-            data['users'] = {
-              'username': userData['username'],
-              'avatar_url': userData['avatar_url'],
-              'bio': userData['bio'],
-              'phone_number': userData['phone'],
-            };
-          }
-        }
-
+        if (senderId != null) userIds.add(senderId);
         loadedMessages.add({
           'id': doc.id,
           ...data,
@@ -522,58 +516,85 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
         });
       }
 
+      // Batch fetch all users at once
+      if (userIds.isNotEmpty) {
+        final userDocs = await Future.wait(
+          userIds.map((id) => firestore.collection('users').doc(id).get()),
+        );
+        for (final userDoc in userDocs) {
+          if (userDoc.exists) {
+            final u = userDoc.data()!;
+            _userCache[userDoc.id] = {
+              'username': u['username'] ?? u['display_name'] ?? 'Unknown',
+              'avatar_url': u['avatar_url'],
+              'bio': u['bio'],
+              'phone_number': u['phone'],
+              'is_verified': u['is_verified'] == true,
+            };
+          }
+        }
+      }
+
+      for (final msg in loadedMessages) {
+        final sid = msg['sender_id'] as String?;
+        if (sid != null && _userCache.containsKey(sid)) {
+          msg['users'] = _userCache[sid];
+        } else {
+          msg['users'] = {
+            'username': 'Unknown',
+            'avatar_url': null,
+            'bio': null,
+            'phone_number': null,
+            'is_verified': false,
+          };
+        }
+      }
+
       setState(() {
         _messages = loadedMessages;
         _isLoading = false;
       });
-
-      _scrollToBottom();
+      _scrollToBottom(force: true);
     } catch (e) {
       debugPrint('Load messages error: $e');
       setState(() => _isLoading = false);
     }
-  }
 
     void _subscribeToMessages() {
-    if (_chatId == null) return;
+        if (_chatId == null) return;
 
     final firestore = FirebaseFirestore.instance;
+    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+    final currentUserId = authProvider.user?.uid ?? authProvider.mockUserId;
+
     _messageSubscription = firestore
         .collection('chats')
         .doc(_chatId!)
         .collection('messages')
         .where('deleted_for_everyone', isEqualTo: false)
-        .orderBy('created_at', descending: true)  // FIX: descending to get newest first
-        .limit(100)
+        .orderBy('created_at', descending: false)
         .snapshots()
         .listen((snapshot) async {
           if (!mounted) return;
-          
+
           final List<Map<String, dynamic>> newMessages = [];
-          
-          for (final doc in snapshot.docs) {
-            final data = doc.data();
+          final Set<String> missingUserIds = {};
+
+          for (final change in snapshot.docChanges) {
+            final doc = change.doc;
+            final data = doc.data()!;
             final messageId = doc.id;
             final senderId = data['sender_id'] as String?;
-            
-            // Skip if deleted for me
+
             final deletedFor = List<String>.from(data['deleted_for'] ?? []);
-            final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
-            final currentUserId = authProvider.user?.uid ?? authProvider.mockUserId;
             if (deletedFor.contains(currentUserId)) continue;
 
-            // Get sender info
             Map<String, dynamic>? userData;
             if (senderId != null) {
-              final userDoc = await firestore.collection('users').doc(senderId).get();
-              if (userDoc.exists) {
-                final u = userDoc.data()!;
-                userData = {
-                  'username': u['username'],
-                  'avatar_url': u['avatar_url'],
-                  'bio': u['bio'],
-                  'phone_number': u['phone'],
-                };
+              if (_userCache.containsKey(senderId)) {
+                userData = _userCache[senderId];
+              } else {
+                missingUserIds.add(senderId);
               }
             }
 
@@ -585,27 +606,45 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
                 'avatar_url': null,
                 'bio': null,
                 'phone_number': null,
+                'is_verified': false,
               },
               'created_at': data['created_at']?.toDate()?.toIso8601String() ?? DateTime.now().toIso8601String(),
             });
           }
 
-          // Reverse to show oldest at bottom (like chat apps)
-          newMessages.sort((a, b) => 
-            DateTime.parse(a['created_at']).compareTo(DateTime.parse(b['created_at']))
-          );
+          if (missingUserIds.isNotEmpty) {
+            final userDocs = await Future.wait(
+              missingUserIds.map((id) => firestore.collection('users').doc(id).get()),
+            );
+            for (final userDoc in userDocs) {
+              if (userDoc.exists) {
+                final u = userDoc.data()!;
+                _userCache[userDoc.id] = {
+                  'username': u['username'] ?? u['display_name'] ?? 'Unknown',
+                  'avatar_url': u['avatar_url'],
+                  'bio': u['bio'],
+                  'phone_number': u['phone'],
+                  'is_verified': u['is_verified'] == true,
+                };
+              }
+            }
+            for (final msg in newMessages) {
+              final sid = msg['sender_id'] as String?;
+              if (sid != null && _userCache.containsKey(sid)) {
+                msg['users'] = _userCache[sid];
+              }
+            }
+          }
 
           setState(() {
             _messages = newMessages;
             _isLoading = false;
           });
-          
-          _scrollToBottom();
+          _scrollToBottom(force: _messages.length <= 20);
         }, onError: (e) {
           debugPrint('Message subscription error: $e');
           setState(() => _isLoading = false);
         });
-  }
 
   Future<void> _loadPinnedMessages() async {
     if (_chatId == null) return;
@@ -633,14 +672,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     }
   }
 
-  void _scrollToBottom() {
-    if (_scrollController.hasClients) {
-      Future.delayed(const Duration(milliseconds: 100), () {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
+    void _scrollToBottom({bool force = false}) {
+    if (!_scrollController.hasClients) return;
+    final maxScroll = _scrollController.position.maxScrollExtent;
+    final currentScroll = _scrollController.position.pixels;
+    if (force || (maxScroll - currentScroll) < 300) {
+      Future.delayed(const Duration(milliseconds: 50), () {
+        if (_scrollController.hasClients) {
+          _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+        }
       });
     }
   }
@@ -678,23 +718,54 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
   }
 
   Future<void> _sendMessage({
-    required String type,
-    required String content,
-    String? mediaUrl,
-    String? fileName,
-    String? fileSize,
-    int? duration,
-  }) async {
-    try {
+    r    try {
       final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
       final firestore = FirebaseFirestore.instance;
       final userId = authProvider.user?.uid ?? authProvider.mockUserId;
-
       if (userId == null || _chatId == null) return;
 
       final messageId = const Uuid().v4();
 
-      final message = {
+      // Optimistic UI - shows immediately
+      final optimisticMessage = {
+        'id': messageId,
+        'chat_id': _chatId!,
+        'sender_id': userId,
+        'type': type,
+        'chat_type': _isGroup ? 'group' : 'direct',
+        'content': content,
+        'media_url': mediaUrl,
+        'file_name': fileName,
+        'file_size': fileSize,
+        'duration': duration,
+        'reply_to': _replyingTo,
+        'reply_to_content': _replyingToContent,
+        'reply_to_sender': _replyingToSender,
+        'created_at': DateTime.now().toIso8601String(),
+        'is_read': false,
+        'is_edited': false,
+        'deleted_for_everyone': false,
+        'deleted_for': [],
+        'reactions': {},
+        'sent_to_fcm': false,
+        'users': {
+          'username': authProvider.displayName ?? authProvider.userName ?? 'You',
+          'avatar_url': authProvider.userPhotoUrl,
+          'bio': authProvider.userBio,
+          'phone_number': authProvider.phoneNumber,
+          'is_verified': false,
+        },
+      };
+
+      setState(() {
+        _messages.add(optimisticMessage);
+        _replyingTo = null;
+        _replyingToContent = null;
+        _replyingToSender = null;
+      });
+      _scrollToBottom(force: true);
+
+      final serverMessage = {
         'id': messageId,
         'chat_id': _chatId!,
         'sender_id': userId,
@@ -717,24 +788,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
         'sent_to_fcm': false,
       };
 
-      await firestore
-          .collection('chats')
-          .doc(_chatId!)
-          .collection('messages')
-          .doc(messageId)
-          .set(message);
-
-      await firestore.collection('chats').doc(_chatId!).update({
-        'last_message': content,
-        'last_message_at': FieldValue.serverTimestamp(),
-      });
-
-      setState(() {
-        _replyingTo = null;
-        _replyingToContent = null;
-        _replyingToSender = null;
-      });
-      _scrollToBottom();
+      await Future.wait([
+        firestore.collection('chats').doc(_chatId!).collection('messages').doc(messageId).set(serverMessage),
+        firestore.collection('chats').doc(_chatId!).update({
+          'last_message': content,
+          'last_message_at': FieldValue.serverTimestamp(),
+        }),
+      ]);
     } catch (e) {
       debugPrint('Send message error: $e');
       if (mounted) {
@@ -743,7 +803,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
         );
       }
     }
-  }
 
   void _showPermissionDenied() {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -771,6 +830,55 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
       ),
     );
   }
+  
+    Future<void> _unblockUser() async {
+    try {
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+      final currentUserId = authProvider.user?.uid ?? authProvider.mockUserId;
+      if (currentUserId == null || _otherUserId == null) return;
+
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(currentUserId)
+          .update({
+        'blocked_users': FieldValue.arrayRemove([_otherUserId]),
+      });
+
+      setState(() {
+        _iBlockedThem = false;
+        _isBlocked = _theyBlockedMe;
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('User unblocked')),
+        );
+      }
+    } catch (e) {
+      debugPrint('Unblock error: $e');
+    }
+  }
+
+  Future<void> _deleteChat() async {
+    try {
+      if (_chatId == null) return;
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+      final currentUserId = authProvider.user?.uid ?? authProvider.mockUserId;
+      if (currentUserId == null) return;
+
+      await FirebaseFirestore.instance
+          .collection('chats')
+          .doc(_chatId)
+          .update({
+        'deleted_for': FieldValue.arrayUnion([currentUserId]),
+      });
+
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      debugPrint('Delete chat error: $e');
+    }
+  }
+
 
   Future<void> _editMessage(String messageId, String newContent) async {
     if (newContent.trim().isEmpty) return;
@@ -2260,23 +2368,112 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
             ),
 
           if (!_isGroup && _isBlocked)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
-              color: Colors.red.withOpacity(0.15),
-              child: Row(
-                children: [
-                  const Icon(Icons.block, size: 16, color: Colors.red),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _iBlockedThem
-                        ? 'You blocked this user. Unblock them from their profile to chat.'
-                        : 'This user blocked you. You cannot send messages.',
-                      style: TextStyle(color: Colors.red.withOpacity(0.9), fontSize: 12),
+            GestureDetector(
+              onTap: () {
+                if (_iBlockedThem) {
+                  showModalBottomSheet(
+                    context: context,
+                    backgroundColor: const Color(0xFF1a103c),
+                    shape: const RoundedRectangleBorder(
+                      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
                     ),
-                  ),
-                ],
+                    builder: (context) => Container(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 40, height: 4,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                          const Icon(Icons.block, color: Colors.red, size: 48),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'You blocked this contact',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'You will no longer receive messages or calls from this person.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.5),
+                              fontSize: 14,
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: ElevatedButton.icon(
+                                  onPressed: () {
+                                    Navigator.pop(context);
+                                    _unblockUser();
+                                  },
+                                  icon: const Icon(Icons.block_flipped, color: Colors.white),
+                                  label: const Text('Unblock'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFF10B981),
+                                    padding: const EdgeInsets.symmetric(vertical: 14),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: ElevatedButton.icon(
+                                  onPressed: () {
+                                    Navigator.pop(context);
+                                    _deleteChat();
+                                  },
+                                  icon: const Icon(Icons.delete_outline, color: Colors.white),
+                                  label: const Text('Delete Chat'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.red,
+                                    padding: const EdgeInsets.symmetric(vertical: 14),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                        ],
+                      ),
+                    ),
+                  );
+                }
+              },
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                color: Colors.red.withOpacity(0.1),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.block, size: 16, color: Colors.red.withOpacity(0.8)),
+                    const SizedBox(width: 8),
+                    Text(
+                      _iBlockedThem
+                        ? 'You blocked this person. Tap to unblock.'
+                        : 'This user blocked you. You cannot send messages.',
+                      style: TextStyle(color: Colors.red.withOpacity(0.9), fontSize: 13),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
               ),
             ),
 
@@ -2701,7 +2898,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
       ),
     );
   }
-
+  
     Widget _buildMessageBubble(BuildContext context, {
     required Map<String, dynamic> message, 
     required bool isMe, 
@@ -2836,7 +3033,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
                               style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 14, fontStyle: FontStyle.italic),
                             )
                           else if (type == 'text')
-                            Text(content, style: TextStyle(color: isMe ? Colors.white : Colors.white.withOpacity(0.9), fontSize: 15))
+                            RichText(text: TextSpan(children: _parseTextWithLinks(content, isMe)))
                           else if (type == 'image' && mediaUrl != null)
                             GestureDetector(
                               onTap: () => _showImageViewer(mediaUrl),
@@ -3060,7 +3257,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
   }
 
   Widget _buildVideoBubble({required String videoUrl, required bool isMe}) {
-    if (!_videoControllers.containsKey(videoUrl)) {
+       if (!_videoControllers.containsKey(videoUrl)) {
       final controller = VideoPlayerController.networkUrl(Uri.parse(videoUrl));
       controller.initialize().then((_) { if (mounted) setState(() {}); });
       _videoControllers[videoUrl] = controller;
@@ -3069,13 +3266,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     final isInitialized = controller.value.isInitialized;
 
     return GestureDetector(
-      onTap: () {
-        if (isInitialized) {
-          setState(() {
-            controller.value.isPlaying ? controller.pause() : controller.play();
-          });
-        }
-      },
+      onTap: isInitialized ? () => _openFullScreenVideo(videoUrl) : null,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(14),
         child: Container(
@@ -3087,16 +3278,30 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
                 fit: StackFit.expand,
                 children: [
                   VideoPlayer(controller),
-                  if (!controller.value.isPlaying)
-                    Container(
-                      color: Colors.black.withOpacity(0.4),
-                      child: const Icon(Icons.play_circle_fill, color: Colors.white, size: 50),
+                  Container(
+                    color: Colors.black.withOpacity(0.3),
+                    child: const Center(
+                      child: Icon(Icons.play_circle_fill, color: Colors.white, size: 50),
                     ),
+                  ),
                 ],
               )
             : const Center(
                 child: SizedBox(width: 32, height: 32, child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation(Color(0xFF8B5CF6)))),
               ),
+        ),
+      ),
+    );
+  
+    void _openFullScreenVideo(String videoUrl) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => Scaffold(
+          backgroundColor: Colors.black,
+          body: SafeArea(
+            child: _FullScreenVideoPlayer(videoUrl: videoUrl),
+          ),
         ),
       ),
     );
@@ -3405,4 +3610,155 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     if (bytes < 1024 * 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
   }
-} 
+}  
+
+class _FullScreenVideoPlayer extends StatefulWidget {
+  final String videoUrl;
+  const _FullScreenVideoPlayer({required this.videoUrl});
+
+  @override
+  State<_FullScreenVideoPlayer> createState() => _FullScreenVideoPlayerState();
+}
+
+class _FullScreenVideoPlayerState extends State<_FullScreenVideoPlayer> {
+  late VideoPlayerController _controller;
+  bool _showControls = true;
+  Timer? _controlsTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl))
+      ..initialize().then((_) {
+        setState(() {});
+        _controller.play();
+      });
+    _hideControlsAfterDelay();
+  }
+
+  @override
+  void dispose() {
+    _controlsTimer?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _hideControlsAfterDelay() {
+    _controlsTimer?.cancel();
+    _controlsTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) setState(() => _showControls = false);
+    });
+  }
+
+  String _fmt(Duration d) {
+    final m = d.inMinutes.toString().padLeft(2, '0');
+    final s = (d.inSeconds % 60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        setState(() => _showControls = !_showControls);
+        if (_showControls) _hideControlsAfterDelay();
+      },
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Center(
+            child: _controller.value.isInitialized
+              ? AspectRatio(
+                  aspectRatio: _controller.value.aspectRatio,
+                  child: VideoPlayer(_controller),
+                )
+              : const CircularProgressIndicator(color: Color(0xFF8B5CF6)),
+          ),
+          if (_showControls && _controller.value.isInitialized) ...[
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Colors.black.withOpacity(0.8), Colors.transparent],
+                  ),
+                ),
+                child: SafeArea(
+                  child: Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.arrow_back, color: Colors.white),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.bottomCenter,
+                    end: Alignment.topCenter,
+                    colors: [Colors.black.withOpacity(0.8), Colors.transparent],
+                  ),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    VideoProgressIndicator(
+                      _controller,
+                      allowScrubbing: true,
+                      colors: const VideoProgressColors(
+                        playedColor: Color(0xFF8B5CF6),
+                        bufferedColor: Colors.white30,
+                        backgroundColor: Colors.white10,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        IconButton(
+                          icon: Icon(
+                            _controller.value.isPlaying ? Icons.pause : Icons.play_arrow,
+                            color: Colors.white,
+                            size: 32,
+                          ),
+                          onPressed: () {
+                            setState(() {
+                              _controller.value.isPlaying ? _controller.pause() : _controller.play();
+                            });
+                            _hideControlsAfterDelay();
+                          },
+                        ),
+                        Text(
+                          '${_fmt(_controller.value.position)} / ${_fmt(_controller.value.duration)}',
+                          style: const TextStyle(color: Colors.white, fontSize: 14),
+                        ),
+                        const Spacer(),
+                        IconButton(
+                          icon: const Icon(Icons.fullscreen_exit, color: Colors.white),
+                          onPressed: () => Navigator.pop(context),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
