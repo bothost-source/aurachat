@@ -106,7 +106,7 @@ class PushNotificationService {
   }
 
   // ==========================================================================
-  // FCM TOKEN
+  // FCM TOKEN — FIX: Save for both real and mock users
   // ==========================================================================
 
   Future<void> _getAndSaveToken() async {
@@ -117,14 +117,27 @@ class PushNotificationService {
   }
 
   Future<void> _saveTokenToFirestore(String token) async {
-    final userId = _auth.currentUser?.uid;
-    if (userId == null) return;
+    // FIX #12: Try real Firebase user first
+    String? userId = _auth.currentUser?.uid;
 
-    await _firestore.collection('users').doc(userId).update({
+    // FIX #12: If no real user, check for mock user
+    if (userId == null) {
+      final prefs = await SharedPreferences.getInstance();
+      userId = prefs.getString('mock_user_id');
+    }
+
+    if (userId == null) {
+      print('No user ID available - cannot save FCM token');
+      return;
+    }
+
+    await _firestore.collection('users').doc(userId).set({
       'fcmToken': token,
-      'platform': 'android', // or detect platform
+      'platform': 'android',
       'tokenUpdatedAt': FieldValue.serverTimestamp(),
-    });
+    }, SetOptions(merge: true));
+
+    print('FCM token saved for user: $userId');
   }
 
   // ==========================================================================
@@ -179,9 +192,10 @@ class PushNotificationService {
     required String body,
     String? payload,
   }) async {
+    // FIX #12: Use correct channel name matching AndroidManifest and backend
     const androidDetails = AndroidNotificationDetails(
-      'tarrific_chat_channel',
-      'TARRIFIC CHAT',
+      'aura_chat_channel',
+      'AURA Chat Messages',
       channelDescription: 'Chat message notifications',
       importance: Importance.high,
       priority: Priority.high,
