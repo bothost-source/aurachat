@@ -416,71 +416,12 @@ class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
         final elapsed = DateTime.now().difference(_backgroundTime!);
         final timeoutMinutes = settingsProvider.autoLockTimeout;
 
-        if (elapsed.inMinutes >= timeoutMinutes) {
-          _showLockScreen();
-        } else {
+        if (elapsed.inMinutes < timeoutMinutes) {
+          // Timeout NOT reached — unlock immediately
           setState(() => _isLocked = false);
         }
-      }
-    }
-  }
-
-  Future<void> _showLockScreen() async {
-    final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
-
-    if (settingsProvider.biometricLock) {
-      final localAuth = LocalAuthentication();
-      try {
-        final didAuth = await localAuth.authenticate(
-          localizedReason: 'Unlock AURA Chat',
-          authMessages: const [
-            AndroidAuthMessages(
-              signInTitle: 'Biometric Authentication',
-              cancelButton: 'Cancel',
-              biometricHint: 'Verify your identity',
-              biometricNotRecognized: 'Not recognized, try again',
-              biometricRequiredTitle: 'Biometric authentication required',
-              biometricSuccess: 'Authentication successful',
-              deviceCredentialsRequiredTitle: 'Device credentials required',
-              deviceCredentialsSetupDescription: 'Please set up device credentials',
-              goToSettingsButton: 'Go to Settings',
-              goToSettingsDescription: 'Please set up biometric authentication in your device settings',
-            ),
-            IOSAuthMessages(
-              cancelButton: 'Cancel',
-              goToSettingsButton: 'Go to Settings',
-              goToSettingsDescription: 'Please set up biometric authentication in your device settings',
-              lockOut: 'Please re-enable biometric authentication',
-            ),
-          ],
-          options: const AuthenticationOptions(
-            biometricOnly: false,
-            stickyAuth: true,
-            sensitiveTransaction: true,
-            useErrorDialogs: true,
-          ),
-        );
-
-        if (didAuth) {
-          setState(() => _isLocked = false);
-          return;
-        }
-      } catch (e) {
-        debugPrint('Biometric auth failed: $e');
-      }
-    }
-
-    if (settingsProvider.appPasscode && mounted) {
-      final result = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => _PasscodeDialog(
-          correctPasscode: settingsProvider.passcode,
-        ),
-      );
-
-      if (result == true) {
-        setState(() => _isLocked = false);
+        // If timeout IS reached, _isLocked stays true and _buildLockScreen() shows.
+        // The LockScreen widget itself handles biometric/passcode auth on init.
       }
     }
   }
@@ -629,6 +570,114 @@ class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
   }
 
   Widget _buildLockScreen() {
+    return LockScreen(
+      onUnlocked: () {
+        setState(() => _isLocked = false);
+      },
+    );
+  }
+}
+
+// ============================================================================
+// LOCK SCREEN WIDGET — handles auth automatically on build, with proper context
+// ============================================================================
+class LockScreen extends StatefulWidget {
+  final VoidCallback onUnlocked;
+
+  const LockScreen({super.key, required this.onUnlocked});
+
+  @override
+  State<LockScreen> createState() => _LockScreenState();
+}
+
+class _LockScreenState extends State<LockScreen> {
+  bool _isAuthenticating = false;
+  bool _showPasscode = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Trigger biometric auth automatically when lock screen appears
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _attemptAutoAuth();
+    });
+  }
+
+  Future<void> _attemptAutoAuth() async {
+    if (_isAuthenticating) return;
+    _isAuthenticating = true;
+
+    final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+
+    // Try biometric first
+    if (settingsProvider.biometricLock) {
+      final localAuth = LocalAuthentication();
+      try {
+        final didAuth = await localAuth.authenticate(
+          localizedReason: 'Unlock AURA Chat',
+          authMessages: const [
+            AndroidAuthMessages(
+              signInTitle: 'Biometric Authentication',
+              cancelButton: 'Cancel',
+              biometricHint: 'Verify your identity',
+              biometricNotRecognized: 'Not recognized, try again',
+              biometricRequiredTitle: 'Biometric authentication required',
+              biometricSuccess: 'Authentication successful',
+              deviceCredentialsRequiredTitle: 'Device credentials required',
+              deviceCredentialsSetupDescription: 'Please set up device credentials',
+              goToSettingsButton: 'Go to Settings',
+              goToSettingsDescription: 'Please set up biometric authentication in your device settings',
+            ),
+            IOSAuthMessages(
+              cancelButton: 'Cancel',
+              goToSettingsButton: 'Go to Settings',
+              goToSettingsDescription: 'Please set up biometric authentication in your device settings',
+              lockOut: 'Please re-enable biometric authentication',
+            ),
+          ],
+          options: const AuthenticationOptions(
+            biometricOnly: false,
+            stickyAuth: true,
+            sensitiveTransaction: true,
+            useErrorDialogs: true,
+          ),
+        );
+
+        if (didAuth && mounted) {
+          widget.onUnlocked();
+          return;
+        }
+      } catch (e) {
+        debugPrint('Biometric auth failed: $e');
+      }
+    }
+
+    // If biometric not enabled or failed, show passcode if enabled
+    if (settingsProvider.appPasscode && mounted) {
+      setState(() => _showPasscode = true);
+    }
+
+    _isAuthenticating = false;
+  }
+
+  Future<void> _showPasscodeDialog() async {
+    final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => _PasscodeDialog(
+        correctPasscode: settingsProvider.passcode,
+      ),
+    );
+
+    if (result == true && mounted) {
+      widget.onUnlocked();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
       body: Center(
@@ -643,16 +692,28 @@ class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
             const Text('Authentication required to continue',
               style: TextStyle(fontSize: 16, color: Colors.white54)),
             const SizedBox(height: 32),
-            ElevatedButton(
-              onPressed: _showLockScreen,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white,
-                foregroundColor: Colors.black,
-                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+            if (_showPasscode)
+              ElevatedButton(
+                onPressed: _showPasscodeDialog,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: Colors.black,
+                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                ),
+                child: const Text('Enter Passcode', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+              )
+            else
+              ElevatedButton(
+                onPressed: _attemptAutoAuth,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: Colors.black,
+                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                ),
+                child: const Text('Unlock', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
               ),
-              child: const Text('Unlock', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-            ),
           ],
         ),
       ),
