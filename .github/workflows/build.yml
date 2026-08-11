@@ -124,33 +124,42 @@ jobs:
         run: |
           python3 << 'PYEOF'
           import re
+          import os
 
+          # 1. Fix app build.gradle
           with open('android/app/build.gradle', 'r') as f:
               content = f.read()
 
-          # 1. Pin compileSdk and targetSdk to 34 (fixes android-35 AAPT error)
-          content = re.sub(r'compileSdk\s*=\s*flutter\.compileSdkVersion', 'compileSdk = 34', content)
-          content = re.sub(r'compileSdkVersion\s+.*', 'compileSdkVersion 34', content)
-          content = re.sub(r'targetSdk\s*=\s*flutter\.targetSdkVersion', 'targetSdk = 34', content)
-          content = re.sub(r'targetSdkVersion\s+.*', 'targetSdkVersion 34', content)
+          # Pin compileSdk and targetSdk to 35 (audioplayers needs it)
+          content = re.sub(r'compileSdk\s*=\s*flutter\.compileSdkVersion', 'compileSdk = 35', content)
+          content = re.sub(r'compileSdkVersion\s+.*', 'compileSdkVersion 35', content)
+          content = re.sub(r'targetSdk\s*=\s*flutter\.targetSdkVersion', 'targetSdk = 35', content)
+          content = re.sub(r'targetSdkVersion\s+.*', 'targetSdkVersion 35', content)
 
-          # 2. Lower minSdk to Android 5.0 (API 21)
+          # Add namespace if missing
+          if 'namespace' not in content:
+              content = content.replace(
+                  'android {',
+                  'android {\n    namespace "com.example.aurachat"'
+              )
+
+          # Lower minSdk
           content = content.replace('minSdk = flutter.minSdkVersion', 'minSdk = 21')
 
-          # 3. Add ABI filters for PHONES ONLY (ARMv7 + ARM64)
+          # ABI filters
           content = content.replace(
               'defaultConfig {',
               'defaultConfig {\n        ndk { abiFilters "armeabi-v7a", "arm64-v8a" }'
           )
 
-          # 4. Add Firebase plugin
+          # Firebase plugin
           if 'com.google.gms.google-services' not in content:
               content = content.replace(
                   'plugins {',
                   'plugins {\n    id "com.google.gms.google-services"'
               )
 
-          # 5. Replace buildTypes with minification + ProGuard
+          # buildTypes
           content = re.sub(
               r'buildTypes\s*\{[^}]*release\s*\{[^}]*\}[^}]*\}',
               "buildTypes {\n        release {\n            minifyEnabled true\n            shrinkResources true\n            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'\n            signingConfig = signingConfigs.debug\n        }\n    }",
@@ -160,6 +169,25 @@ jobs:
 
           with open('android/app/build.gradle', 'w') as f:
               f.write(content)
+
+          # 2. Fix plugin build.gradle files (record, audioplayers_android, etc.)
+          for root, dirs, files in os.walk('android'):
+              for file in files:
+                  if file == 'build.gradle':
+                      path = os.path.join(root, file)
+                      # Skip app build.gradle (already fixed)
+                      if 'app/build.gradle' in path:
+                          continue
+                      with open(path, 'r') as f:
+                          plugin_content = f.read()
+                      # Add namespace if missing and file has android block
+                      if 'namespace' not in plugin_content and 'android {' in plugin_content:
+                          plugin_content = plugin_content.replace(
+                              'android {',
+                              'android {\n    namespace "com.example.aurachat.plugin"'
+                          )
+                          with open(path, 'w') as f:
+                              f.write(plugin_content)
           PYEOF
 
       - name: Create ProGuard rules
