@@ -61,7 +61,7 @@ jobs:
 
           plugins {
               id "dev.flutter.flutter-plugin-loader" version "1.0.0"
-              id "com.android.application" version "8.1.0" apply false
+              id "com.android.application" version "7.4.2" apply false
               id "org.jetbrains.kotlin.android" version "1.8.22" apply false
               id "com.google.gms.google-services" version "4.3.15" apply false
           }
@@ -99,7 +99,7 @@ jobs:
           distributionPath=wrapper/dists
           zipStoreBase=GRADLE_USER_HOME
           zipStorePath=wrapper/dists
-          distributionUrl=https\://services.gradle.org/distributions/gradle-8.4-all.zip
+          distributionUrl=https\://services.gradle.org/distributions/gradle-7.6.3-all.zip
           EOF
 
       - name: Create Cloudinary config
@@ -124,24 +124,15 @@ jobs:
         run: |
           python3 << 'PYEOF'
           import re
-          import os
 
-          # 1. Fix app build.gradle
           with open('android/app/build.gradle', 'r') as f:
               content = f.read()
 
-          # Pin compileSdk and targetSdk to 35 (audioplayers needs it)
-          content = re.sub(r'compileSdk\s*=\s*flutter\.compileSdkVersion', 'compileSdk = 35', content)
-          content = re.sub(r'compileSdkVersion\s+.*', 'compileSdkVersion 35', content)
-          content = re.sub(r'targetSdk\s*=\s*flutter\.targetSdkVersion', 'targetSdk = 35', content)
-          content = re.sub(r'targetSdkVersion\s+.*', 'targetSdkVersion 35', content)
-
-          # Add namespace if missing
-          if 'namespace' not in content:
-              content = content.replace(
-                  'android {',
-                  'android {\n    namespace "com.example.aurachat"'
-              )
+          # Pin compileSdk and targetSdk to 34
+          content = re.sub(r'compileSdk\s*=\s*flutter\.compileSdkVersion', 'compileSdk = 34', content)
+          content = re.sub(r'compileSdkVersion\s+.*', 'compileSdkVersion 34', content)
+          content = re.sub(r'targetSdk\s*=\s*flutter\.targetSdkVersion', 'targetSdk = 34', content)
+          content = re.sub(r'targetSdkVersion\s+.*', 'targetSdkVersion 34', content)
 
           # Lower minSdk
           content = content.replace('minSdk = flutter.minSdkVersion', 'minSdk = 21')
@@ -169,25 +160,6 @@ jobs:
 
           with open('android/app/build.gradle', 'w') as f:
               f.write(content)
-
-          # 2. Fix plugin build.gradle files (record, audioplayers_android, etc.)
-          for root, dirs, files in os.walk('android'):
-              for file in files:
-                  if file == 'build.gradle':
-                      path = os.path.join(root, file)
-                      # Skip app build.gradle (already fixed)
-                      if 'app/build.gradle' in path:
-                          continue
-                      with open(path, 'r') as f:
-                          plugin_content = f.read()
-                      # Add namespace if missing and file has android block
-                      if 'namespace' not in plugin_content and 'android {' in plugin_content:
-                          plugin_content = plugin_content.replace(
-                              'android {',
-                              'android {\n    namespace "com.example.aurachat.plugin"'
-                          )
-                          with open(path, 'w') as f:
-                              f.write(plugin_content)
           PYEOF
 
       - name: Create ProGuard rules
