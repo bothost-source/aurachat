@@ -687,6 +687,53 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     }
   }
 
+  List<TextSpan> _parseTextWithLinks(String text, bool isMe) {
+  final urlRegex = RegExp(r'https?://[^\s]+');
+  final matches = urlRegex.allMatches(text);
+  
+  if (matches.isEmpty) {
+    return [TextSpan(text: text, style: TextStyle(color: isMe ? Colors.white : Colors.white.withOpacity(0.9)))];
+  }
+
+  final spans = <TextSpan>[];
+  int lastEnd = 0;
+
+  for (final match in matches) {
+    if (match.start > lastEnd) {
+      spans.add(TextSpan(
+        text: text.substring(lastEnd, match.start),
+        style: TextStyle(color: isMe ? Colors.white : Colors.white.withOpacity(0.9)),
+      ));
+    }
+    spans.add(TextSpan(
+      text: match.group(0),
+      style: TextStyle(
+        color: isMe ? Colors.white.withOpacity(0.85) : const Color(0xFF8B5CF6),
+        decoration: TextDecoration.underline,
+      ),
+      recognizer: TapGestureRecognizer()..onTap = () => _openLink(match.group(0)!),
+    ));
+    lastEnd = match.end;
+  }
+
+  if (lastEnd < text.length) {
+    spans.add(TextSpan(
+      text: text.substring(lastEnd),
+      style: TextStyle(color: isMe ? Colors.white : Colors.white.withOpacity(0.9)),
+    ));
+  }
+
+  return spans;
+}
+
+Future<void> _openLink(String url) async {
+  final uri = Uri.parse(url);
+  if (await canLaunchUrl(uri)) {
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+}
+
+
   void _scrollToMessage(String messageId) {
     final index = _messages.indexWhere((m) => m['id'] == messageId);
     if (index >= 0 && _scrollController.hasClients) {
