@@ -111,12 +111,10 @@ cloudinary.config({
 
 app.post('/delete-cloudinary', async (req, res) => {
   try {
-    // ── API KEY AUTH CHECK ──
     const apiKey = req.headers['x-api-key'];
     if (apiKey !== process.env.BACKEND_API_KEY) {
       return res.status(401).json({ success: false, error: 'Unauthorized' });
     }
-    // ── END AUTH CHECK ──
 
     const { public_id } = req.body;
 
@@ -137,7 +135,7 @@ app.post('/delete-cloudinary', async (req, res) => {
 });
 
 // ============================================================================
-// NEW: Delete old avatar endpoint - called when group/channel/user changes photo
+// Delete old avatar endpoint - called when group/channel/user changes photo
 // ============================================================================
 app.post('/delete-avatar', async (req, res) => {
   try {
@@ -152,7 +150,6 @@ app.post('/delete-avatar', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Valid Cloudinary URL required' });
     }
 
-    // Extract public_id from Cloudinary URL
     const urlParts = imageUrl.split('/upload/');
     if (urlParts.length <= 1) {
       return res.status(400).json({ success: false, error: 'Invalid Cloudinary URL format' });
@@ -188,20 +185,16 @@ setupAIModeration();
 
 // ============================================================================
 // PUSH NOTIFICATIONS - Listen for new messages and send FCM pushes
-// FIX #12: Simplified approach - no composite index needed
 // ============================================================================
 const db = admin.firestore();
 const messaging = admin.messaging();
 
-// Track processed messages to avoid duplicates
 const processedMessages = new Set();
 const PROCESSED_MAX_SIZE = 1000;
 
 function startPushNotificationListener() {
   console.log('Starting push notification listener...');
 
-  // FIX #12: Use timestamp-based query instead of sent_to_fcm boolean
-  // This avoids needing a composite index on collectionGroup
   const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
 
   db.collectionGroup('messages')
@@ -215,11 +208,9 @@ function startPushNotificationListener() {
         const message = change.doc.data();
         const messageId = change.doc.id;
 
-        // Skip if already processed (memory-based dedup)
         if (processedMessages.has(messageId)) continue;
         processedMessages.add(messageId);
 
-        // Keep set size bounded
         if (processedMessages.size > PROCESSED_MAX_SIZE) {
           const iterator = processedMessages.values();
           processedMessages.delete(iterator.next().value);
@@ -309,7 +300,6 @@ function startPushNotificationListener() {
               },
             }).catch(err => {
               console.error('Failed to send to token:', token, err.message);
-              // If token is invalid, remove it
               if (err.code === 'messaging/registration-token-not-registered') {
                 _removeInvalidToken(token);
               }
@@ -317,10 +307,7 @@ function startPushNotificationListener() {
           );
 
           await Promise.all(sendPromises);
-
-          // Mark as sent
           await change.doc.ref.update({ sent_to_fcm: true });
-
           console.log(`Push sent to ${tokens.length} users for chat ${chatId}`);
 
         } catch (error) {
@@ -364,21 +351,96 @@ function formatMessageBody(message) {
 startPushNotificationListener();
 
 // ============================================================================
-// MONTHLY AUTO-CLEANUP — Delete old media from Cloudinary (keeps messages)
-// Runs every 20 days, processes 50 files max per run
-// FIX #14: Skips permanent folder AND active avatar URLs
+// CALL NOTIFICATIONS - Send FCM push when call signal is written to RTDB
+// NEW: Watches call_signals/{userId} and sends high-priority FCM
+// ============================================================================
+function startCallNotificationListener() {
+  console.log('Starting call notification listener...');
+
+  const rtdb = admin.database();
+
+  rtdb.ref('call_signals').on('child_added', async (userSnapshot) => {
+    const userId = userSnapshot.key;
+    const signals = userSnapshot.val();
+
+    if (!signals) return;
+
+    const signalKeys = Object.keys(signals);
+    const latestSignalKey = signalKeys[signalKeys.length - 1];
+    const signal = signals[latestSignalKey];
+
+    if (signal.type !== 'incoming_call') return;
+    if (signal._fcmSent) return;
+
+    try {
+      const userDoc = await db.collection('users').doc(userId).get();
+      const fcmToken = userDoc.data()?.fcmToken;
+
+      if (!fcmToken) {
+        console.log('No FCM token for user', userId);
+        return;
+      }
+
+      const message = {
+        token: fcmToken,
+        data: {
+          type: 'call',
+          call_id: signal.call_id,
+          caller_id: signal.caller_id,
+          caller_name: signal.caller_name || 'Unknown',
+          caller_avatar: signal.caller_avatar || '',
+          channel_name: signal.channel_name,
+          is_video_call: String(signal.is_video_call),
+        },
+        android: {
+          priority: 'high',
+          notification: {
+            channel_id: 'aura_call_channel',
+            title: signal.is_video_call ? 'Incoming Video Call' : 'Incoming Voice Call',
+            body: signal.caller_name || 'Unknown',
+            sound: 'default',
+            priority: 'max',
+          },
+        },
+        apns: {
+          payload: {
+            aps: {
+              alert: {
+                title: signal.is_video_call ? 'Incoming Video Call' : 'Incoming Voice Call',
+                body: signal.caller_name || 'Unknown',
+              },
+              sound: 'default',
+              badge: 1,
+            },
+          },
+        },
+      };
+
+      await messaging.send(message);
+      console.log('Call notification sent to', userId);
+
+      await userSnapshot.ref.child(latestSignalKey).update({ _fcmSent: true });
+
+    } catch (error) {
+      console.error('Error sending call notification:', error);
+    }
+  });
+}
+
+startCallNotificationListener();
+
+// ============================================================================
+// MONTHLY AUTO-CLEANUP — Delete old media from Cloudinary
 // ============================================================================
 async function getActiveAvatarUrls() {
   const urls = new Set();
 
-  // Get all user avatars
   const usersSnapshot = await db.collection('users').get();
   usersSnapshot.forEach(doc => {
     const avatar = doc.data().avatar_url;
     if (avatar && avatar.includes('cloudinary.com')) urls.add(avatar);
   });
 
-  // Get all chat avatars
   const chatsSnapshot = await db.collection('chats').get();
   chatsSnapshot.forEach(doc => {
     const avatar = doc.data().avatar_url;
@@ -391,18 +453,14 @@ async function getActiveAvatarUrls() {
 function startMonthlyCleanup() {
   console.log('Starting monthly media cleanup scheduler...');
 
-  // Run every 20 days
   setInterval(async () => {
     try {
       const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-
       console.log(`[Cleanup] Running cleanup for media older than ${thirtyDaysAgo.toISOString()}`);
 
-      // Get all active avatar URLs for double protection
       const activeAvatarUrls = await getActiveAvatarUrls();
       console.log(`[Cleanup] Found ${activeAvatarUrls.size} active avatar URLs to protect`);
 
-      // Process only 50 at a time to save Firebase quota
       const oldMessagesSnapshot = await db.collectionGroup('messages')
         .where('created_at', '<', admin.firestore.Timestamp.fromDate(thirtyDaysAgo))
         .where('media_url', '!=', null)
@@ -419,21 +477,18 @@ function startMonthlyCleanup() {
 
         if (mediaUrl && mediaUrl.includes('cloudinary.com')) {
           try {
-            // FIX #14: Skip permanent folder files (avatars, profile pictures)
             if (mediaUrl.includes('/permanent/')) {
               skippedCount++;
               console.log(`[Cleanup] SKIPPED permanent file: ${mediaUrl}`);
               continue;
             }
 
-            // FIX #14: Skip any URL that is currently an active avatar
             if (activeAvatarUrls.has(mediaUrl)) {
               skippedCount++;
               console.log(`[Cleanup] SKIPPED active avatar: ${mediaUrl}`);
               continue;
             }
 
-            // Extract public_id from Cloudinary URL
             const urlParts = mediaUrl.split('/upload/');
             if (urlParts.length > 1) {
               const afterUpload = urlParts[1];
@@ -472,12 +527,11 @@ function startMonthlyCleanup() {
     } catch (error) {
       console.error('[Cleanup] Monthly cleanup error:', error.message);
     }
-  }, 20 * 24 * 60 * 60 * 1000); // Every 20 days
+  }, 20 * 24 * 60 * 60 * 1000);
 
   console.log('Monthly cleanup scheduled. Next run in 20 days.');
 }
 
-// Start the monthly cleanup
 startMonthlyCleanup();
 
 // Error handling
@@ -490,7 +544,6 @@ app.use((req, res) => {
 
 const PORT = process.env.PORT || 3000;
 
-// Connect to database then start server
 connectDB().then(() => {
   server.listen(PORT, () => {
     console.log(`
