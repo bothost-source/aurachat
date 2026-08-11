@@ -47,6 +47,7 @@ import 'screens/ai/ai_studio_screen.dart';
 import 'screens/channel/channel_screen.dart';
 import 'screens/groups/create_channel_screen.dart';
 import 'screens/calls/call_screen.dart';
+import 'screens/calls/incoming_call_screen.dart';
 import 'screens/search/global_search_screen.dart';
 import 'screens/contacts/contacts_screen.dart';
 import 'screens/settings/settings_screen.dart';
@@ -55,6 +56,7 @@ import 'screens/saved/saved_messages_screen.dart';
 import 'screens/archive/archived_chats_screen.dart';
 import 'services/notification_service.dart';
 import 'services/push_notification_service.dart';
+import 'services/call_notification_service.dart';
 import 'services/connectivity.dart';
 import 'services/online_status_service.dart';
 import 'services/call_service.dart';
@@ -62,6 +64,8 @@ import 'services/call_signaling_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'screens/auth/email_verification_screen.dart';
 
+// Global navigator key for navigation from background/notification handlers
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 // ============================================================================
 // BACKGROUND MESSAGE HANDLER — Must be top-level function
@@ -70,6 +74,27 @@ import 'screens/auth/email_verification_screen.dart';
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
   print('Background message: ${message.messageId}');
+
+  final data = message.data;
+  final type = data['type'] as String?;
+
+  // Handle call notifications when app is killed/backgrounded
+  if (type == 'call') {
+    final callService = CallNotificationService();
+    await callService.initialize();
+
+    final signal = CallSignal(
+      type: CallSignalType.incoming,
+      callId: data['call_id'],
+      callerId: data['caller_id'],
+      callerName: data['caller_name'],
+      callerAvatar: data['caller_avatar'],
+      channelName: data['channel_name'],
+      isVideoCall: data['is_video_call'] == 'true',
+    );
+
+    await callService.showIncomingCallNotification(signal);
+  }
 }
 
 void main() async {
@@ -91,17 +116,13 @@ void main() async {
     await NotificationService.init();
     await NotificationService.requestPermission();
 
-    // Initialize push notifications (FCM for chat)
-    final pushService = PushNotificationService();
-    await pushService.initialize(
-      onChatOpenCallback: (chatId) {
-        Navigator.of(context).pushNamed('/chat', arguments: {
-          'chatId': chatId,
-        });
-      },
-    );
+    // Initialize call notification service
+    await CallNotificationService().initialize();
 
-    // FIX #1: Removed await since initialize() returns void
+    // FIX: Initialize push notifications WITHOUT context (context doesn't exist in main)
+    final pushService = PushNotificationService();
+    await pushService.initialize();
+
     ConnectivityService().initialize();
     CallService.initialize('8a2cea909f994b0d9e61146e99710277');
 
@@ -226,10 +247,8 @@ class ErrorApp extends StatelessWidget {
   }
 }
 
-
 // ============================================================================
-// AUTH ROUTER — Handles app reopen state: pending OTP, pending email, 
-// authenticated user, or fresh start
+// AUTH ROUTER — Handles app reopen state
 // ============================================================================
 class AuthRouter extends StatefulWidget {
   const AuthRouter({super.key});
@@ -251,7 +270,7 @@ class _AuthRouterState extends State<AuthRouter> {
   Future<void> _checkAuthState() async {
     final prefs = await SharedPreferences.getInstance();
 
-    // Check 1: Pending OTP (app closed during OTP flow)
+    // Check 1: Pending OTP
     final pendingOtpPhone = prefs.getString('pending_otp_phone');
     final pendingOtpExpected = prefs.getString('pending_otp_expected');
     final pendingOtpTimestamp = prefs.getInt('pending_otp_timestamp');
@@ -259,9 +278,8 @@ class _AuthRouterState extends State<AuthRouter> {
     if (pendingOtpPhone != null && 
         pendingOtpExpected != null && 
         pendingOtpTimestamp != null) {
-      // Check if OTP is still valid (10 minute expiry)
       final otpAge = DateTime.now().millisecondsSinceEpoch - pendingOtpTimestamp;
-      if (otpAge < 10 * 60 * 1000) { // 10 minutes
+      if (otpAge < 10 * 60 * 1000) {
         setState(() {
           _targetScreen = OtpScreen(
             phoneNumber: pendingOtpPhone,
@@ -272,14 +290,13 @@ class _AuthRouterState extends State<AuthRouter> {
         });
         return;
       } else {
-        // OTP expired - clear state
         await prefs.remove('pending_otp_phone');
         await prefs.remove('pending_otp_expected');
         await prefs.remove('pending_otp_timestamp');
       }
     }
 
-    // Check 2: Pending email verification (app closed during email flow)
+    // Check 2: Pending email verification
     final pendingEmailUserId = prefs.getString('pending_email_user_id');
     final pendingEmailVerification = prefs.getBool('pending_email_verification') ?? false;
     final pendingEmailTimestamp = prefs.getInt('pending_email_timestamp');
@@ -287,9 +304,8 @@ class _AuthRouterState extends State<AuthRouter> {
     if (pendingEmailUserId != null && 
         pendingEmailVerification && 
         pendingEmailTimestamp != null) {
-      // Check if email verification is still valid (30 minute expiry)
       final emailAge = DateTime.now().millisecondsSinceEpoch - pendingEmailTimestamp;
-      if (emailAge < 30 * 60 * 1000) { // 30 minutes
+      if (emailAge < 30 * 60 * 1000) {
         setState(() {
           _targetScreen = EmailVerificationScreen(
             userId: pendingEmailUserId,
@@ -300,14 +316,13 @@ class _AuthRouterState extends State<AuthRouter> {
         });
         return;
       } else {
-        // Email verification expired - clear state
         await prefs.remove('pending_email_user_id');
         await prefs.remove('pending_email_verification');
         await prefs.remove('pending_email_timestamp');
       }
     }
 
-    // Check 3: Authenticated user (real Firebase or mock)
+    // Check 3: Authenticated user
     final currentUser = FirebaseAuth.instance.currentUser;
     final mockUserId = prefs.getString('mock_user_id');
 
@@ -319,7 +334,7 @@ class _AuthRouterState extends State<AuthRouter> {
       return;
     }
 
-    // Check 4: Fresh start - show splash/onboarding
+    // Check 4: Fresh start
     setState(() {
       _targetScreen = const SplashScreen();
       _isChecking = false;
@@ -339,6 +354,74 @@ class _AuthRouterState extends State<AuthRouter> {
       );
     }
     return _targetScreen!;
+  }
+}
+
+// ============================================================================
+// CALL LISTENER WIDGET — Handles call signaling for ALL auth states
+// ============================================================================
+class CallListener extends StatefulWidget {
+  final Widget child;
+
+  const CallListener({super.key, required this.child});
+
+  @override
+  State<CallListener> createState() => _CallListenerState();
+}
+
+class _CallListenerState extends State<CallListener> {
+  StreamSubscription<CallSignal>? _callSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _setupCallListening();
+  }
+
+  void _setupCallListening() {
+    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+    final userId = authProvider.currentUserId;
+
+    if (userId != null) {
+      // Start listening for call signals
+      CallSignalingService.startListening(userId);
+
+      // Listen for incoming calls
+      _callSub = CallSignalingService.onCallSignal.listen((signal) {
+        if (signal.type == CallSignalType.incoming && mounted) {
+          // Show full-screen incoming call
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              fullscreenDialog: true,
+              builder: (_) => IncomingCallScreen(signal: signal),
+            ),
+          );
+        }
+      });
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Re-setup if auth changes
+    final authProvider = Provider.of<AuraAuthProvider>(context);
+    final userId = authProvider.currentUserId;
+    
+    if (userId != null) {
+      CallSignalingService.startListening(userId);
+    }
+  }
+
+  @override
+  void dispose() {
+    _callSub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return widget.child;
   }
 }
 
@@ -365,21 +448,14 @@ class _AuraChatAppState extends State<AuraChatApp>
       final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
       authProvider.listenToAuthChanges();
 
-      final currentUser = FirebaseAuth.instance.currentUser;
-      if (currentUser != null) {
-        CallSignalingService.startListening(currentUser.uid);
-
-        CallSignalingService.onCallSignal.listen((signal) {
-          if (signal.type == CallSignalType.incoming && mounted) {
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                fullscreenDialog: true,
-                builder: (_) => CallScreen.incoming(incomingSignal: signal),
-              ),
-            );
-          }
-        });
-      }
+      // Setup push notification navigation using global navigator key
+      PushNotificationService().onChatOpen = (chatId) {
+        if (navigatorKey.currentState != null) {
+          navigatorKey.currentState!.pushNamed('/chat', arguments: {
+            'chatId': chatId,
+          });
+        }
+      };
     });
   }
 
@@ -494,11 +570,15 @@ class _AuraChatAppState extends State<AuraChatApp>
           return MaterialApp(
             title: 'AURA',
             debugShowCheckedModeBanner: false,
+            navigatorKey: navigatorKey, // Global navigator key for background navigation
             theme: AppTheme.lightTheme,
             darkTheme: AppTheme.darkTheme,
             themeMode: themeProvider.themeMode,
             initialRoute: '/',
             builder: (context, child) {
+              // Wrap app with CallListener for ALL screens
+              Widget app = CallListener(child: child!);
+
               // Check lock status on first build
               if (!_lockChecked) {
                 _lockChecked = true;
@@ -512,7 +592,7 @@ class _AuraChatAppState extends State<AuraChatApp>
                 }
               }
 
-              // LOCK SCREEN - takes priority over everything
+              // LOCK SCREEN
               if (_isLocked) {
                 return _buildLockScreen();
               }
@@ -526,7 +606,6 @@ class _AuraChatAppState extends State<AuraChatApp>
                       .doc(currentUser.uid)
                       .snapshots(),
                   builder: (context, snapshot) {
-                    // Loading
                     if (snapshot.connectionState == ConnectionState.waiting) {
                       return const Scaffold(
                         backgroundColor: Color(0xFF0A0A0F),
@@ -536,12 +615,10 @@ class _AuraChatAppState extends State<AuraChatApp>
                       );
                     }
 
-                    // Check ban status from Firestore
                     final userData = snapshot.data?.data() as Map<String, dynamic>?;
                     final isBanned = userData?['is_banned'] == true;
                     final bannedUntil = userData?['banned_until'] as Timestamp?;
 
-                    // Auto-unban if temporary ban expired
                     if (isBanned && bannedUntil != null) {
                       final banExpiry = bannedUntil.toDate();
                       if (DateTime.now().isAfter(banExpiry)) {
@@ -555,11 +632,10 @@ class _AuraChatAppState extends State<AuraChatApp>
                           'ban_report_id': null,
                           'ban_level': null,
                         });
-                        return child!;
+                        return app;
                       }
                     }
 
-                    // BANNED - show banned screen
                     if (isBanned) {
                       final banStatus = {
                         'is_banned': true,
@@ -571,14 +647,12 @@ class _AuraChatAppState extends State<AuraChatApp>
                       return BannedScreen(banStatus: banStatus);
                     }
 
-                    // NOT BANNED - show normal app
-                    return child!;
+                    return app;
                   },
                 );
               }
 
-              // Not authenticated
-              return child!;
+              return app;
             },
             routes: {
               '/': (context) => const AuthRouter(),
@@ -604,7 +678,6 @@ class _AuraChatAppState extends State<AuraChatApp>
               '/appeal': (context) => const AppealScreen(),
               '/ai_chatbot': (context) => const AIChatbotScreen(),
               '/ai_studio': (context) => const AIStudioScreen(),
-              // FIX #2: No hardcoded channels — args come from user-created channels
               '/channel': (context) {
                 final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
                 return ChannelChatScreen(
