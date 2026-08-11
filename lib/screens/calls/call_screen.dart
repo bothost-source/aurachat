@@ -829,7 +829,7 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
   }
 
   @override
-  Widget build(BuildScreen context) {
+  Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0F),
       body: switch (_callState) {
