@@ -559,6 +559,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
       debugPrint('Load messages error: $e');
       setState(() => _isLoading = false);
     }
+    }
 
     void _subscribeToMessages() {
         if (_chatId == null) return;
@@ -717,8 +718,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     await _sendMessage(type: 'text', content: text);
   }
 
-  Future<void> _sendMessage({
-    r    try {
+    Future<void> _sendMessage({
+    required String type,
+    required String content,
+    String? mediaUrl,
+    String? fileName,
+    String? fileSize,
+    int? duration,
+  }) async {
+    try {
       final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
       final firestore = FirebaseFirestore.instance;
       final userId = authProvider.user?.uid ?? authProvider.mockUserId;
@@ -817,6 +825,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
         );
       }
     }
+   }
 
   void _showPermissionDenied() {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -3306,6 +3315,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
         ),
       ),
     );
+  }
   
     void _openFullScreenVideo(String videoUrl) {
     Navigator.push(
@@ -3775,4 +3785,4 @@ class _FullScreenVideoPlayerState extends State<_FullScreenVideoPlayer> {
       ),
     );
   }
-}  
+}    
