@@ -24,6 +24,9 @@ class SettingsProvider extends ChangeNotifier {
   bool _inAppVibrate = true;
   bool _showPreview = true;
 
+  // NEW: Call Ringtone
+  String _callRingtone = 'default';
+
   // Privacy Settings
   bool _phoneNumberVisible = true;
   bool _lastSeenVisible = true;
@@ -63,6 +66,9 @@ class SettingsProvider extends ChangeNotifier {
   bool get inAppVibrate => _inAppVibrate;
   bool get showPreview => _showPreview;
 
+  // NEW: Call Ringtone Getter
+  String get callRingtone => _callRingtone;
+
   bool get phoneNumberVisible => _phoneNumberVisible;
   bool get lastSeenVisible => _lastSeenVisible;
   bool get profilePhotoVisible => _profilePhotoVisible;
@@ -101,6 +107,9 @@ class SettingsProvider extends ChangeNotifier {
     _inAppSounds = prefs.getBool('in_app_sounds') ?? true;
     _inAppVibrate = prefs.getBool('in_app_vibrate') ?? true;
     _showPreview = prefs.getBool('show_preview') ?? true;
+
+    // NEW: Load Call Ringtone
+    _callRingtone = prefs.getString('call_ringtone') ?? 'default';
 
     // Privacy
     _phoneNumberVisible = prefs.getBool('phone_number_visible') ?? true;
@@ -159,6 +168,8 @@ class SettingsProvider extends ChangeNotifier {
         _inAppSounds = data['in_app_sounds'] ?? _inAppSounds;
         _inAppVibrate = data['in_app_vibrate'] ?? _inAppVibrate;
         _showPreview = data['show_preview'] ?? _showPreview;
+        // NEW: Sync Call Ringtone from Firebase
+        _callRingtone = data['call_ringtone'] ?? _callRingtone;
         // Privacy
         _phoneNumberVisible = data['phone_number_visible'] ?? _phoneNumberVisible;
         _lastSeenVisible = data['last_seen_visible'] ?? _lastSeenVisible;
@@ -186,36 +197,38 @@ class SettingsProvider extends ChangeNotifier {
   }
 
   Future<void> _saveToFirebase() async {
-  try {
-    final userId = _auth.currentUser?.uid ?? _mockUserId;
-    if (userId == null) return;
+    try {
+      final userId = _auth.currentUser?.uid ?? _mockUserId;
+      if (userId == null) return;
 
-    await _firestore.collection('user_settings').doc(userId).set({
-      'user_id': userId,
-      // Security
-      'two_step_verification': _twoStepVerification,
-      // Privacy
-      'phone_number_visible': _phoneNumberVisible,
-      'last_seen_visible': _lastSeenVisible,
-      'profile_photo_visible': _profilePhotoVisible,
-      'forwarded_messages': _forwardedMessages,
-      'add_to_groups': _addToGroups,
-      'voice_video_calls_visible': _voiceVideoCallsVisible,
-      'find_by_phone': _findByPhone,
-      'find_by_username': _findByUsername,
-      // Data Storage (NEW - add if you want)
-      'auto_download_media': _autoDownloadMedia,
-      'auto_download_documents': _autoDownloadDocuments,
-      'save_to_gallery': _saveToGallery,
-      // Theme & Language (NEW - add if you want)
-      'theme_mode': _themeMode == ThemeMode.light ? 'light' : _themeMode == ThemeMode.system ? 'system' : 'dark',
-      'language': _language,
-      'updated_at': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
-  } catch (e) {
-    debugPrint('Save to Firebase error: $e');
+      await _firestore.collection('user_settings').doc(userId).set({
+        'user_id': userId,
+        // Security
+        'two_step_verification': _twoStepVerification,
+        // Privacy
+        'phone_number_visible': _phoneNumberVisible,
+        'last_seen_visible': _lastSeenVisible,
+        'profile_photo_visible': _profilePhotoVisible,
+        'forwarded_messages': _forwardedMessages,
+        'add_to_groups': _addToGroups,
+        'voice_video_calls_visible': _voiceVideoCallsVisible,
+        'find_by_phone': _findByPhone,
+        'find_by_username': _findByUsername,
+        // Data Storage
+        'auto_download_media': _autoDownloadMedia,
+        'auto_download_documents': _autoDownloadDocuments,
+        'save_to_gallery': _saveToGallery,
+        // Theme & Language
+        'theme_mode': _themeMode == ThemeMode.light ? 'light' : _themeMode == ThemeMode.system ? 'system' : 'dark',
+        'language': _language,
+        // NEW: Save Call Ringtone to Firebase
+        'call_ringtone': _callRingtone,
+        'updated_at': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('Save to Firebase error: $e');
+    }
   }
-}
 
   // Security Setters
   Future<void> setTwoStepVerification(bool value) async {
@@ -302,6 +315,15 @@ class SettingsProvider extends ChangeNotifier {
     final prefs = await _prefs;
     await prefs.setBool('show_preview', value);
     notifyListeners();
+  }
+
+  // NEW: Call Ringtone Setter
+  Future<void> setCallRingtone(String ringtoneId) async {
+    _callRingtone = ringtoneId;
+    final prefs = await _prefs;
+    await prefs.setString('call_ringtone', ringtoneId);
+    notifyListeners();
+    _saveToFirebase();
   }
 
   // Privacy Setters
