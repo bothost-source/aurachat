@@ -67,9 +67,6 @@ import 'screens/auth/email_verification_screen.dart';
 // Global navigator key for navigation from background/notification handlers
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
-// ============================================================================
-// BACKGROUND MESSAGE HANDLER — Must be top-level function
-// ============================================================================
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
@@ -78,7 +75,6 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   final data = message.data;
   final type = data['type'] as String?;
 
-  // Handle call notifications when app is killed/backgrounded
   if (type == 'call') {
     final callService = CallNotificationService();
     await callService.initialize();
@@ -109,17 +105,13 @@ void main() async {
     WidgetsFlutterBinding.ensureInitialized();
     await Firebase.initializeApp();
 
-    // Register background message handler BEFORE any other Firebase calls
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
-    // Initialize local notifications (OTP)
     await NotificationService.init();
     await NotificationService.requestPermission();
 
-    // Initialize call notification service
     await CallNotificationService().initialize();
 
-    // FIX: Initialize push notifications WITHOUT context (context doesn't exist in main)
     final pushService = PushNotificationService();
     await pushService.initialize();
 
@@ -170,28 +162,15 @@ class ErrorApp extends StatelessWidget {
               children: [
                 const Icon(Icons.error_outline, color: Colors.red, size: 64),
                 const SizedBox(height: 24),
-                const Text(
-                  'AURA Chat Error',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+                const Text('AURA Chat Error',
+                  style: TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
                 const Text(
                   'The app failed to start. Please screenshot this and send it to support email for help.',
-                  style: TextStyle(color: Colors.white70, fontSize: 14),
-                ),
+                  style: TextStyle(color: Colors.white70, fontSize: 14)),
                 const SizedBox(height: 32),
-                const Text(
-                  'ERROR:',
-                  style: TextStyle(
-                    color: Colors.redAccent,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+                const Text('ERROR:',
+                  style: TextStyle(color: Colors.redAccent, fontSize: 12, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
                 Container(
                   width: double.infinity,
@@ -201,25 +180,13 @@ class ErrorApp extends StatelessWidget {
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: Colors.red.withOpacity(0.3)),
                   ),
-                  child: Text(
-                    error,
-                    style: const TextStyle(
-                      color: Colors.redAccent,
-                      fontSize: 14,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
+                  child: Text(error,
+                    style: const TextStyle(color: Colors.redAccent, fontSize: 14, fontFamily: 'monospace')),
                 ),
                 if (stack != null) ...[
                   const SizedBox(height: 24),
-                  const Text(
-                    'STACK TRACE:',
-                    style: TextStyle(
-                      color: Colors.white54,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
+                  const Text('STACK TRACE:',
+                    style: TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
                   Container(
                     width: double.infinity,
@@ -228,14 +195,8 @@ class ErrorApp extends StatelessWidget {
                       color: Colors.white.withOpacity(0.05),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Text(
-                      stack!,
-                      style: const TextStyle(
-                        color: Colors.white54,
-                        fontSize: 10,
-                        fontFamily: 'monospace',
-                      ),
-                    ),
+                    child: Text(stack!,
+                      style: const TextStyle(color: Colors.white54, fontSize: 10, fontFamily: 'monospace')),
                   ),
                 ],
               ],
@@ -247,9 +208,6 @@ class ErrorApp extends StatelessWidget {
   }
 }
 
-// ============================================================================
-// AUTH ROUTER — Handles app reopen state
-// ============================================================================
 class AuthRouter extends StatefulWidget {
   const AuthRouter({super.key});
 
@@ -270,14 +228,11 @@ class _AuthRouterState extends State<AuthRouter> {
   Future<void> _checkAuthState() async {
     final prefs = await SharedPreferences.getInstance();
 
-    // Check 1: Pending OTP
     final pendingOtpPhone = prefs.getString('pending_otp_phone');
     final pendingOtpExpected = prefs.getString('pending_otp_expected');
     final pendingOtpTimestamp = prefs.getInt('pending_otp_timestamp');
 
-    if (pendingOtpPhone != null && 
-        pendingOtpExpected != null && 
-        pendingOtpTimestamp != null) {
+    if (pendingOtpPhone != null && pendingOtpExpected != null && pendingOtpTimestamp != null) {
       final otpAge = DateTime.now().millisecondsSinceEpoch - pendingOtpTimestamp;
       if (otpAge < 10 * 60 * 1000) {
         setState(() {
@@ -296,14 +251,11 @@ class _AuthRouterState extends State<AuthRouter> {
       }
     }
 
-    // Check 2: Pending email verification
     final pendingEmailUserId = prefs.getString('pending_email_user_id');
     final pendingEmailVerification = prefs.getBool('pending_email_verification') ?? false;
     final pendingEmailTimestamp = prefs.getInt('pending_email_timestamp');
 
-    if (pendingEmailUserId != null && 
-        pendingEmailVerification && 
-        pendingEmailTimestamp != null) {
+    if (pendingEmailUserId != null && pendingEmailVerification && pendingEmailTimestamp != null) {
       final emailAge = DateTime.now().millisecondsSinceEpoch - pendingEmailTimestamp;
       if (emailAge < 30 * 60 * 1000) {
         setState(() {
@@ -322,7 +274,6 @@ class _AuthRouterState extends State<AuthRouter> {
       }
     }
 
-    // Check 3: Authenticated user
     final currentUser = FirebaseAuth.instance.currentUser;
     final mockUserId = prefs.getString('mock_user_id');
 
@@ -334,7 +285,6 @@ class _AuthRouterState extends State<AuthRouter> {
       return;
     }
 
-    // Check 4: Fresh start
     setState(() {
       _targetScreen = const SplashScreen();
       _isChecking = false;
@@ -346,23 +296,15 @@ class _AuthRouterState extends State<AuthRouter> {
     if (_isChecking) {
       return const Scaffold(
         backgroundColor: Color(0xFF0A0A0F),
-        body: Center(
-          child: CircularProgressIndicator(
-            color: Color(0xFF8B5CF6),
-          ),
-        ),
+        body: Center(child: CircularProgressIndicator(color: Color(0xFF8B5CF6))),
       );
     }
     return _targetScreen!;
   }
 }
 
-// ============================================================================
-// CALL LISTENER WIDGET — Handles call signaling for ALL auth states
-// ============================================================================
 class CallListener extends StatefulWidget {
   final Widget child;
-
   const CallListener({super.key, required this.child});
 
   @override
@@ -383,13 +325,10 @@ class _CallListenerState extends State<CallListener> {
     final userId = authProvider.currentUserId;
 
     if (userId != null) {
-      // Start listening for call signals
       CallSignalingService.startListening(userId);
 
-      // Listen for incoming calls
       _callSub = CallSignalingService.onCallSignal.listen((signal) {
         if (signal.type == CallSignalType.incoming && mounted) {
-          // Show full-screen incoming call
           Navigator.of(context).push(
             MaterialPageRoute(
               fullscreenDialog: true,
@@ -404,10 +343,8 @@ class _CallListenerState extends State<CallListener> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Re-setup if auth changes
     final authProvider = Provider.of<AuraAuthProvider>(context);
     final userId = authProvider.currentUserId;
-    
     if (userId != null) {
       CallSignalingService.startListening(userId);
     }
@@ -432,9 +369,7 @@ class AuraChatApp extends StatefulWidget {
   State<AuraChatApp> createState() => _AuraChatAppState();
 }
 
-class _AuraChatAppState extends State<AuraChatApp> 
-    with WidgetsBindingObserver {
-
+class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
   DateTime? _backgroundTime;
   bool _isLocked = false;
   bool _lockChecked = false;
@@ -448,12 +383,9 @@ class _AuraChatAppState extends State<AuraChatApp>
       final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
       authProvider.listenToAuthChanges();
 
-      // Setup push notification navigation using global navigator key
       PushNotificationService().onChatOpen = (chatId) {
         if (navigatorKey.currentState != null) {
-          navigatorKey.currentState!.pushNamed('/chat', arguments: {
-            'chatId': chatId,
-          });
+          navigatorKey.currentState!.pushNamed('/chat', arguments: {'chatId': chatId});
         }
       };
     });
@@ -472,7 +404,6 @@ class _AuraChatAppState extends State<AuraChatApp>
 
     if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
       _backgroundTime = DateTime.now();
-
       if (settingsProvider.biometricLock || settingsProvider.appPasscode) {
         setState(() => _isLocked = true);
       }
@@ -570,16 +501,14 @@ class _AuraChatAppState extends State<AuraChatApp>
           return MaterialApp(
             title: 'AURA',
             debugShowCheckedModeBanner: false,
-            navigatorKey: navigatorKey, // Global navigator key for background navigation
+            navigatorKey: navigatorKey,
             theme: AppTheme.lightTheme,
             darkTheme: AppTheme.darkTheme,
             themeMode: themeProvider.themeMode,
             initialRoute: '/',
             builder: (context, child) {
-              // Wrap app with CallListener for ALL screens
               Widget app = CallListener(child: child!);
 
-              // Check lock status on first build
               if (!_lockChecked) {
                 _lockChecked = true;
                 final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
@@ -592,12 +521,10 @@ class _AuraChatAppState extends State<AuraChatApp>
                 }
               }
 
-              // LOCK SCREEN
               if (_isLocked) {
                 return _buildLockScreen();
               }
 
-              // REAL-TIME BAN CHECK
               final currentUser = FirebaseAuth.instance.currentUser;
               if (currentUser != null) {
                 return StreamBuilder<DocumentSnapshot>(
@@ -609,9 +536,7 @@ class _AuraChatAppState extends State<AuraChatApp>
                     if (snapshot.connectionState == ConnectionState.waiting) {
                       return const Scaffold(
                         backgroundColor: Color(0xFF0A0A0F),
-                        body: Center(
-                          child: CircularProgressIndicator(color: Color(0xFF8B5CF6)),
-                        ),
+                        body: Center(child: CircularProgressIndicator(color: Color(0xFF8B5CF6))),
                       );
                     }
 
@@ -710,28 +635,13 @@ class _AuraChatAppState extends State<AuraChatApp>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(
-              Icons.lock_outline,
-              size: 80,
-              color: Colors.white70,
-            ),
+            const Icon(Icons.lock_outline, size: 80, color: Colors.white70),
             const SizedBox(height: 24),
-            const Text(
-              'AURA is Locked',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            ),
+            const Text('AURA is Locked',
+              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
             const SizedBox(height: 12),
-            const Text(
-              'Authentication required to continue',
-              style: TextStyle(
-                fontSize: 16,
-                color: Colors.white54,
-              ),
-            ),
+            const Text('Authentication required to continue',
+              style: TextStyle(fontSize: 16, color: Colors.white54)),
             const SizedBox(height: 32),
             ElevatedButton(
               onPressed: _showLockScreen,
@@ -739,14 +649,9 @@ class _AuraChatAppState extends State<AuraChatApp>
                 backgroundColor: Colors.white,
                 foregroundColor: Colors.black,
                 padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(24),
-                ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
               ),
-              child: const Text(
-                'Unlock',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-              ),
+              child: const Text('Unlock', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
             ),
           ],
         ),
@@ -757,7 +662,6 @@ class _AuraChatAppState extends State<AuraChatApp>
 
 class _PasscodeDialog extends StatefulWidget {
   final String? correctPasscode;
-
   const _PasscodeDialog({required this.correctPasscode});
 
   @override
@@ -774,10 +678,7 @@ class _PasscodeDialogState extends State<_PasscodeDialog> {
         _enteredPasscode += digit;
         _errorMessage = '';
       });
-
-      if (_enteredPasscode.length == 6) {
-        _verifyPasscode();
-      }
+      if (_enteredPasscode.length == 6) _verifyPasscode();
     }
   }
 
@@ -811,43 +712,27 @@ class _PasscodeDialogState extends State<_PasscodeDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
-              Icons.lock_outline,
-              size: 48,
-              color: Colors.white70,
-            ),
+            const Icon(Icons.lock_outline, size: 48, color: Colors.white70),
             const SizedBox(height: 16),
-            const Text(
-              'Enter Passcode',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            ),
+            const Text('Enter Passcode',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
             const SizedBox(height: 24),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: List.generate(6, (index) {
                 return Container(
                   margin: const EdgeInsets.symmetric(horizontal: 6),
-                  width: 14,
-                  height: 14,
+                  width: 14, height: 14,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: index < _enteredPasscode.length
-                        ? Colors.white
-                        : Colors.white24,
+                    color: index < _enteredPasscode.length ? Colors.white : Colors.white24,
                   ),
                 );
               }),
             ),
             if (_errorMessage.isNotEmpty) ...[
               const SizedBox(height: 12),
-              Text(
-                _errorMessage,
-                style: const TextStyle(color: Colors.redAccent, fontSize: 14),
-              ),
+              Text(_errorMessage, style: const TextStyle(color: Colors.redAccent, fontSize: 14)),
             ],
             const SizedBox(height: 24),
             GridView.count(
@@ -856,8 +741,7 @@ class _PasscodeDialogState extends State<_PasscodeDialog> {
               childAspectRatio: 1.5,
               physics: const NeverScrollableScrollPhysics(),
               children: [
-                for (var i = 1; i <= 9; i++)
-                  _buildDigitButton(i.toString()),
+                for (var i = 1; i <= 9; i++) _buildDigitButton(i.toString()),
                 const SizedBox.shrink(),
                 _buildDigitButton('0'),
                 IconButton(
@@ -878,14 +762,8 @@ class _PasscodeDialogState extends State<_PasscodeDialog> {
       borderRadius: BorderRadius.circular(40),
       child: Container(
         alignment: Alignment.center,
-        child: Text(
-          digit,
-          style: const TextStyle(
-            fontSize: 28,
-            fontWeight: FontWeight.w500,
-            color: Colors.white,
-          ),
-        ),
+        child: Text(digit,
+          style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w500, color: Colors.white)),
       ),
     );
   }
