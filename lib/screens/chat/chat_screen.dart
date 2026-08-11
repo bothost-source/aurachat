@@ -5,7 +5,6 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:uuid/uuid.dart';
@@ -27,6 +26,7 @@ import '../../utils/verified_badge.dart';
 import '../groups/group_info_screen.dart';
 import 'package:flutter/gestures.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../widgets/custom_emoji_picker.dart';
 
 
 class ChatScreen extends StatefulWidget {
@@ -559,9 +559,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
       debugPrint('Load messages error: $e');
       setState(() => _isLoading = false);
     }
-    }
-
-    void _subscribeToMessages() {
+  }
+ 
+  void _subscribeToMessages() {
         if (_chatId == null) return;
 
     final firestore = FirebaseFirestore.instance;
@@ -646,6 +646,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
           debugPrint('Message subscription error: $e');
           setState(() => _isLoading = false);
         });
+      }    
 
   Future<void> _loadPinnedMessages() async {
     if (_chatId == null) return;
@@ -2678,29 +2679,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
             _buildRecordingIndicator(),
 
           if (_showEmojiPicker)
-            SizedBox(
-              height: 250,
-              child: EmojiPicker(
-                onEmojiSelected: (category, emoji) => _messageController.text += emoji.emoji,
-                config: Config(
-                  emojiViewConfig: EmojiViewConfig(
-                    columns: 7, emojiSizeMax: 32, verticalSpacing: 0, horizontalSpacing: 0,
-                    gridPadding: EdgeInsets.zero, recentsLimit: 28, replaceEmojiOnLimitExceed: false,
-                    noRecents: const Text('No Recents', style: TextStyle(fontSize: 20, color: Colors.black26)),
-                    loadingIndicator: const SizedBox.shrink(), buttonMode: ButtonMode.MATERIAL,
-                  ),
-                  categoryViewConfig: const CategoryViewConfig(
-                    initCategory: Category.RECENT, tabIndicatorAnimDuration: kTabScrollDuration, categoryIcons: CategoryIcons(),
-                  ),
-                  skinToneConfig: const SkinToneConfig(enabled: true, dialogBackgroundColor: Colors.white, indicatorColor: Colors.grey),
-                  searchViewConfig: const SearchViewConfig(backgroundColor: Colors.white, buttonIconColor: Colors.grey),
-                  bottomActionBarConfig: BottomActionBarConfig(
-                    backgroundColor: const Color(0xFF0A0A0F), buttonIconColor: const Color(0xFF8B5CF6),
-                    buttonColor: const Color(0xFF8B5CF6), showBackspaceButton: true, showSearchViewButton: true,
-                  ),
-                ),
-              ),
-            ),
+  CustomEmojiPicker(
+    onEmojiSelected: (emoji) {
+      setState(() => _messageController.text += emoji);
+    },
+    onClose: () => setState(() => _showEmojiPicker = false),
+  ),
 
           Container(
             padding: const EdgeInsets.all(8),
