@@ -45,7 +45,7 @@ import 'screens/moderation/ban_guard.dart';
 import 'screens/ai/ai_chatbot_screen.dart';
 import 'screens/ai/ai_studio_screen.dart';
 import 'screens/channel/channel_screen.dart';
-import 'screens/groups/create_channel_screen.dart';
+import 'screens/channel/create_channel_screen.dart';
 import 'screens/calls/call_screen.dart';
 import 'screens/calls/incoming_call_screen.dart';
 import 'screens/search/global_search_screen.dart';
