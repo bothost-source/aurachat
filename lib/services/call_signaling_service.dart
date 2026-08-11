@@ -1,7 +1,5 @@
 import 'dart:async';
 import 'package:firebase_database/firebase_database.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'call_notification_service.dart';
 
 class CallSignalingService {
   static DatabaseReference? _userSignalRef;
@@ -36,8 +34,6 @@ class CallSignalingService {
             timestamp: DateTime.tryParse(data['timestamp'] ?? ''),
           );
           _callStreamController.add(signal);
-          // Also trigger notification for foreground
-          CallNotificationService().showIncomingCallNotification(signal);
           break;
         case 'call_answered':
           _callStreamController.add(CallSignal(
@@ -55,7 +51,6 @@ class CallSignalingService {
           break;
       }
 
-      // Delete the signal after processing so it doesn't replay
       event.snapshot.ref.remove();
     });
   }
@@ -69,16 +64,17 @@ class CallSignalingService {
     required String channelName,
     required bool isVideoCall,
   }) async {
-    // Send FCM push notification first
-    await CallNotificationService.sendCallFCM(
-      targetUserId: targetUserId,
-      callId: callId,
-      callerId: callerId,
-      callerName: callerName,
-      callerAvatar: callerAvatar,
-      channelName: channelName,
-      isVideoCall: isVideoCall,
-    );
+    final ref = FirebaseDatabase.instance.ref('call_signals/$targetUserId').push();
+    await ref.set({
+      'type': 'incoming_call',
+      'call_id': callId,
+      'caller_id': callerId,
+      'caller_name': callerName,
+      'caller_avatar': callerAvatar,
+      'channel_name': channelName,
+      'is_video_call': isVideoCall,
+      'timestamp': DateTime.now().toIso8601String(),
+    });
   }
 
   static Future<void> answerCall({
