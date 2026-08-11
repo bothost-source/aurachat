@@ -2,16 +2,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:audioplayers/audioplayers.dart';
-import '../services/call_signaling_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../services/call_signaling_service.dart';
 import 'call_screen.dart';
 
 class IncomingCallScreen extends StatefulWidget {
   final CallSignal signal;
 
-  const IncomingCallScreen({
-    super.key,
-    required this.signal,
-  });
+  const IncomingCallScreen({super.key, required this.signal});
 
   @override
   State<IncomingCallScreen> createState() => _IncomingCallScreenState();
@@ -26,24 +24,44 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
     super.initState();
     _startRinging();
     _startTimeout();
-    
-    // Keep screen on during incoming call
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   }
 
-  void _startRinging() async {
+  Future<void> _startRinging() async {
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final selectedRingtone = prefs.getString('call_ringtone') ?? 'default';
+
+      String assetPath;
+      switch (selectedRingtone) {
+        case 'chill':
+          assetPath = 'assets/audio/ringtone_chill.mp3';
+          break;
+        case 'classic':
+          assetPath = 'assets/audio/ringtone_classic.mp3';
+          break;
+        case 'electronic':
+          assetPath = 'assets/audio/ringtone_electronic.mp3';
+          break;
+        case 'default':
+        default:
+          assetPath = 'assets/audio/ringtone_default.mp3';
+          break;
+      }
+
       await _audioPlayer.setReleaseMode(ReleaseMode.loop);
-      await _audioPlayer.play(AssetSource('sounds/ringtone.mp3'));
+      await _audioPlayer.play(AssetSource(assetPath));
     } catch (e) {
       debugPrint('Ringtone error: $e');
+      try {
+        await _audioPlayer.setReleaseMode(ReleaseMode.loop);
+        await _audioPlayer.play(AssetSource('assets/audio/ringtone_default.mp3'));
+      } catch (_) {}
     }
   }
 
   void _startTimeout() {
-    _timeoutTimer = Timer(const Duration(seconds: 30), () {
-      _declineCall();
-    });
+    _timeoutTimer = Timer(const Duration(seconds: 30), () => _declineCall());
   }
 
   Future<void> _acceptCall() async {
@@ -65,7 +83,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
             channelName: widget.signal.channelName!,
             isVideoCall: widget.signal.isVideoCall!,
             targetUserId: widget.signal.callerId!,
-            targetUserName: widget.signal.callerName!,
+            targetUserName: widget.signal.callerName ?? 'Unknown',
           ),
         ),
       );
@@ -83,15 +101,32 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
       channelName: widget.signal.channelName!,
     );
 
+    await _saveMissedCallLog();
+
     if (mounted) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
       Navigator.pop(context);
     }
   }
 
+  Future<void> _saveMissedCallLog() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getString('mock_user_id');
+      if (userId == null) return;
+
+      // You can also save to Firestore here if needed
+      debugPrint('Call declined logged for receiver: $userId');
+    } catch (e) {
+      debugPrint('Error saving call log: $e');
+    }
+  }
+
   void _stopRinging() {
-    _audioPlayer.stop();
-    _audioPlayer.dispose();
+    try {
+      _audioPlayer.stop();
+      _audioPlayer.dispose();
+    } catch (_) {}
   }
 
   @override
@@ -104,179 +139,105 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final name = widget.signal.callerName ?? widget.signal.callerId ?? 'Unknown';
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0F),
       body: SafeArea(
         child: Column(
           children: [
             const Spacer(flex: 2),
-            
-            // Caller avatar
             Container(
-              width: 140,
-              height: 140,
+              width: 140, height: 140,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 image: widget.signal.callerAvatar != null
-                    ? DecorationImage(
-                        image: NetworkImage(widget.signal.callerAvatar!),
-                        fit: BoxFit.cover,
-                      )
+                    ? DecorationImage(image: NetworkImage(widget.signal.callerAvatar!), fit: BoxFit.cover)
                     : null,
                 color: const Color(0xFF8B5CF6),
                 boxShadow: [
                   BoxShadow(
                     color: const Color(0xFF8B5CF6).withOpacity(0.4),
-                    blurRadius: 40,
-                    spreadRadius: 10,
+                    blurRadius: 40, spreadRadius: 10,
                   ),
                 ],
               ),
               child: widget.signal.callerAvatar == null
-                  ? Center(
-                      child: Text(
-                        (widget.signal.callerName ?? '?')[0].toUpperCase(),
-                        style: const TextStyle(
-                          fontSize: 56,
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    )
+                  ? Center(child: Text(name[0].toUpperCase(),
+                      style: const TextStyle(fontSize: 56, color: Colors.white, fontWeight: FontWeight.bold)))
                   : null,
             ),
-            
             const SizedBox(height: 32),
-            
-            // Caller name
-            Text(
-              widget.signal.callerName ?? 'Unknown',
-              style: const TextStyle(
-                fontSize: 28,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            ),
-            
+            Text(name,
+              style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white)),
             const SizedBox(height: 12),
-            
-            // Call type
             Text(
-              widget.signal.isVideoCall == true
-                  ? 'Incoming video call...'
-                  : 'Incoming voice call...',
-              style: TextStyle(
-                fontSize: 16,
-                color: Colors.white.withOpacity(0.6),
-              ),
+              widget.signal.isVideoCall == true ? 'Incoming video call...' : 'Incoming voice call...',
+              style: TextStyle(fontSize: 16, color: Colors.white.withOpacity(0.6)),
             ),
-            
             const Spacer(flex: 3),
-            
-            // Pulsing animation
             TweenAnimationBuilder(
               tween: Tween(begin: 0.0, end: 1.0),
               duration: const Duration(seconds: 1),
               builder: (context, value, child) => Container(
-                width: 100 + (value * 50),
-                height: 100 + (value * 50),
+                width: 100 + (value * 50), height: 100 + (value * 50),
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: const Color(0xFF8B5CF6).withOpacity(0.2 * (1 - value)),
                 ),
               ),
             ),
-            
             const Spacer(flex: 2),
-            
-            // Accept / Decline buttons
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Decline
                 Column(
                   children: [
                     GestureDetector(
                       onTap: _declineCall,
                       child: Container(
-                        width: 72,
-                        height: 72,
+                        width: 72, height: 72,
                         decoration: const BoxDecoration(
-                          color: Colors.red,
-                          shape: BoxShape.circle,
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.red,
-                              blurRadius: 20,
-                              spreadRadius: 2,
-                            ),
-                          ],
+                          color: Colors.red, shape: BoxShape.circle,
+                          boxShadow: [BoxShadow(color: Colors.red, blurRadius: 20, spreadRadius: 2)],
                         ),
-                        child: const Icon(
-                          Icons.call_end,
-                          color: Colors.white,
-                          size: 32,
-                        ),
+                        child: const Icon(Icons.call_end, color: Colors.white, size: 32),
                       ),
                     ),
                     const SizedBox(height: 12),
-                    const Text(
-                      'Decline',
-                      style: TextStyle(
-                        color: Colors.white70,
-                        fontSize: 14,
-                      ),
-                    ),
+                    const Text('Decline', style: TextStyle(color: Colors.white70, fontSize: 14)),
                   ],
                 ),
-                
                 const SizedBox(width: 64),
-                
-                // Accept
                 Column(
                   children: [
                     GestureDetector(
                       onTap: _acceptCall,
                       child: Container(
-                        width: 72,
-                        height: 72,
+                        width: 72, height: 72,
                         decoration: BoxDecoration(
                           color: widget.signal.isVideoCall == true
-                              ? const Color(0xFF8B5CF6)
-                              : Colors.green,
+                              ? const Color(0xFF8B5CF6) : Colors.green,
                           shape: BoxShape.circle,
                           boxShadow: [
                             BoxShadow(
                               color: widget.signal.isVideoCall == true
-                                  ? const Color(0xFF8B5CF6)
-                                  : Colors.green,
-                              blurRadius: 20,
-                              spreadRadius: 2,
+                                  ? const Color(0xFF8B5CF6) : Colors.green,
+                              blurRadius: 20, spreadRadius: 2,
                             ),
                           ],
                         ),
                         child: Icon(
-                          widget.signal.isVideoCall == true
-                              ? Icons.videocam
-                              : Icons.call,
-                          color: Colors.white,
-                          size: 32,
+                          widget.signal.isVideoCall == true ? Icons.videocam : Icons.call,
+                          color: Colors.white, size: 32,
                         ),
                       ),
                     ),
                     const SizedBox(height: 12),
-                    const Text(
-                      'Accept',
-                      style: TextStyle(
-                        color: Colors.white70,
-                        fontSize: 14,
-                      ),
-                    ),
+                    const Text('Accept', style: TextStyle(color: Colors.white70, fontSize: 14)),
                   ],
                 ),
               ],
             ),
-            
             const SizedBox(height: 48),
           ],
         ),
