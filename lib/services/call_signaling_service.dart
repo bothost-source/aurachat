@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:firebase_database/firebase_database.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'call_notification_service.dart';
 
 class CallSignalingService {
   static DatabaseReference? _userSignalRef;
@@ -8,7 +9,12 @@ class CallSignalingService {
   static final _callStreamController = StreamController<CallSignal>.broadcast();
   static Stream<CallSignal> get onCallSignal => _callStreamController.stream;
 
+  static bool _isListening = false;
+
   static void startListening(String userId) {
+    if (_isListening) return;
+    _isListening = true;
+
     _userSignalRef = FirebaseDatabase.instance.ref('call_signals/$userId');
 
     _signalSubscription = _userSignalRef!.onChildAdded.listen((event) {
@@ -19,7 +25,7 @@ class CallSignalingService {
 
       switch (signalType) {
         case 'incoming_call':
-          _callStreamController.add(CallSignal(
+          final signal = CallSignal(
             type: CallSignalType.incoming,
             callId: data['call_id'],
             callerId: data['caller_id'],
@@ -27,8 +33,11 @@ class CallSignalingService {
             callerAvatar: data['caller_avatar'],
             channelName: data['channel_name'],
             isVideoCall: data['is_video_call'],
-            timestamp: DateTime.parse(data['timestamp']),
-          ));
+            timestamp: DateTime.tryParse(data['timestamp'] ?? ''),
+          );
+          _callStreamController.add(signal);
+          // Also trigger notification for foreground
+          CallNotificationService().showIncomingCallNotification(signal);
           break;
         case 'call_answered':
           _callStreamController.add(CallSignal(
@@ -60,17 +69,16 @@ class CallSignalingService {
     required String channelName,
     required bool isVideoCall,
   }) async {
-    final ref = FirebaseDatabase.instance.ref('call_signals/$targetUserId').push();
-    await ref.set({
-      'type': 'incoming_call',
-      'call_id': callId,
-      'caller_id': callerId,
-      'caller_name': callerName,
-      'caller_avatar': callerAvatar,
-      'channel_name': channelName,
-      'is_video_call': isVideoCall,
-      'timestamp': DateTime.now().toIso8601String(),
-    });
+    // Send FCM push notification first
+    await CallNotificationService.sendCallFCM(
+      targetUserId: targetUserId,
+      callId: callId,
+      callerId: callerId,
+      callerName: callerName,
+      callerAvatar: callerAvatar,
+      channelName: channelName,
+      isVideoCall: isVideoCall,
+    );
   }
 
   static Future<void> answerCall({
@@ -100,6 +108,7 @@ class CallSignalingService {
   }
 
   static void dispose() {
+    _isListening = false;
     _signalSubscription?.cancel();
     _callStreamController.close();
   }
