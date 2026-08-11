@@ -32,12 +32,14 @@ class AuraAuthProvider extends ChangeNotifier {
   String? get userBio => _userBio;
   String? get userPhotoUrl => _userPhotoUrl;
 
-  // FIX: Removed public mockUserId getter. Use currentUserId instead.
-  // Never expose mock IDs to UI.
+  // FIX: Added mockUserId getter — screens expect this
+  String? get mockUserId => _mockUserId;
+
+  // FIX: currentUserId works for both real and mock users
   String? get currentUserId => _user?.uid ?? _mockUserId;
 
-  // FIX: Private setter only - no external code can set mock ID
-  set _mockUserIdValue(String? value) {
+  // FIX: Public setter for mock user ID (used by mock OTP flow)
+  set mockUserId(String? value) {
     _mockUserId = value;
     notifyListeners();
   }
@@ -309,7 +311,6 @@ class AuraAuthProvider extends ChangeNotifier {
   }
 
   Future<bool> _loadUserProfile() async {
-    // FIX: Use currentUserId instead of _user?.uid ?? _mockUserId
     final userId = currentUserId;
     if (userId == null) return false;
     try {
@@ -363,7 +364,6 @@ class AuraAuthProvider extends ChangeNotifier {
   }) async {
     _setLoading(true);
     try {
-      // FIX: Use currentUserId instead of direct _mockUserId
       final userId = currentUserId ?? 'mock_${DateTime.now().millisecondsSinceEpoch}';
 
       if (_user == null && _mockUserId == null) {
@@ -417,7 +417,6 @@ class AuraAuthProvider extends ChangeNotifier {
   }) async {
     _setLoading(true);
     try {
-      // FIX: Use currentUserId
       final userId = currentUserId;
       if (userId == null) {
         _error = 'Not authenticated';
@@ -463,7 +462,6 @@ class AuraAuthProvider extends ChangeNotifier {
   Future<bool> changePhoneNumber(String newPhone) async {
     _setLoading(true);
     try {
-      // FIX: Use currentUserId
       final userId = currentUserId;
       if (userId == null) {
         _error = 'Not authenticated';
@@ -505,7 +503,6 @@ class AuraAuthProvider extends ChangeNotifier {
   Future<bool> changeEmail(String newEmail) async {
     _setLoading(true);
     try {
-      // FIX: Use currentUserId
       final userId = currentUserId;
       if (userId == null) {
         _error = 'Not authenticated';
@@ -570,7 +567,6 @@ class AuraAuthProvider extends ChangeNotifier {
   Future<bool> deleteAccount() async {
     _setLoading(true);
     try {
-      // FIX: Use currentUserId
       final userId = currentUserId;
       if (userId == null) {
         _error = 'Not authenticated';
