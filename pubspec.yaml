@@ -73,7 +73,7 @@ dependencies:
   connectivity_plus: ^5.0.0
 
   # NEW: Audio player for ringtone preview
-  audioplayers: ^6.0.0
+  # audioplayers: ^6.0.0
 
 dev_dependencies:
   flutter_test:
