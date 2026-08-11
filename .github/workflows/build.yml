@@ -92,6 +92,16 @@ jobs:
           }
           EOF
 
+      - name: Fix Gradle wrapper
+        run: |
+          cat > android/gradle/wrapper/gradle-wrapper.properties << 'EOF'
+          distributionBase=GRADLE_USER_HOME
+          distributionPath=wrapper/dists
+          zipStoreBase=GRADLE_USER_HOME
+          zipStorePath=wrapper/dists
+          distributionUrl=https\://services.gradle.org/distributions/gradle-8.4-all.zip
+          EOF
+
       - name: Create Cloudinary config
         run: |
           cat > lib/services/cloudinary_config.dart << 'EOF'
