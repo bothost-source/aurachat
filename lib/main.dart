@@ -1,3 +1,5 @@
+import 'dart:async';  // FIX: Added for StreamSubscription
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -466,12 +468,15 @@ class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
                 return _buildLockScreen();
               }
 
+              // FIX: Check both Firebase user AND mock user for ban status
               final currentUser = FirebaseAuth.instance.currentUser;
-              if (currentUser != null) {
+              final userId = currentUser?.uid ?? authProvider.currentUserId;
+
+              if (userId != null) {
                 return StreamBuilder<DocumentSnapshot>(
                   stream: FirebaseFirestore.instance
                       .collection('users')
-                      .doc(currentUser.uid)
+                      .doc(userId)
                       .snapshots(),
                   builder: (context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) {
@@ -490,7 +495,7 @@ class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
                       if (DateTime.now().isAfter(banExpiry)) {
                         FirebaseFirestore.instance
                             .collection('users')
-                            .doc(currentUser.uid)
+                            .doc(userId)
                             .update({
                           'is_banned': false,
                           'banned_until': null,
