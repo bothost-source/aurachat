@@ -52,7 +52,7 @@ class _MainAppScreenState extends State<MainAppScreen>
 
     return PopScope(
       canPop: false,
-      onPopInvokedWithResult: (didPop, result) {
+      onPopInvoked: (didPop) {
         if (!didPop) {
           SystemNavigator.pop();
         }
