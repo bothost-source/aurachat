@@ -1,391 +1,801 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:provider/provider.dart';
+import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../../providers/auth_provider.dart' show AuraAuthProvider;
-import '../../services/online_status_service.dart';
-import '../../services/app_localizations.dart';
-import 'email_verification_screen.dart';
-import 'setup_profile_screen.dart';
+import '../services/online_status_service.dart';
+import '../../providers/settings_provider.dart';
 
-class OtpScreen extends StatefulWidget {
-  final String phoneNumber;
-  final String expectedOtp;
-  final String cleanPhoneNumber;
+class AuraAuthProvider extends ChangeNotifier {
+  final firebase_auth.FirebaseAuth _auth = firebase_auth.FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  const OtpScreen({
-    super.key,
-    required this.phoneNumber,
-    required this.expectedOtp,
-    required this.cleanPhoneNumber,
-  });
+  firebase_auth.User? _user;
+  bool _isLoading = true;
+  bool _isAuthenticated = false;
+  String? _error;
+  String? _phoneNumber;
+  String? _email;
+  String? _userName;
+  String? _displayName;
+  String? _userBio;
+  String? _userPhotoUrl;
+  String? _mockUserId;
 
-  @override
-  State<OtpScreen> createState() => _OtpScreenState();
-}
+  firebase_auth.User? get user => _user;
+  bool get isLoading => _isLoading;
+  bool get isAuthenticated => _isAuthenticated;
+  String? get error => _error;
+  String? get phoneNumber => _phoneNumber;
+  String? get email => _email;
+  String? get userName => _userName;
+  String? get displayName => _displayName;
+  String? get userBio => _userBio;
+  String? get userPhotoUrl => _userPhotoUrl;
 
-class _OtpScreenState extends State<OtpScreen> {
-  final List<TextEditingController> _controllers = List.generate(6, (_) => TextEditingController());
-  final List<FocusNode> _focusNodes = List.generate(6, (_) => FocusNode());
-  bool _isLoading = false;
-  int _resendTimer = 60;
+  String? get mockUserId => _mockUserId;
 
-  @override
-  void initState() {
-    super.initState();
-    _startResendTimer();
-    _savePendingOtpState();
+  String? get currentUserId => _user?.uid ?? _mockUserId;
+
+  set mockUserId(String? value) {
+    _mockUserId = value;
+    notifyListeners();
   }
 
-  Future<void> _savePendingOtpState() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('pending_otp_phone', widget.cleanPhoneNumber);
-    await prefs.setString('pending_otp_expected', widget.expectedOtp);
-    await prefs.setInt('pending_otp_timestamp', DateTime.now().millisecondsSinceEpoch);
+  AuraAuthProvider() {
+    _initAuth();
   }
 
-  Future<void> _clearPendingOtpState() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('pending_otp_phone');
-    await prefs.remove('pending_otp_expected');
-    await prefs.remove('pending_otp_timestamp');
-  }
+  /// ==================== INIT AUTH ====================
+  Future<void> _initAuth() async {
+    _setLoading(true);
+    try {
+      _user = _auth.currentUser;
 
-  void _startResendTimer() {
-    Future.delayed(const Duration(seconds: 1), () {
-      if (mounted && _resendTimer > 0) {
-        setState(() => _resendTimer--);
-        _startResendTimer();
+      if (_user != null) {
+        _isAuthenticated = true;
+        await _loadUserProfile();
+        await OnlineStatusService.setOnline();
+      } else {
+        final prefs = await SharedPreferences.getInstance();
+        _mockUserId = prefs.getString('mock_user_id');
+        if (_mockUserId != null) {
+          _isAuthenticated = true;
+          _phoneNumber = prefs.getString('mock_phone');
+          _userName = prefs.getString('mock_username');
+          _displayName = prefs.getString('mock_display_name');
+          _userBio = prefs.getString('mock_bio');
+          _userPhotoUrl = prefs.getString('mock_avatar');
+          _email = prefs.getString('mock_email');
+          await _loadUserProfile();
+        }
       }
+    } catch (e) {
+      _error = 'Auth init failed: $e';
+      debugPrint('Auth init error: $e');
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  Future<Map<String, dynamic>?> getUserProfile(String userId) async {
+    try {
+      final doc = await _firestore.collection('users').doc(userId).get();
+      if (doc.exists) {
+        final data = doc.data()!;
+        return {
+          'id': userId,
+          'username': data['username'] ?? data['display_name'] ?? 'Unknown',
+          'display_name': data['display_name'],
+          'avatar_url': data['avatar_url'],
+          'bio': data['bio'],
+          'phone': data['phone'],
+          'is_verified': data['is_verified'] == true,
+        };
+      }
+      return null;
+    } catch (e) {
+      debugPrint('Get user profile error: $e');
+      return null;
+    }
+  }
+
+  /// ==================== CHECK IF PHONE EXISTS ====================
+  Future<Map<String, dynamic>?> checkPhoneExists(String phone) async {
+    try {
+      final snapshot = await _firestore
+          .collection('users')
+          .where('phone', isEqualTo: phone)
+          .limit(1)
+          .get();
+
+      if (snapshot.docs.isNotEmpty) {
+        final data = snapshot.docs.first.data();
+        data['id'] = snapshot.docs.first.id;
+        return data;
+      }
+      return null;
+    } catch (e) {
+      debugPrint('Check phone error: $e');
+      return null;
+    }
+  }
+
+  /// ==================== LOGIN EXISTING USER (ENFORCES EMAIL OTP) ====================
+  Future<bool> loginExistingUser(String phone) async {
+    _setLoading(true);
+    try {
+      final userData = await checkPhoneExists(phone);
+      if (userData == null) {
+        _error = 'User not found';
+        _setLoading(false);
+        return false;
+      }
+
+      final userId = userData['id'] as String?;
+      if (userId == null) {
+        _error = 'Invalid user data';
+        _setLoading(false);
+        return false;
+      }
+
+      _phoneNumber = phone;
+      _email = userData['email'] as String?;
+      _userName = userData['username'] as String?;
+      _displayName = userData['display_name'] as String?;
+      _userBio = userData['bio'] as String?;
+      _userPhotoUrl = userData['avatar_url'] as String?;
+      _mockUserId = userId;
+      _isAuthenticated = true;
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('pending_mock_user_id', userId);
+      await prefs.setString('pending_mock_phone', phone);
+      await prefs.setString('pending_mock_username', _userName ?? '');
+      await prefs.setString('pending_mock_display_name', _displayName ?? '');
+      await prefs.setString('pending_mock_bio', _userBio ?? '');
+      await prefs.setString('pending_mock_avatar', _userPhotoUrl ?? '');
+      await prefs.setString('pending_mock_email', _email ?? '');
+
+      final isEmailVerified = userData['email_verified'] == true;
+      if (isEmailVerified) {
+        await _completeLogin(prefs);
+      }
+
+      _setLoading(false);
+      return true;
+    } catch (e) {
+      _error = 'Login failed: $e';
+      _setLoading(false);
+      return false;
+    }
+  }
+
+  /// Complete login after email verification
+  Future<void> _completeLogin(SharedPreferences prefs) async {
+    _isAuthenticated = true;
+
+    await prefs.setString('mock_user_id', _mockUserId!);
+    await prefs.setString('mock_phone', _phoneNumber ?? '');
+    await prefs.setString('mock_username', _userName ?? '');
+    await prefs.setString('mock_display_name', _displayName ?? '');
+    await prefs.setString('mock_bio', _userBio ?? '');
+    await prefs.setString('mock_avatar', _userPhotoUrl ?? '');
+    await prefs.setString('mock_email', _email ?? '');
+
+    await prefs.remove('pending_mock_user_id');
+    await prefs.remove('pending_mock_phone');
+    await prefs.remove('pending_mock_username');
+    await prefs.remove('pending_mock_display_name');
+    await prefs.remove('pending_mock_bio');
+    await prefs.remove('pending_mock_avatar');
+    await prefs.remove('pending_mock_email');
+
+    try {
+      final settingsProvider = SettingsProvider();
+      settingsProvider.setMockUserId(_mockUserId!);
+    } catch (e) {
+      debugPrint('SettingsProvider sync error: $e');
+    }
+
+    notifyListeners();
+  }
+
+  /// ==================== SEND EMAIL OTP ====================
+  Future<bool> sendEmailOtp() async {
+    _setLoading(true);
+    try {
+      if (_email == null || _mockUserId == null) {
+        _error = 'No email available';
+        _setLoading(false);
+        return false;
+      }
+
+      final otp = (100000 + DateTime.now().millisecond * 900000 ~/ 1000).toString().padLeft(6, '0');
+      final expiry = DateTime.now().add(const Duration(minutes: 10));
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('email_otp_code', otp);
+      await prefs.setString('email_otp_expiry', expiry.toIso8601String());
+
+      debugPrint('EMAIL OTP FOR $_email: $otp');
+
+      _setLoading(false);
+      return true;
+    } catch (e) {
+      _error = 'Failed to send OTP: $e';
+      _setLoading(false);
+      return false;
+    }
+  }
+
+  /// ==================== VERIFY EMAIL OTP ====================
+  Future<bool> verifyEmailOtp(String otpCode) async {
+    _setLoading(true);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final pendingUserId = prefs.getString('pending_mock_user_id');
+      final storedOtp = prefs.getString('email_otp_code');
+      final otpExpiry = prefs.getString('email_otp_expiry');
+
+      if (pendingUserId == null || _mockUserId == null) {
+        _error = 'No pending login';
+        _setLoading(false);
+        return false;
+      }
+
+      if (storedOtp == null || otpExpiry == null) {
+        _error = 'No OTP sent. Request a new code.';
+        _setLoading(false);
+        return false;
+      }
+
+      final expiry = DateTime.parse(otpExpiry);
+      if (DateTime.now().isAfter(expiry)) {
+        _error = 'OTP expired. Request a new code.';
+        _setLoading(false);
+        return false;
+      }
+
+      if (otpCode != storedOtp) {
+        _error = 'Invalid OTP code';
+        _setLoading(false);
+        return false;
+      }
+
+      await _firestore.collection('users').doc(pendingUserId).update({
+        'email_verified': true,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+
+      await _completeLogin(prefs);
+      await OnlineStatusService.setOnline();
+
+      _setLoading(false);
+      return true;
+    } catch (e) {
+      _error = 'Email verification failed: $e';
+      _setLoading(false);
+      return false;
+    }
+  }
+
+
+
+  /// ==================== COMPLETE EMAIL VERIFICATION (BACKEND) ====================
+  Future<bool> completeEmailVerification(String userId) async {
+    _setLoading(true);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      final pendingUserId = prefs.getString('pending_mock_user_id') ?? userId;
+      final pendingPhone = prefs.getString('pending_mock_phone');
+      final pendingUsername = prefs.getString('pending_mock_username');
+      final pendingDisplayName = prefs.getString('pending_mock_display_name');
+      final pendingBio = prefs.getString('pending_mock_bio');
+      final pendingAvatar = prefs.getString('pending_mock_avatar');
+      final pendingEmail = prefs.getString('pending_mock_email');
+
+      _mockUserId = pendingUserId;
+      _phoneNumber = pendingPhone;
+      _userName = pendingUsername;
+      _displayName = pendingDisplayName;
+      _userBio = pendingBio;
+      _userPhotoUrl = pendingAvatar;
+      _email = pendingEmail;
+      _isAuthenticated = true;
+
+      await _firestore.collection('users').doc(pendingUserId).update({
+        'email_verified': true,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+
+      await prefs.setString('mock_user_id', pendingUserId);
+      await prefs.setString('mock_phone', pendingPhone ?? '');
+      await prefs.setString('mock_username', pendingUsername ?? '');
+      await prefs.setString('mock_display_name', pendingDisplayName ?? '');
+      await prefs.setString('mock_bio', pendingBio ?? '');
+      await prefs.setString('mock_avatar', pendingAvatar ?? '');
+      await prefs.setString('mock_email', pendingEmail ?? '');
+
+      await prefs.remove('pending_mock_user_id');
+      await prefs.remove('pending_mock_phone');
+      await prefs.remove('pending_mock_username');
+      await prefs.remove('pending_mock_display_name');
+      await prefs.remove('pending_mock_bio');
+      await prefs.remove('pending_mock_avatar');
+      await prefs.remove('pending_mock_email');
+      await prefs.remove('email_otp_code');
+      await prefs.remove('email_otp_expiry');
+
+      try {
+        final settingsProvider = SettingsProvider();
+        settingsProvider.setMockUserId(pendingUserId);
+      } catch (e) {
+        debugPrint('SettingsProvider sync error: $e');
+      }
+
+      await OnlineStatusService.setOnline();
+      notifyListeners();
+      _setLoading(false);
+      return true;
+    } catch (e) {
+      _error = 'Email verification completion failed: $e';
+      debugPrint('completeEmailVerification error: $e');
+      _setLoading(false);
+      return false;
+    }
+  }
+  void listenToAuthChanges() {
+    _auth.authStateChanges().listen((firebase_auth.User? user) {
+      if (user != null) {
+        _user = user;
+        _isAuthenticated = true;
+        _loadUserProfile();
+        OnlineStatusService.setOnline();
+      } else {
+        OnlineStatusService.setOffline();
+        _clearAuth();
+      }
+      notifyListeners();
     });
   }
 
-  void _onOtpDigitChanged(int index, String value) {
-    if (value.length == 1 && index < 5) {
-      _focusNodes[index + 1].requestFocus();
+  Future<void> refreshSession() async {
+    try {
+      _user = _auth.currentUser;
+      _isAuthenticated = _user != null || _mockUserId != null;
+      if (_isAuthenticated) await _loadUserProfile();
+    } catch (e) {
+      _isAuthenticated = false;
+      _user = null;
     }
-    if (value.isEmpty && index > 0) {
-      _focusNodes[index - 1].requestFocus();
-    }
-    _checkComplete();
+    notifyListeners();
   }
 
-  void _checkComplete() {
-    final otp = _controllers.map((c) => c.text).join();
-    if (otp.length == 6) {
-      _verifyOTP();
+  Future<bool> signUpWithEmail(String email, String password, String phone) async {
+    _setLoading(true);
+    try {
+      final cred = await _auth.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+      _phoneNumber = phone;
+      _email = email;
+      _user = cred.user;
+      _isAuthenticated = cred.user != null;
+      _setLoading(false);
+      return cred.user != null;
+    } catch (e) {
+      _error = e.toString();
+      _setLoading(false);
+      return false;
     }
   }
 
-  void _verifyOTP() async {
-    final enteredOtp = _controllers.map((c) => c.text).join();
+  Future<bool> signInWithEmail(String email, String password) async {
+    _setLoading(true);
+    try {
+      final cred = await _auth.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+      _user = cred.user;
+      _isAuthenticated = true;
+      _email = email;
+      await _loadUserProfile();
+      await OnlineStatusService.setOnline();
+      _setLoading(false);
+      return true;
+    } catch (e) {
+      _error = e.toString();
+      _setLoading(false);
+      return false;
+    }
+  }
 
-    setState(() => _isLoading = true);
-    await Future.delayed(const Duration(seconds: 1));
-    setState(() => _isLoading = false);
+  Future<bool> signInWithOtp(String phone) async {
+    _setLoading(true);
+    try {
+      await _auth.verifyPhoneNumber(
+        phoneNumber: phone,
+        verificationCompleted: (firebase_auth.PhoneAuthCredential credential) async {
+          await _auth.signInWithCredential(credential);
+        },
+        verificationFailed: (firebase_auth.FirebaseAuthException e) {
+          _error = e.message;
+        },
+        codeSent: (String verificationId, int? resendToken) {
+          _phoneNumber = phone;
+          _storeVerificationId(verificationId);
+        },
+        codeAutoRetrievalTimeout: (String verificationId) {},
+      );
+      _setLoading(false);
+      return true;
+    } catch (e) {
+      _error = e.toString();
+      _setLoading(false);
+      return false;
+    }
+  }
 
-    if (enteredOtp == widget.expectedOtp) {
-      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
-      authProvider.setMockPhone(widget.cleanPhoneNumber);
+  Future<void> _storeVerificationId(String verificationId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('verification_id', verificationId);
+  }
 
-      final existingUser = await authProvider.checkPhoneExists(widget.cleanPhoneNumber);
-
-      if (existingUser != null) {
-        final success = await authProvider.loginExistingUser(widget.cleanPhoneNumber);
-        if (success && mounted) {
-          await _clearPendingOtpState();
-
-          final existingEmail = existingUser['email'] as String?;
-          final userId = existingUser['id'] as String;  // FIX: Get actual Firestore doc ID
-
-          if (existingEmail != null && existingEmail.isNotEmpty) {
-            await authProvider.sendEmailOtp();
-            if (mounted) {
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => EmailVerificationScreen(
-                    userId: userId,  // FIX: Pass actual Firestore doc ID, not phone number
-                    backendUrl: 'https://aurachat-backend-5utu.onrender.com',
-                    autoDetectedEmail: existingEmail,
-                    isLoginFlow: true,
-                  ),
-                ),
-              );
-            }
-          } else {
-            Navigator.pushReplacementNamed(context, '/setup_profile');
-          }
-        }
-      } else {
-        await authProvider.createMockUser();
-        if (mounted) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (context) => EmailVerificationScreen(
-                userId: authProvider.mockUserId!,  // FIX: Pass actual mock user ID
-                backendUrl: 'https://aurachat-backend-5utu.onrender.com',
-                isLoginFlow: false,
-              ),
-            ),
-          );
-        }
+  Future<bool> verifyOtp(String phone, String token) async {
+    _setLoading(true);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final verificationId = prefs.getString('verification_id');
+      if (verificationId == null) {
+        _error = 'Verification ID not found';
+        _setLoading(false);
+        return false;
       }
-    } else {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(AppLocalizations.get('invalid_otp')),
-            backgroundColor: Colors.red.withOpacity(0.9),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          ),
-        );
-      }
+
+      final credential = firebase_auth.PhoneAuthProvider.credential(
+        verificationId: verificationId,
+        smsCode: token,
+      );
+
+      final cred = await _auth.signInWithCredential(credential);
+      _user = cred.user;
+      _isAuthenticated = cred.user != null;
+      _phoneNumber = phone;
+      await _loadUserProfile();
+      await OnlineStatusService.setOnline();
+      _setLoading(false);
+      return cred.user != null;
+    } catch (e) {
+      _error = e.toString();
+      _setLoading(false);
+      return false;
     }
   }
 
-  @override
-  void dispose() {
-    for (var c in _controllers) c.dispose();
-    for (var f in _focusNodes) f.dispose();
-    super.dispose();
+  Future<bool> _loadUserProfile() async {
+    final userId = currentUserId;
+    if (userId == null) return false;
+    try {
+      final doc = await _firestore.collection('users').doc(userId).get();
+
+      if (doc.exists) {
+        final data = doc.data()!;
+        _userName = data['username'] as String?;
+        _displayName = data['display_name'] as String?;
+        _userBio = data['bio'] as String?;
+        _userPhotoUrl = data['avatar_base64'] as String? ?? data['avatar_url'] as String?;
+        _phoneNumber = data['phone'] as String? ?? _phoneNumber;
+        _email = data['email'] as String? ?? _email;
+        notifyListeners();
+        return true;
+      }
+      return false;
+    } catch (e) {
+      debugPrint('Profile load error: $e');
+      return false;
+    }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Color(0xFF0A0A0F),
-              Color(0xFF1a103c),
-              Color(0xFF0d1b2a),
-              Color(0xFF0A0A0F),
-            ],
-            stops: [0.0, 0.3, 0.7, 1.0],
-          ),
-        ),
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                GestureDetector(
-                  onTap: () => Navigator.pop(context),
-                  child: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.05),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: Colors.white.withOpacity(0.08),
-                      ),
-                    ),
-                    child: Icon(
-                      Icons.arrow_back_ios_new_rounded,
-                      color: Colors.white.withOpacity(0.7),
-                      size: 18,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 40),
+  void setMockPhone(String phone) {
+    _phoneNumber = phone;
+    notifyListeners();
+  }
 
-                ShaderMask(
-                  shaderCallback: (bounds) => const LinearGradient(
-                    colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
-                  ).createShader(bounds),
-                  child: Text(
-                    AppLocalizations.get('verify_number'),
-                    style: const TextStyle(
-                      fontSize: 32,
-                      fontWeight: FontWeight.w900,
-                      color: Colors.white,
-                      height: 1.2,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
+  Future<void> createMockUser() async {
+    final prefs = await SharedPreferences.getInstance();
+    _mockUserId = 'mock_${DateTime.now().millisecondsSinceEpoch}';
+    _isAuthenticated = true;
+    await prefs.setString('pending_mock_user_id', _mockUserId!);
+    await prefs.setString('pending_mock_phone', _phoneNumber ?? '');
+    await prefs.setString('mock_user_id', _mockUserId!);
 
-                RichText(
-                  text: TextSpan(
-                    style: TextStyle(
-                      fontSize: 15,
-                      color: Colors.white.withOpacity(0.5),
-                      height: 1.5,
-                    ),
-                    children: [
-                      TextSpan(text: AppLocalizations.get('enter_code_sent_to') + ' '),
-                      TextSpan(
-                        text: widget.phoneNumber,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 48),
+    try {
+      final settingsProvider = SettingsProvider();
+      settingsProvider.setMockUserId(_mockUserId);
+    } catch (e) {
+      debugPrint('SettingsProvider sync error: $e');
+    }
 
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: List.generate(6, (index) {
-                    return ClipRRect(
-                      borderRadius: BorderRadius.circular(16),
-                      child: BackdropFilter(
-                        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                        child: Container(
-                          width: 52,
-                          height: 64,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.05),
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(
-                              color: _focusNodes[index].hasFocus
-                                  ? const Color(0xFF8B5CF6).withOpacity(0.5)
-                                  : Colors.white.withOpacity(0.08),
-                              width: _focusNodes[index].hasFocus ? 2 : 1,
-                            ),
-                            boxShadow: _focusNodes[index].hasFocus
-                                ? [
-                                    BoxShadow(
-                                      color: const Color(0xFF8B5CF6).withOpacity(0.2),
-                                      blurRadius: 12,
-                                      spreadRadius: -2,
-                                    ),
-                                  ]
-                                : null,
-                          ),
-                          child: TextField(
-                            controller: _controllers[index],
-                            focusNode: _focusNodes[index],
-                            textAlign: TextAlign.center,
-                            keyboardType: TextInputType.number,
-                            inputFormatters: [
-                              FilteringTextInputFormatter.digitsOnly,
-                              LengthLimitingTextInputFormatter(1),
-                            ],
-                            maxLength: 1,
-                            style: const TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
-                            decoration: const InputDecoration(
-                              counterText: '',
-                              border: InputBorder.none,
-                              contentPadding: EdgeInsets.zero,
-                            ),
-                            onChanged: (v) => _onOtpDigitChanged(index, v),
-                          ),
-                        ),
-                      ),
-                    );
-                  }),
-                ),
-                const SizedBox(height: 40),
+    notifyListeners();
+  }
 
-                Center(
-                  child: _resendTimer > 0
-                      ? Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.03),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: Colors.white.withOpacity(0.06),
-                            ),
-                          ),
-                          child: Text(
-                            '${AppLocalizations.get('resend_code_in')} $_resendTimer seconds',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.white.withOpacity(0.4),
-                            ),
-                          ),
-                        )
-                      : GestureDetector(
-                          onTap: () => setState(() => _resendTimer = 60),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF8B5CF6).withOpacity(0.15),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: const Color(0xFF8B5CF6).withOpacity(0.3),
-                              ),
-                            ),
-                            child: Text(
-                              AppLocalizations.get('resend_code'),
-                              style: const TextStyle(
-                                color: Color(0xFF8B5CF6),
-                                fontWeight: FontWeight.w600,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ),
-                        ),
-                ),
-                const Spacer(),
+  /// ==================== SETUP PROFILE (FIXED) ====================
+  Future<bool> setupProfile({
+    required String username,
+    String? displayName,
+    String? bio,
+    String? photoUrl,
+    String? email,
+  }) async {
+    _setLoading(true);
+    try {
+      final userId = currentUserId ?? 'mock_${DateTime.now().millisecondsSinceEpoch}';
 
-                SizedBox(
-                  width: double.infinity,
-                  height: 56,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
-                      ),
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(0xFF8B5CF6).withOpacity(0.3),
-                          blurRadius: 20,
-                          offset: const Offset(0, 8),
-                        ),
-                      ],
-                    ),
-                    child: ElevatedButton(
-                      onPressed: _isLoading ? null : _verifyOTP,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.transparent,
-                        shadowColor: Colors.transparent,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                      ),
-                      child: _isLoading
-                          ? const SizedBox(
-                              width: 24,
-                              height: 24,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : Text(
-                              AppLocalizations.get('verify'),
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
-                                color: Colors.white,
-                              ),
-                            ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
+      if (_user == null && _mockUserId == null) {
+        _mockUserId = userId;
+      }
+
+      final now = DateTime.now().toIso8601String();
+      await _firestore.collection('users').doc(userId).set({
+        'id': userId,
+        'phone': _phoneNumber,
+        'email': email ?? _email,
+        'username': username,
+        'display_name': displayName ?? username,
+        'bio': bio ?? '',
+        'avatar_url': photoUrl,
+        'created_at': now,
+        'updated_at': now,
+      }, SetOptions(merge: true));
+
+      _userName = username;
+      _displayName = displayName ?? username;
+      _userBio = bio;
+      _userPhotoUrl = photoUrl;
+      _isAuthenticated = true;
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('mock_user_id', userId);
+      await prefs.setString('mock_phone', _phoneNumber ?? '');
+      await prefs.setString('mock_username', username);
+      await prefs.setString('mock_display_name', displayName ?? username);
+      await prefs.setString('mock_bio', bio ?? '');
+      await prefs.setString('mock_avatar', photoUrl ?? '');
+      await prefs.setString('mock_email', email ?? _email ?? '');
+
+      notifyListeners();
+      _setLoading(false);
+      return true;
+    } catch (e) {
+      _error = 'Profile setup failed: $e';
+      debugPrint('Profile setup error: $e');
+      _setLoading(false);
+      return false;
+    }
+  }
+
+  Future<bool> updateProfile({
+    String? username,
+    String? displayName,
+    String? bio,
+    String? photoUrl,
+  }) async {
+    _setLoading(true);
+    try {
+      final userId = currentUserId;
+      if (userId == null) {
+        _error = 'Not authenticated';
+        _setLoading(false);
+        return false;
+      }
+
+      final updates = <String, dynamic>{
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+      if (username != null) updates['username'] = username;
+      if (displayName != null) updates['display_name'] = displayName;
+      if (bio != null) updates['bio'] = bio;
+      if (photoUrl != null) updates['avatar_url'] = photoUrl;
+
+      await _firestore.collection('users').doc(userId).set(
+        updates,
+        SetOptions(merge: true),
+      );
+
+      if (username != null) _userName = username;
+      if (displayName != null) _displayName = displayName;
+      if (bio != null) _userBio = bio;
+      if (photoUrl != null) _userPhotoUrl = photoUrl;
+
+      final prefs = await SharedPreferences.getInstance();
+      if (username != null) await prefs.setString('mock_username', username);
+      if (displayName != null) await prefs.setString('mock_display_name', displayName);
+      if (bio != null) await prefs.setString('mock_bio', bio);
+      if (photoUrl != null) await prefs.setString('mock_avatar', photoUrl);
+
+      notifyListeners();
+      _setLoading(false);
+      return true;
+    } catch (e) {
+      _error = 'Update failed: $e';
+      _setLoading(false);
+      return false;
+    }
+  }
+
+  Future<bool> changePhoneNumber(String newPhone) async {
+    _setLoading(true);
+    try {
+      final userId = currentUserId;
+      if (userId == null) {
+        _error = 'Not authenticated';
+        _setLoading(false);
+        return false;
+      }
+
+      final existing = await checkPhoneExists(newPhone);
+      if (existing != null) {
+        _error = 'Phone number already in use';
+        _setLoading(false);
+        return false;
+      }
+
+      await _firestore.collection('users').doc(userId).update({
+        'phone': newPhone,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+
+      _phoneNumber = newPhone;
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('mock_phone', newPhone);
+
+      notifyListeners();
+      _setLoading(false);
+      return true;
+    } catch (e) {
+      _error = 'Change number failed: $e';
+      _setLoading(false);
+      return false;
+    }
+  }
+
+  Future<bool> changeEmail(String newEmail) async {
+    _setLoading(true);
+    try {
+      final userId = currentUserId;
+      if (userId == null) {
+        _error = 'Not authenticated';
+        _setLoading(false);
+        return false;
+      }
+
+      await _firestore.collection('users').doc(userId).update({
+        'email': newEmail,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+
+      _email = newEmail;
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('mock_email', newEmail);
+
+      notifyListeners();
+      _setLoading(false);
+      return true;
+    } catch (e) {
+      _error = 'Change email failed: $e';
+      _setLoading(false);
+      return false;
+    }
+  }
+
+  Future<void> signOut() async {
+    _setLoading(true);
+    try {
+      if (_user != null) {
+        await OnlineStatusService.setOffline();
+        await _auth.signOut();
+      }
+      await _clearAuth();
+    } catch (e) {
+      _error = 'Sign out failed: $e';
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  Future<void> _clearAuth() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('mock_user_id');
+    await prefs.remove('mock_phone');
+    await prefs.remove('mock_username');
+    await prefs.remove('mock_display_name');
+    await prefs.remove('mock_bio');
+    await prefs.remove('mock_avatar');
+    await prefs.remove('mock_email');
+    await prefs.remove('pending_mock_user_id');
+    await prefs.remove('pending_mock_phone');
+    await prefs.remove('pending_mock_username');
+    await prefs.remove('pending_mock_display_name');
+    await prefs.remove('pending_mock_bio');
+    await prefs.remove('pending_mock_avatar');
+    await prefs.remove('pending_mock_email');
+    await prefs.remove('email_otp_code');
+    await prefs.remove('email_otp_expiry');
+    await prefs.remove('verification_id');
+
+    _user = null;
+    _isAuthenticated = false;
+    _phoneNumber = null;
+    _email = null;
+    _userName = null;
+    _displayName = null;
+    _userBio = null;
+    _userPhotoUrl = null;
+    _mockUserId = null;
+    notifyListeners();
+  }
+
+  Future<bool> deleteAccount() async {
+    _setLoading(true);
+    try {
+      final userId = currentUserId;
+      if (userId == null) {
+        _error = 'Not authenticated';
+        _setLoading(false);
+        return false;
+      }
+
+      await _firestore.collection('messages').where('sender_id', isEqualTo: userId).get().then((snapshot) {
+        for (var doc in snapshot.docs) doc.reference.delete();
+      });
+      await _firestore.collection('chat_participants').where('user_id', isEqualTo: userId).get().then((snapshot) {
+        for (var doc in snapshot.docs) doc.reference.delete();
+      });
+      await _firestore.collection('user_settings').where('user_id', isEqualTo: userId).get().then((snapshot) {
+        for (var doc in snapshot.docs) doc.reference.delete();
+      });
+      await _firestore.collection('status_views').where('user_id', isEqualTo: userId).get().then((snapshot) {
+        for (var doc in snapshot.docs) doc.reference.delete();
+      });
+      await _firestore.collection('statuses').where('user_id', isEqualTo: userId).get().then((snapshot) {
+        for (var doc in snapshot.docs) doc.reference.delete();
+      });
+      await _firestore.collection('contacts').where('user_id', isEqualTo: userId).get().then((snapshot) {
+        for (var doc in snapshot.docs) doc.reference.delete();
+      });
+      await _firestore.collection('blocked_users').where('user_id', isEqualTo: userId).get().then((snapshot) {
+        for (var doc in snapshot.docs) doc.reference.delete();
+      });
+      await _firestore.collection('bots').where('creator_id', isEqualTo: userId).get().then((snapshot) {
+        for (var doc in snapshot.docs) doc.reference.delete();
+      });
+      await _firestore.collection('users').doc(userId).delete();
+
+      if (_user != null) {
+        await _auth.signOut();
+      }
+      await _clearAuth();
+      _setLoading(false);
+      return true;
+    } catch (e) {
+      _error = 'Account deletion failed: $e';
+      _setLoading(false);
+      return false;
+    }
+  }
+
+  void _setLoading(bool value) {
+    _isLoading = value;
+    notifyListeners();
+  }
+
+  void clearError() {
+    _error = null;
+    notifyListeners();
   }
 }
