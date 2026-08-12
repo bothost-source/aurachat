@@ -48,6 +48,77 @@ class SettingsProvider extends ChangeNotifier {
   bool _autoDownloadDocuments = false;
   bool _saveToGallery = true;
 
+  // =========================================================================
+  // APP LOCK TRACKING — ADDED
+  // =========================================================================
+  DateTime? _lastBackgroundTime;
+  bool _isLocked = false;
+
+  bool get isLocked => _isLocked;
+
+  /// Call this when app goes to background (paused/detached)
+  Future<void> onAppBackground() async {
+    // Only track if lock is actually configured
+    if (!_appPasscode && !_biometricLock) return;
+
+    final now = DateTime.now();
+    _lastBackgroundTime = now;
+    final prefs = await _prefs;
+    await prefs.setInt('last_background_time', now.millisecondsSinceEpoch);
+  }
+
+  /// Call this when app resumes — returns true if lock screen should show
+  Future<bool> shouldShowLockScreen() async {
+    // No lock configured
+    if (!_appPasscode && !_biometricLock) return false;
+
+    // Already locked (e.g. manually locked)
+    if (_isLocked) return true;
+
+    final prefs = await _prefs;
+    final lastBg = prefs.getInt('last_background_time');
+
+    // No background time recorded — app was killed or first launch
+    if (lastBg == null) {
+      // If lock is configured, lock on first open after fresh start too
+      _isLocked = true;
+      notifyListeners();
+      return true;
+    }
+
+    final lastBgTime = DateTime.fromMillisecondsSinceEpoch(lastBg);
+    final now = DateTime.now();
+    final diff = now.difference(lastBgTime).inMinutes;
+
+    if (diff >= _autoLockTimeout) {
+      _isLocked = true;
+      notifyListeners();
+      return true;
+    }
+
+    // Timeout not reached — clear background time, stay unlocked
+    await prefs.remove('last_background_time');
+    _lastBackgroundTime = null;
+    return false;
+  }
+
+  /// Call this after successful unlock (biometric or passcode)
+  Future<void> unlock() async {
+    _isLocked = false;
+    final prefs = await _prefs;
+    await prefs.remove('last_background_time');
+    notifyListeners();
+  }
+
+  /// For manual lock trigger
+  Future<void> lock() async {
+    _isLocked = true;
+    notifyListeners();
+  }
+  // =========================================================================
+  // END APP LOCK TRACKING
+  // =========================================================================
+
   // Getters
   bool get twoStepVerification => _twoStepVerification;
   bool get appPasscode => _appPasscode;
