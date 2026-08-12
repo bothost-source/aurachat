@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
@@ -31,6 +32,8 @@ class GroupInfoScreen extends StatefulWidget {
 class _GroupInfoScreenState extends State<GroupInfoScreen> {
   bool _isLoading = false;
   bool _isEditing = false;
+  String? _invitationLink;
+  String? _invitationCode;
 
   // Edit controllers
   final _editNameController = TextEditingController();
@@ -38,10 +41,117 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   String? _editPhotoUrl;
 
   @override
+  void initState() {
+    super.initState();
+    _loadInvitationLink();
+  }
+
+  @override
   void dispose() {
     _editNameController.dispose();
     _editDescriptionController.dispose();
     super.dispose();
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // INVITATION LINK
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  Future<void> _loadInvitationLink() async {
+    final preview = await InvitationService.getInvitationPreview(widget.chatId);
+    if (preview != null && mounted) {
+      setState(() {
+        _invitationLink = preview['link'] as String?;
+        _invitationCode = preview['code'] as String?;
+      });
+    }
+  }
+
+  Future<void> _copyLinkToClipboard() async {
+    if (_invitationLink == null || _invitationLink!.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No invitation link available')),
+      );
+      return;
+    }
+    await Clipboard.setData(ClipboardData(text: _invitationLink!));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Link copied to clipboard')),
+      );
+    }
+  }
+
+  Future<void> _copyCodeToClipboard() async {
+    if (_invitationCode == null || _invitationCode!.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No invitation code available')),
+      );
+      return;
+    }
+    await Clipboard.setData(ClipboardData(text: _invitationCode!));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Code copied to clipboard')),
+      );
+    }
+  }
+
+  Future<void> _regenerateLink() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1a103c),
+        title: const Text('Regenerate Link?', style: TextStyle(color: Colors.white)),
+        content: const Text(
+          'This will invalidate the current invitation link and create a new one. Anyone with the old link will no longer be able to join.',
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel', style: TextStyle(color: Colors.white.withOpacity(0.5))),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+            child: const Text('Regenerate'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() => _isLoading = true);
+
+    try {
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+      final createdBy = authProvider.user?.uid ?? authProvider.mockUserId ?? 'unknown';
+      final newLink = await InvitationService.regenerateLink(widget.chatId, createdBy);
+
+      if (newLink != null && mounted) {
+        await _loadInvitationLink();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Invitation link regenerated'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to regenerate link')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    } finally {
+      setState(() => _isLoading = false);
+    }
   }
 
   Future<void> _shareInvitationLink() async {
@@ -69,8 +179,9 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // FIX #15: Edit profile photo, name, and description
+  // EDIT PROFILE
   // ═══════════════════════════════════════════════════════════════════════════
+
   Future<void> _pickEditPhoto() async {
     final picker = ImagePicker();
     final pickedFile = await picker.pickImage(source: ImageSource.gallery);
@@ -83,7 +194,6 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
       final userId = authProvider.user?.uid ?? authProvider.mockUserId;
       if (userId == null) throw Exception('Not authenticated');
 
-      // FIX #14: Use permanent folder
       final imageUrl = await CloudinaryService.uploadImage(
         File(pickedFile.path),
         'aurachat/permanent/avatars/${widget.isChannel ? "channels" : "groups"}/$userId'
@@ -125,7 +235,6 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // Get current avatar before updating
       final chatDoc = await FirebaseFirestore.instance
           .collection('chats')
           .doc(widget.chatId)
@@ -142,7 +251,6 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
 
       if (_editPhotoUrl != null && _editPhotoUrl != oldAvatarUrl) {
         updates['avatar_url'] = _editPhotoUrl;
-        // Delete old avatar from Cloudinary
         await _deleteOldAvatar(oldAvatarUrl);
       }
 
@@ -178,14 +286,16 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     setState(() => _isEditing = false);
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // MEMBER MANAGEMENT
+  // ═══════════════════════════════════════════════════════════════════════════
+
   Future<void> _showMemberOptions(String memberId, String memberName, String memberRole, bool isMe, bool canManage) async {
     if (isMe) return;
     if (!canManage) return;
 
-    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
     final chatProvider = Provider.of<ChatProvider>(context, listen: false);
     final myRole = await _getMyRole();
-
     if (myRole == null) return;
 
     showModalBottomSheet(
@@ -387,6 +497,10 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     );
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // BUILD
+  // ═══════════════════════════════════════════════════════════════════════════
+
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuraAuthProvider>(context);
@@ -452,7 +566,6 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
           final participants = List<String>.from(data['participants'] ?? []);
           final memberCount = data['member_count'] ?? participants.length;
           final description = data['description'] ?? '';
-          final createdBy = data['created_by'] as String?;
           final createdByPhone = data['created_by_phone'] as String?;
           final myRole = (data['participants_data']?[userId]?['role'] ?? 'member') as String;
           final canManage = myRole == 'owner' || myRole == 'admin';
@@ -467,7 +580,6 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                 Center(
                   child: Column(
                     children: [
-                      // Avatar with edit overlay when editing
                       GestureDetector(
                         onTap: _isEditing ? _pickEditPhoto : null,
                         child: Stack(
@@ -491,7 +603,6 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                       ),
                       const SizedBox(height: 12),
 
-                      // Name - editable or display
                       if (_isEditing)
                         Container(
                           margin: const EdgeInsets.symmetric(horizontal: 32),
@@ -527,7 +638,6 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                           spacing: 6,
                         ),
 
-                      // Description - editable or display
                       if (_isEditing) ...[
                         const SizedBox(height: 12),
                         Container(
@@ -603,6 +713,216 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                     ],
                   ),
                 if (!_isEditing) const SizedBox(height: 24),
+
+                // INVITATION LINK SECTION
+                if (!_isEditing && _invitationLink != null && _invitationLink!.isNotEmpty) ...[
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF8B5CF6).withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFF8B5CF6).withOpacity(0.2)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.link, color: Color(0xFF8B5CF6), size: 18),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Invitation Link',
+                              style: TextStyle(
+                                color: const Color(0xFF8B5CF6).withOpacity(0.9),
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                            const Spacer(),
+                            if (canManage)
+                              GestureDetector(
+                                onTap: _isLoading ? null : _regenerateLink,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.orange.withOpacity(0.15),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                                  ),
+                                  child: _isLoading
+                                    ? const SizedBox(
+                                        width: 14,
+                                        height: 14,
+                                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.orange),
+                                      )
+                                    : const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.refresh, color: Colors.orange, size: 12),
+                                          SizedBox(width: 4),
+                                          Text(
+                                            'Regenerate',
+                                            style: TextStyle(
+                                              color: Colors.orange,
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        // Code display
+                        if (_invitationCode != null && _invitationCode!.isNotEmpty) ...[
+                          GestureDetector(
+                            onTap: _copyCodeToClipboard,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.white.withOpacity(0.06)),
+                              ),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF8B5CF6).withOpacity(0.15),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: const Text(
+                                      'CODE',
+                                      style: TextStyle(
+                                        color: Color(0xFF8B5CF6),
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.w700,
+                                        letterSpacing: 1,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(
+                                      _invitationCode!,
+                                      style: TextStyle(
+                                        color: Colors.white.withOpacity(0.9),
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w600,
+                                        fontFamily: 'monospace',
+                                        fontFamilyFallback: const ['Courier'],
+                                        letterSpacing: 1,
+                                      ),
+                                    ),
+                                  ),
+                                  const Icon(Icons.copy, color: Colors.white38, size: 16),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                        ],
+                        // Link display
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.white.withOpacity(0.06)),
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  _invitationLink!,
+                                  style: TextStyle(
+                                    color: Colors.white.withOpacity(0.8),
+                                    fontSize: 13,
+                                    fontFamily: 'monospace',
+                                    fontFamilyFallback: const ['Courier'],
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              GestureDetector(
+                                onTap: _copyLinkToClipboard,
+                                child: Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF8B5CF6).withOpacity(0.15),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: const Icon(Icons.copy, color: Color(0xFF8B5CF6), size: 18),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: GestureDetector(
+                                onTap: _shareInvitationLink,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(vertical: 10),
+                                  decoration: BoxDecoration(
+                                    gradient: const LinearGradient(
+                                      colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
+                                    ),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: const Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(Icons.share, color: Colors.white, size: 16),
+                                      SizedBox(width: 6),
+                                      Text(
+                                        'Share Link',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            GestureDetector(
+                              onTap: _copyLinkToClipboard,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.05),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: Colors.white.withOpacity(0.1)),
+                                ),
+                                child: const Text(
+                                  'Copy',
+                                  style: TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                ],
 
                 // Settings preview (if admin)
                 if (canManage && !_isEditing) ...[
@@ -831,7 +1151,6 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                             final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
                             final currentUserId = authProvider.user?.uid ?? authProvider.mockUserId;
 
-                            // Check if user allows being added to groups
                             final userDoc = await FirebaseFirestore.instance
                                 .collection('users')
                                 .doc(user['id'])
@@ -858,8 +1177,6 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                                       ElevatedButton(
                                         onPressed: () async {
                                           Navigator.pop(context);
-
-                                          // 1. Get or create invitation link
                                           final preview = await InvitationService.getInvitationPreview(widget.chatId);
                                           String link = preview?['link'] ?? '';
 
@@ -875,7 +1192,6 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
 
                                           if (!context.mounted) return;
 
-                                          // 2. CONFIRMATION DIALOG - Ask before sending
                                           final shouldSend = await showDialog<bool>(
                                             context: context,
                                             builder: (context) => AlertDialog(
@@ -901,14 +1217,11 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
 
                                           if (shouldSend != true) return;
 
-                                          // 3. Open DM with this user
                                           final dmChat = await chatProvider.startDirectChat(user['id']);
 
                                           if (dmChat != null && context.mounted) {
-                                            // 4. Get rich preview data for Telegram-style card
                                             final previewData = await InvitationService.getChatPreviewData(widget.chatId);
 
-                                            // 5. Send rich preview message
                                             await FirebaseFirestore.instance
                                                 .collection('chats')
                                                 .doc(dmChat['id'])
@@ -934,7 +1247,6 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                                               'is_edited': false,
                                             });
 
-                                            // 6. Update last message
                                             await FirebaseFirestore.instance
                                                 .collection('chats')
                                                 .doc(dmChat['id'])
@@ -943,7 +1255,6 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                                               'last_message_at': FieldValue.serverTimestamp(),
                                             });
 
-                                            // 7. Navigate to the DM
                                             Navigator.pushNamed(
                                               context,
                                               '/chat',
@@ -970,7 +1281,6 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                               return;
                             }
 
-                            // Add user to group directly
                             await FirebaseFirestore.instance
                                 .collection('chats')
                                 .doc(widget.chatId)
@@ -983,7 +1293,6 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                               'member_count': FieldValue.increment(1),
                             });
 
-                            // Add system message
                             await FirebaseFirestore.instance
                                 .collection('chats')
                                 .doc(widget.chatId)
