@@ -732,6 +732,8 @@ class AuraAuthProvider extends ChangeNotifier {
     await prefs.remove('email_otp_code');
     await prefs.remove('email_otp_expiry');
     await prefs.remove('verification_id');
+    await prefs.remove('email_verified_complete');
+
 
     _user = null;
     _isAuthenticated = false;
