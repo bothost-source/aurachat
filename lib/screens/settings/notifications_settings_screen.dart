@@ -51,10 +51,12 @@ class _NotificationsSettingsScreenState extends State<NotificationsSettingsScree
     }
 
     try {
-      await _previewPlayer.play(AssetSource(filePath));
+     await _previewPlayer.setAudioSource(AudioSource.asset(filePath));
+     await _previewPlayer.play(); 
       setState(() => _isPlaying = true);
 
-      _previewPlayer.onPlayerComplete.listen((_) {
+      _previewPlayer.playerStateStream.listen((state) {
+        if (state.processingState == ProcessingState.completed) {
         if (mounted) setState(() => _isPlaying = false);
       });
     } catch (e) {
