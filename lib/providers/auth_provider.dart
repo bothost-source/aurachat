@@ -451,11 +451,13 @@ class AuraAuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// ==================== SETUP PROFILE (FIXED) ====================
   Future<bool> setupProfile({
     required String username,
     String? displayName,
     String? bio,
     String? photoUrl,
+    String? email,
   }) async {
     _setLoading(true);
     try {
@@ -469,7 +471,7 @@ class AuraAuthProvider extends ChangeNotifier {
       await _firestore.collection('users').doc(userId).set({
         'id': userId,
         'phone': _phoneNumber,
-        'email': _email,
+        'email': email ?? _email,
         'username': username,
         'display_name': displayName ?? username,
         'bio': bio ?? '',
@@ -491,7 +493,7 @@ class AuraAuthProvider extends ChangeNotifier {
       await prefs.setString('mock_display_name', displayName ?? username);
       await prefs.setString('mock_bio', bio ?? '');
       await prefs.setString('mock_avatar', photoUrl ?? '');
-      await prefs.setString('mock_email', _email ?? '');
+      await prefs.setString('mock_email', email ?? _email ?? '');
 
       notifyListeners();
       _setLoading(false);
