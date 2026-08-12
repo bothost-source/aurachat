@@ -68,7 +68,8 @@ class StatusService {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // FIXED: Get statuses from saved contacts + user's own status (works for mock users)
+  // FIXED: Get statuses from saved contacts + user's own status
+  // Uses simple query + client-side filtering to avoid composite index issues
   // ═══════════════════════════════════════════════════════════════════════════
   static Future<List<Map<String, dynamic>>> getContactStatuses(String userId) async {
     try {
@@ -86,23 +87,29 @@ class StatusService {
       if (allUserIds.isEmpty) return [];
 
       final statuses = <Map<String, dynamic>>[];
-      final now = Timestamp.now();
+      final now = DateTime.now();
 
+      // Fetch in batches of 10 (Firestore whereIn limit)
       for (int i = 0; i < allUserIds.length; i += 10) {
         final batch = allUserIds.sublist(
           i,
           i + 10 > allUserIds.length ? allUserIds.length : i + 10,
         );
 
+        // FIXED: Simple query without orderBy to avoid composite index requirement
+        // We sort client-side instead
         final snapshot = await _firestore
             .collection('statuses')
             .where('user_id', whereIn: batch)
-            .where('expires_at', isGreaterThan: now)
-            .orderBy('created_at', descending: true)
             .get();
 
         for (final doc in snapshot.docs) {
           final data = doc.data();
+          final expiresAt = (data['expires_at'] as Timestamp?)?.toDate();
+          
+          // Client-side expiry check
+          if (expiresAt == null || expiresAt.isBefore(now)) continue;
+
           final statusUserId = data['user_id'] as String;
 
           // Get user info
@@ -189,10 +196,10 @@ class StatusService {
   static Future<List<Map<String, dynamic>>> getActiveStatuses() async {
     try {
       final now = Timestamp.now();
+      // FIXED: Simple query, client-side filter for user data
       final snapshot = await _firestore
           .collection('statuses')
           .where('expires_at', isGreaterThan: now)
-          .orderBy('expires_at', descending: true)
           .get();
 
       final statuses = <Map<String, dynamic>>[];
@@ -214,6 +221,13 @@ class StatusService {
         });
       }
 
+      // Sort client-side
+      statuses.sort((a, b) {
+        final aTime = (a['created_at'] as Timestamp).toDate();
+        final bTime = (b['created_at'] as Timestamp).toDate();
+        return bTime.compareTo(aTime);
+      });
+
       return statuses;
     } catch (e) {
       print('Get statuses error: $e');
@@ -222,20 +236,34 @@ class StatusService {
   }
 
   // Get my statuses — works for both Firebase and mock users
+  // FIXED: Simple query without composite index
   static Future<List<Map<String, dynamic>>> getMyStatuses(String userId) async {
     try {
-      final now = Timestamp.now();
       final snapshot = await _firestore
           .collection('statuses')
           .where('user_id', isEqualTo: userId)
-          .where('expires_at', isGreaterThan: now)
-          .orderBy('created_at', descending: true)
           .get();
 
-      return snapshot.docs.map((doc) => {
-        'id': doc.id,
-        ...doc.data(),
-      }).toList();
+      final now = DateTime.now();
+      final statuses = snapshot.docs
+          .map((doc) => {
+            'id': doc.id,
+            ...doc.data(),
+          })
+          .where((s) {
+            final expiresAt = (s['expires_at'] as Timestamp?)?.toDate();
+            return expiresAt != null && expiresAt.isAfter(now);
+          })
+          .toList();
+
+      // Sort client-side
+      statuses.sort((a, b) {
+        final aTime = (a['created_at'] as Timestamp).toDate();
+        final bTime = (b['created_at'] as Timestamp).toDate();
+        return bTime.compareTo(aTime);
+      });
+
+      return statuses;
     } catch (e) {
       print('Get my statuses error: $e');
       return [];
