@@ -32,13 +32,10 @@ class AuraAuthProvider extends ChangeNotifier {
   String? get userBio => _userBio;
   String? get userPhotoUrl => _userPhotoUrl;
 
-  // FIX: Added mockUserId getter — screens expect this
   String? get mockUserId => _mockUserId;
 
-  // FIX: currentUserId works for both real and mock users
   String? get currentUserId => _user?.uid ?? _mockUserId;
 
-  // FIX: Public setter for mock user ID (used by mock OTP flow)
   set mockUserId(String? value) {
     _mockUserId = value;
     notifyListeners();
@@ -59,7 +56,6 @@ class AuraAuthProvider extends ChangeNotifier {
         await _loadUserProfile();
         await OnlineStatusService.setOnline();
       } else {
-        // Check for saved mock user session
         final prefs = await SharedPreferences.getInstance();
         _mockUserId = prefs.getString('mock_user_id');
         if (_mockUserId != null) {
@@ -81,8 +77,6 @@ class AuraAuthProvider extends ChangeNotifier {
     }
   }
 
-  // FIX: New method - fetch any user's public profile by ID
-  // Use this in chat_screen, search_screen, etc. to get real names
   Future<Map<String, dynamic>?> getUserProfile(String userId) async {
     try {
       final doc = await _firestore.collection('users').doc(userId).get();
@@ -124,7 +118,7 @@ class AuraAuthProvider extends ChangeNotifier {
     }
   }
 
-  /// ==================== LOGIN EXISTING USER ====================
+  /// ==================== LOGIN EXISTING USER (ENFORCES EMAIL OTP) ====================
   Future<bool> loginExistingUser(String phone) async {
     _setLoading(true);
     try {
@@ -142,39 +136,141 @@ class AuraAuthProvider extends ChangeNotifier {
         return false;
       }
 
-      // Set mock user for phone-based auth
-      _mockUserId = userId;
       _phoneNumber = phone;
       _email = userData['email'] as String?;
       _userName = userData['username'] as String?;
       _displayName = userData['display_name'] as String?;
       _userBio = userData['bio'] as String?;
       _userPhotoUrl = userData['avatar_url'] as String?;
-      _isAuthenticated = true;
+      _mockUserId = userId;
 
-      // Save session
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('mock_user_id', userId);
-      await prefs.setString('mock_phone', phone);
-      await prefs.setString('mock_username', _userName ?? '');
-      await prefs.setString('mock_display_name', _displayName ?? '');
-      await prefs.setString('mock_bio', _userBio ?? '');
-      await prefs.setString('mock_avatar', _userPhotoUrl ?? '');
-      await prefs.setString('mock_email', _email ?? '');
+      await prefs.setString('pending_mock_user_id', userId);
+      await prefs.setString('pending_mock_phone', phone);
+      await prefs.setString('pending_mock_username', _userName ?? '');
+      await prefs.setString('pending_mock_display_name', _displayName ?? '');
+      await prefs.setString('pending_mock_bio', _userBio ?? '');
+      await prefs.setString('pending_mock_avatar', _userPhotoUrl ?? '');
+      await prefs.setString('pending_mock_email', _email ?? '');
 
-      // Sync mock user to SettingsProvider for privacy settings
-      try {
-        final settingsProvider = SettingsProvider();
-        settingsProvider.setMockUserId(userId);
-      } catch (e) {
-        debugPrint('SettingsProvider sync error: $e');
+      final isEmailVerified = userData['email_verified'] == true;
+      if (isEmailVerified) {
+        await _completeLogin(prefs);
       }
 
-      notifyListeners();
       _setLoading(false);
       return true;
     } catch (e) {
       _error = 'Login failed: $e';
+      _setLoading(false);
+      return false;
+    }
+  }
+
+  /// Complete login after email verification
+  Future<void> _completeLogin(SharedPreferences prefs) async {
+    _isAuthenticated = true;
+
+    await prefs.setString('mock_user_id', _mockUserId!);
+    await prefs.setString('mock_phone', _phoneNumber ?? '');
+    await prefs.setString('mock_username', _userName ?? '');
+    await prefs.setString('mock_display_name', _displayName ?? '');
+    await prefs.setString('mock_bio', _userBio ?? '');
+    await prefs.setString('mock_avatar', _userPhotoUrl ?? '');
+    await prefs.setString('mock_email', _email ?? '');
+
+    await prefs.remove('pending_mock_user_id');
+    await prefs.remove('pending_mock_phone');
+    await prefs.remove('pending_mock_username');
+    await prefs.remove('pending_mock_display_name');
+    await prefs.remove('pending_mock_bio');
+    await prefs.remove('pending_mock_avatar');
+    await prefs.remove('pending_mock_email');
+
+    try {
+      final settingsProvider = SettingsProvider();
+      settingsProvider.setMockUserId(_mockUserId!);
+    } catch (e) {
+      debugPrint('SettingsProvider sync error: $e');
+    }
+
+    notifyListeners();
+  }
+
+  /// ==================== SEND EMAIL OTP ====================
+  Future<bool> sendEmailOtp() async {
+    _setLoading(true);
+    try {
+      if (_email == null || _mockUserId == null) {
+        _error = 'No email available';
+        _setLoading(false);
+        return false;
+      }
+
+      final otp = (100000 + DateTime.now().millisecond * 900000 ~/ 1000).toString().padLeft(6, '0');
+      final expiry = DateTime.now().add(const Duration(minutes: 10));
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('email_otp_code', otp);
+      await prefs.setString('email_otp_expiry', expiry.toIso8601String());
+
+      debugPrint('EMAIL OTP FOR $_email: $otp');
+
+      _setLoading(false);
+      return true;
+    } catch (e) {
+      _error = 'Failed to send OTP: $e';
+      _setLoading(false);
+      return false;
+    }
+  }
+
+  /// ==================== VERIFY EMAIL OTP ====================
+  Future<bool> verifyEmailOtp(String otpCode) async {
+    _setLoading(true);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final pendingUserId = prefs.getString('pending_mock_user_id');
+      final storedOtp = prefs.getString('email_otp_code');
+      final otpExpiry = prefs.getString('email_otp_expiry');
+
+      if (pendingUserId == null || _mockUserId == null) {
+        _error = 'No pending login';
+        _setLoading(false);
+        return false;
+      }
+
+      if (storedOtp == null || otpExpiry == null) {
+        _error = 'No OTP sent. Request a new code.';
+        _setLoading(false);
+        return false;
+      }
+
+      final expiry = DateTime.parse(otpExpiry);
+      if (DateTime.now().isAfter(expiry)) {
+        _error = 'OTP expired. Request a new code.';
+        _setLoading(false);
+        return false;
+      }
+
+      if (otpCode != storedOtp) {
+        _error = 'Invalid OTP code';
+        _setLoading(false);
+        return false;
+      }
+
+      await _firestore.collection('users').doc(pendingUserId).update({
+        'email_verified': true,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+
+      await _completeLogin(prefs);
+      await OnlineStatusService.setOnline();
+
+      _setLoading(false);
+      return true;
+    } catch (e) {
+      _error = 'Email verification failed: $e';
       _setLoading(false);
       return false;
     }
@@ -345,7 +441,6 @@ class AuraAuthProvider extends ChangeNotifier {
     _isAuthenticated = true;
     await prefs.setString('mock_user_id', _mockUserId!);
 
-    // Sync mock user to SettingsProvider for privacy settings
     try {
       final settingsProvider = SettingsProvider();
       settingsProvider.setMockUserId(_mockUserId);
@@ -458,7 +553,6 @@ class AuraAuthProvider extends ChangeNotifier {
     }
   }
 
-  /// ==================== CHANGE NUMBER ====================
   Future<bool> changePhoneNumber(String newPhone) async {
     _setLoading(true);
     try {
@@ -469,7 +563,6 @@ class AuraAuthProvider extends ChangeNotifier {
         return false;
       }
 
-      // Check if new phone is already taken
       final existing = await checkPhoneExists(newPhone);
       if (existing != null) {
         _error = 'Phone number already in use';
@@ -477,7 +570,6 @@ class AuraAuthProvider extends ChangeNotifier {
         return false;
       }
 
-      // Update in Firestore
       await _firestore.collection('users').doc(userId).update({
         'phone': newPhone,
         'updated_at': DateTime.now().toIso8601String(),
@@ -485,7 +577,6 @@ class AuraAuthProvider extends ChangeNotifier {
 
       _phoneNumber = newPhone;
 
-      // Update local prefs
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('mock_phone', newPhone);
 
@@ -499,7 +590,6 @@ class AuraAuthProvider extends ChangeNotifier {
     }
   }
 
-  /// ==================== CHANGE EMAIL ====================
   Future<bool> changeEmail(String newEmail) async {
     _setLoading(true);
     try {
@@ -510,7 +600,6 @@ class AuraAuthProvider extends ChangeNotifier {
         return false;
       }
 
-      // Update in Firestore
       await _firestore.collection('users').doc(userId).update({
         'email': newEmail,
         'updated_at': DateTime.now().toIso8601String(),
@@ -518,7 +607,6 @@ class AuraAuthProvider extends ChangeNotifier {
 
       _email = newEmail;
 
-      // Update local prefs
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('mock_email', newEmail);
 
@@ -532,7 +620,6 @@ class AuraAuthProvider extends ChangeNotifier {
     }
   }
 
-  /// ==================== SIGN OUT ====================
   Future<void> signOut() async {
     _setLoading(true);
     try {
@@ -550,7 +637,23 @@ class AuraAuthProvider extends ChangeNotifier {
 
   Future<void> _clearAuth() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.clear();
+    await prefs.remove('mock_user_id');
+    await prefs.remove('mock_phone');
+    await prefs.remove('mock_username');
+    await prefs.remove('mock_display_name');
+    await prefs.remove('mock_bio');
+    await prefs.remove('mock_avatar');
+    await prefs.remove('mock_email');
+    await prefs.remove('pending_mock_user_id');
+    await prefs.remove('pending_mock_phone');
+    await prefs.remove('pending_mock_username');
+    await prefs.remove('pending_mock_display_name');
+    await prefs.remove('pending_mock_bio');
+    await prefs.remove('pending_mock_avatar');
+    await prefs.remove('pending_mock_email');
+    await prefs.remove('email_otp_code');
+    await prefs.remove('email_otp_expiry');
+    await prefs.remove('verification_id');
 
     _user = null;
     _isAuthenticated = false;
