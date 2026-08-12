@@ -118,9 +118,11 @@ class ChatProvider extends ChangeNotifier {
         final deletedFor = List<String>.from(chat['deleted_for'] ?? []);
         if (deletedFor.contains(userId)) continue;
 
+        // Get participants list ONCE here so it's available everywhere in this loop
+        final participants = List<String>.from(chat['participants'] ?? []);
+
         // Skip blocked DMs
         if (chatType == 'direct') {
-          final participants = List<String>.from(chat['participants'] ?? []);
           final otherUserId = participants.firstWhere(
             (id) => id != userId,
             orElse: () => '',
@@ -138,7 +140,7 @@ class ChatProvider extends ChangeNotifier {
         // Get unread count
         final unreadCount = await _getUnreadCount(chatId, userId);
 
-        // Get member count
+        // Get member count — FIXED: participants is now in scope
         int participantsCount = 0;
         if (chatType == 'group' || chatType == 'channel') {
           participantsCount = participants.length;
