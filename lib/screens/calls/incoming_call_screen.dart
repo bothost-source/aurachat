@@ -49,13 +49,15 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
           break;
       }
 
-      await _audioPlayer.setReleaseMode(ReleaseMode.loop);
-      await _audioPlayer.play(AssetSource(assetPath));
+      await _audioPlayer.setLoopMode(LoopMode.all);
+      await _audioPlayer.setAudioSource(AudioSource.asset(assetPath));
+      await _audioPlayer.play();
     } catch (e) {
       debugPrint('Ringtone error: $e');
       try {
         await _audioPlayer.setReleaseMode(ReleaseMode.loop);
-        await _audioPlayer.play(AssetSource('assets/audio/ringtone_default.mp3'));
+        await _audioPlayer.setAudioSource(AudioSource.asset('assets/audio/ringtone_default.mp3'));
+        await _audioPlayer.play();
       } catch (_) {}
     }
   }
