@@ -1,400 +1,457 @@
+import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:share_plus/share_plus.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:intl/intl.dart';
+import 'package:just_audio/just_audio.dart';
+import 'package:video_player/video_player.dart';
+import 'package:record/record.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:photo_view/photo_view.dart';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
-import '../../providers/chat_provider.dart';
-import '../../services/invitation_service.dart';
+import '../../services/cloudinary_service.dart';
 import '../../utils/verified_badge.dart';
+import '../../widgets/custom_emoji_picker.dart';
 
-class ChannelInfoScreen extends StatefulWidget {
-  final String chatId;
-  final String chatName;
-  final String? chatAvatar;
+class ChannelChatScreen extends StatefulWidget {
+  final String channelId;
+  final String channelName;
 
-  const ChannelInfoScreen({
+  const ChannelChatScreen({
     super.key,
-    required this.chatId,
-    required this.chatName,
-    this.chatAvatar,
+    required this.channelId,
+    required this.channelName,
   });
 
   @override
-  State<ChannelInfoScreen> createState() => _ChannelInfoScreenState();
+  State<ChannelChatScreen> createState() => _ChannelChatScreenState();
 }
 
-class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
+class _ChannelChatScreenState extends State<ChannelChatScreen> {
+  final _messageController = TextEditingController();
+  final _editController = TextEditingController();
+  final _scrollController = ScrollController();
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  final Record _audioRecorder = Record();
+
   bool _isLoading = false;
+  bool _showEmojiPicker = false;
+  File? _selectedImage;
+  File? _selectedVideo;
+  String? _recordingPath;
+  bool _isRecording = false;
+  int _recordingSeconds = 0;
+  Timer? _recordingTimer;
 
-  Future<void> _shareInvitationLink() async {
-    final preview = await InvitationService.getInvitationPreview(widget.chatId);
-    if (preview == null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No active invitation link')),
-        );
-      }
-      return;
-    }
+  String? _channelAvatarUrl;
+  String? _channelDescription;
+  String? _channelLink;
 
-    final chatName = preview['chat_name'] ?? 'Unknown';
-    final memberCount = preview['member_count'] ?? 0;
-    final link = preview['link'] ?? '';
+  bool _isPlayingAudio = false;
+  String? _currentlyPlayingAudioId;
+  Duration _audioDuration = Duration.zero;
+  Duration _audioPosition = Duration.zero;
 
-    final text = 'Join $chatName on AURA Chat!\n\n'
-        'Channel\n'
-        'Members: $memberCount\n\n'
-        'Tap to join: $link';
+  String? _editingMessageId;
+  String? _replyingTo;
+  String? _replyingToContent;
+  String? _replyingToSender;
 
-    await Share.share(text);
+  static const Color _bgDark = Color(0xFF0A0A0F);
+  static const Color _bgCard = Color(0xFF1a103c);
+  static const Color _purple = Color(0xFF8B5CF6);
+  static const Color _cyan = Color(0xFF06B6D4);
+
+  Stream<QuerySnapshot> get _messagesStream => FirebaseFirestore.instance
+      .collection('chats')
+      .doc(widget.channelId)
+      .collection('messages')
+      .orderBy('created_at', descending: true)
+      .snapshots();
+
+  @override
+  void initState() {
+    super.initState();
+    _initAudioPlayer();
+    _loadChannelInfo();
   }
 
-  void _startCall({required bool video}) {
-    Navigator.pushNamed(context, '/call_screen', arguments: {
-      'chatId': widget.chatId,
-      'chatName': widget.chatName,
-      'isVideo': video,
-      'isGroup': true,
+  void _initAudioPlayer() {
+    _audioPlayer.durationStream.listen((d) {
+      if (mounted && d != null) setState(() => _audioDuration = d);
+    });
+    _audioPlayer.positionStream.listen((p) {
+      if (mounted) setState(() => _audioPosition = p);
+    });
+    _audioPlayer.playerStateStream.listen((state) {
+      if (mounted) {
+        setState(() => _isPlayingAudio = state.playing);
+        if (state.processingState == ProcessingState.completed) {
+          setState(() {
+            _currentlyPlayingAudioId = null;
+            _audioPosition = Duration.zero;
+          });
+        }
+      }
     });
   }
 
-  Future<void> _showAddMembersDialog() async {
-    final searchController = TextEditingController();
-    List<Map<String, dynamic>> searchResults = [];
-    List<Map<String, dynamic>> selectedUsers = [];
-
-    await showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF1a103c),
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (context) => StatefulBuilder(
-        builder: (context, setModalState) {
-          return Container(
-            padding: const EdgeInsets.all(16),
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(context).size.height * 0.8,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'Add Members',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: searchController,
-                  style: const TextStyle(color: Colors.white),
-                  decoration: InputDecoration(
-                    hintText: 'Search by username or phone...',
-                    hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
-                    prefixIcon: const Icon(Icons.search, color: Colors.white54),
-                    filled: true,
-                    fillColor: Colors.white.withOpacity(0.05),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                  onChanged: (query) async {
-                    if (query.isEmpty) {
-                      setModalState(() => searchResults = []);
-                      return;
-                    }
-                    final results = await _searchUsers(query);
-                    setModalState(() => searchResults = results);
-                  },
-                ),
-                const SizedBox(height: 16),
-                if (selectedUsers.isNotEmpty) ...[
-                  SizedBox(
-                    height: 80,
-                    child: ListView.builder(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: selectedUsers.length,
-                      itemBuilder: (context, index) {
-                        final user = selectedUsers[index];
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: Column(
-                            children: [
-                              Stack(
-                                children: [
-                                  _buildMemberAvatar(user['avatar_url'], user['username']),
-                                  Positioned(
-                                    top: 0,
-                                    right: 0,
-                                    child: GestureDetector(
-                                      onTap: () {
-                                        setModalState(() {
-                                          selectedUsers.removeWhere((u) => u['id'] == user['id']);
-                                        });
-                                      },
-                                      child: Container(
-                                        padding: const EdgeInsets.all(2),
-                                        decoration: const BoxDecoration(
-                                          color: Colors.red,
-                                          shape: BoxShape.circle,
-                                        ),
-                                        child: const Icon(Icons.close, size: 12, color: Colors.white),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                user['username'] ?? 'Unknown',
-                                style: const TextStyle(fontSize: 11, color: Colors.white70),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                ],
-                Expanded(
-                  child: searchResults.isEmpty
-                    ? Center(
-                        child: Text(
-                          searchController.text.isEmpty
-                            ? 'Type to search users'
-                            : 'No users found',
-                          style: TextStyle(color: Colors.white.withOpacity(0.3)),
-                        ),
-                      )
-                    : ListView.builder(
-                        itemCount: searchResults.length,
-                        itemBuilder: (context, index) {
-                          final user = searchResults[index];
-                          final isSelected = selectedUsers.any((u) => u['id'] == user['id']);
-                          return ListTile(
-                            leading: _buildMemberAvatar(user['avatar_url'], user['username']),
-                            title: Text(
-                              user['username'] ?? 'Unknown',
-                              style: const TextStyle(color: Colors.white),
-                            ),
-                            subtitle: Text(
-                              user['phone'] ?? '',
-                              style: TextStyle(color: Colors.white.withOpacity(0.4)),
-                            ),
-                            trailing: isSelected
-                              ? const Icon(Icons.check_circle, color: Color(0xFF8B5CF6))
-                              : const Icon(Icons.add_circle_outline, color: Colors.white54),
-                            onTap: () {
-                              setModalState(() {
-                                if (isSelected) {
-                                  selectedUsers.removeWhere((u) => u['id'] == user['id']);
-                                } else {
-                                  selectedUsers.add(user);
-                                }
-                              });
-                            },
-                          );
-                        },
-                      ),
-                ),
-                const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: selectedUsers.isEmpty
-                      ? null
-                      : () async {
-                          Navigator.pop(context);
-                          await _addMembers(selectedUsers);
-                        },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF8B5CF6),
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: Text(
-                      'Add ${selectedUsers.length} Member${selectedUsers.length > 1 ? 's' : ''}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Future<List<Map<String, dynamic>>> _searchUsers(String query) async {
-    try {
-      final firestore = FirebaseFirestore.instance;
-      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
-      final currentUserId = authProvider.user?.uid ?? authProvider.mockUserId;
-
-      final snapshot = await firestore
-          .collection('users')
-          .where('username', isGreaterThanOrEqualTo: query)
-          .where('username', isLessThanOrEqualTo: '$query\uf8ff')
-          .limit(20)
-          .get();
-
-      return snapshot.docs
-          .map((doc) => {'id': doc.id, ...doc.data()})
-          .where((u) => u['id'] != currentUserId)
-          .toList();
-    } catch (e) {
-      debugPrint('Search error: $e');
-      return [];
+  Future<void> _loadChannelInfo() async {
+    final doc = await FirebaseFirestore.instance
+        .collection('chats')
+        .doc(widget.channelId)
+        .get();
+    if (doc.exists && mounted) {
+      final data = doc.data()!;
+      setState(() {
+        _channelAvatarUrl = data['avatar_url'] as String?;
+        _channelDescription = data['description'] as String?;
+        _channelLink = data['invitation_link'] as String?;
+      });
     }
   }
 
-  Future<void> _addMembers(List<Map<String, dynamic>> users) async {
+  Future<void> _sendMessage({String? text, String? mediaUrl, String? mediaType, String? fileName, String? fileSize, int? duration}) async {
+    final content = text ?? _messageController.text.trim();
+    if (content.isEmpty && mediaUrl == null && _selectedImage == null && _selectedVideo == null && _recordingPath == null) return;
+
+    setState(() => _isLoading = true);
+
     try {
-      final firestore = FirebaseFirestore.instance;
-      final chatRef = firestore.collection('chats').doc(widget.chatId);
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+      final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+      if (userId == null) throw Exception('Not authenticated');
 
-      final blockedUsers = <Map<String, dynamic>>[];
-      final addedUsers = <Map<String, dynamic>>[];
+      final userDoc = await FirebaseFirestore.instance.collection('users').doc(userId).get();
+      final userData = userDoc.data() ?? {};
+      final senderName = userData['display_name'] ?? userData['username'] ?? userData['name'] ?? 'Admin';
+      final senderAvatar = userData['avatar_url'];
 
-      for (final user in users) {
-        final userId = user['id'] as String;
-        final userDoc = await firestore.collection('users').doc(userId).get();
-        final privacy = userDoc.data()?['privacy_settings'] as Map<String, dynamic>?;
-        final allowAddToGroup = privacy?['allow_add_to_group'] ?? true;
+      // Upload media if selected
+      String? uploadedUrl;
+      String? finalMediaType = mediaType;
+      String? finalFileName = fileName;
+      String? finalFileSize = fileSize;
+      int? finalDuration = duration;
 
-        if (!allowAddToGroup) {
-          blockedUsers.add(user);
-        } else {
-          addedUsers.add(user);
-          await chatRef.update({
-            'participants': FieldValue.arrayUnion([userId]),
-            'participants_data.$userId': {
-              'role': 'member',
-              'joined_at': FieldValue.serverTimestamp(),
-            },
-            'member_count': FieldValue.increment(1),
-          });
-
-          await firestore.collection('users').doc(userId).collection('notifications').add({
-            'type': 'added_to_channel',
-            'chat_id': widget.chatId,
-            'chat_name': widget.chatName,
-            'timestamp': FieldValue.serverTimestamp(),
-            'read': false,
-          });
-        }
+      if (_selectedImage != null) {
+        uploadedUrl = await CloudinaryService.uploadImage(_selectedImage!, 'aurachat/channels/${widget.channelId}');
+        finalMediaType = 'image';
+      } else if (_selectedVideo != null) {
+        uploadedUrl = await CloudinaryService.uploadVideo(_selectedVideo!, 'aurachat/channels/${widget.channelId}');
+        finalMediaType = 'video';
+        finalFileName = _selectedVideo!.path.split('/').last;
+      } else if (_recordingPath != null) {
+        final file = File(_recordingPath!);
+        uploadedUrl = await CloudinaryService.uploadAudio(file, 'aurachat/channels/${widget.channelId}');
+        finalMediaType = 'audio';
+        finalDuration = _recordingSeconds;
       }
 
-      if (mounted) {
-        if (addedUsers.isNotEmpty) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Added ${addedUsers.length} member(s)'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
-
-        if (blockedUsers.isNotEmpty) {
-          _showBlockedUsersDialog(blockedUsers);
-        }
+      if ((_selectedImage != null || _selectedVideo != null || _recordingPath != null) && uploadedUrl == null) {
+        throw Exception('Media upload failed');
       }
+
+      final messageRef = FirebaseFirestore.instance
+          .collection('chats')
+          .doc(widget.channelId)
+          .collection('messages')
+          .doc();
+
+      await messageRef.set({
+        'id': messageRef.id,
+        'text': content.isNotEmpty ? content : null,
+        'content': content.isNotEmpty ? content : null,
+        'media_url': uploadedUrl ?? mediaUrl,
+        'media_type': finalMediaType,
+        'file_name': finalFileName,
+        'file_size': finalFileSize,
+        'duration': finalDuration,
+        'sender_id': userId,
+        'sender_name': senderName,
+        'sender_avatar': senderAvatar,
+        'reply_to': _replyingTo,
+        'reply_to_content': _replyingToContent,
+        'reply_to_sender': _replyingToSender,
+        'created_at': FieldValue.serverTimestamp(),
+        'is_edited': false,
+        'deleted_for_everyone': false,
+        'reactions': {},
+      });
+
+      await FirebaseFirestore.instance
+          .collection('chats')
+          .doc(widget.channelId)
+          .update({
+        'last_message': content.isNotEmpty ? content : (finalMediaType == 'image' ? '📷 Image' : finalMediaType == 'video' ? '🎥 Video' : finalMediaType == 'audio' ? '🎤 Voice' : '📎 File'),
+        'last_message_at': FieldValue.serverTimestamp(),
+        'last_message_type': finalMediaType ?? 'text',
+      });
+
+      _messageController.clear();
+      setState(() {
+        _selectedImage = null;
+        _selectedVideo = null;
+        _recordingPath = null;
+        _replyingTo = null;
+        _replyingToContent = null;
+        _replyingToSender = null;
+      });
     } catch (e) {
-      debugPrint('Add members error: $e');
+      _showError('Failed to send: $e');
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _editMessage(String messageId, String newContent) async {
+    if (newContent.trim().isEmpty) return;
+    try {
+      await FirebaseFirestore.instance
+          .collection('chats')
+          .doc(widget.channelId)
+          .collection('messages')
+          .doc(messageId)
+          .update({
+        'text': newContent.trim(),
+        'content': newContent.trim(),
+        'is_edited': true,
+        'updated_at': FieldValue.serverTimestamp(),
+      });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to add members: $e')),
+          const SnackBar(content: Text('Message edited')),
+        );
+      }
+    } catch (e) {
+      _showError('Edit failed: $e');
+    }
+  }
+
+  Future<void> _deleteMessageForEveryone(String messageId) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('chats')
+          .doc(widget.channelId)
+          .collection('messages')
+          .doc(messageId)
+          .update({
+        'deleted_for_everyone': true,
+        'text': 'This message was deleted',
+        'content': 'This message was deleted',
+        'media_url': null,
+        'updated_at': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      _showError('Delete failed: $e');
+    }
+  }
+
+  Future<void> _pinMessage(String messageId) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('chats')
+          .doc(widget.channelId)
+          .collection('pinned_messages')
+          .doc(messageId)
+          .set({
+        'message_id': messageId,
+        'pinned_at': FieldValue.serverTimestamp(),
+        'pinned_by': Provider.of<AuraAuthProvider>(context, listen: false).user?.uid,
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Message pinned')),
+        );
+      }
+    } catch (e) {
+      _showError('Pin failed: $e');
+    }
+  }
+
+  Future<void> _toggleReaction(String messageId, String emoji) async {
+    try {
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+      final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+      if (userId == null) return;
+
+      final messageRef = FirebaseFirestore.instance
+          .collection('chats')
+          .doc(widget.channelId)
+          .collection('messages')
+          .doc(messageId);
+
+      final doc = await messageRef.get();
+      if (!doc.exists) return;
+
+      final reactions = Map<String, dynamic>.from(doc.data()?['reactions'] ?? {});
+      final users = List<String>.from(reactions[emoji] ?? []);
+
+      if (users.contains(userId)) {
+        users.remove(userId);
+        if (users.isEmpty) {
+          reactions.remove(emoji);
+        } else {
+          reactions[emoji] = users;
+        }
+      } else {
+        users.add(userId);
+        reactions[emoji] = users;
+      }
+
+      await messageRef.update({'reactions': reactions});
+    } catch (e) {
+      debugPrint('Reaction error: $e');
+    }
+  }
+
+  // ==================== MEDIA PICKING ====================
+
+  Future<void> _pickImage() async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
+    if (picked != null) setState(() => _selectedImage = File(picked.path));
+  }
+
+  Future<void> _takePhoto() async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(source: ImageSource.camera, imageQuality: 80);
+    if (picked != null) setState(() => _selectedImage = File(picked.path));
+  }
+
+  Future<void> _pickVideo() async {
+    final picker = ImagePicker();
+    final picked = await picker.pickVideo(source: ImageSource.gallery);
+    if (picked != null) setState(() => _selectedVideo = File(picked.path));
+  }
+
+  Future<void> _recordVideo() async {
+    final picker = ImagePicker();
+    final picked = await picker.pickVideo(source: ImageSource.camera);
+    if (picked != null) setState(() => _selectedVideo = File(picked.path));
+  }
+
+  Future<void> _pickFile() async {
+    final result = await FilePicker.platform.pickFiles(allowMultiple: false, withData: true);
+    if (result != null && result.files.isNotEmpty) {
+      final file = result.files.first;
+      if (file.path != null) {
+        await _sendMessage(
+          text: '📎 ${file.name}',
+          mediaUrl: null,
+          mediaType: 'file',
+          fileName: file.name,
+          fileSize: _formatFileSize(file.size),
         );
       }
     }
   }
 
-  void _showBlockedUsersDialog(List<Map<String, dynamic>> blockedUsers) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1a103c),
-        title: const Text('Cannot Add Users', style: TextStyle(color: Colors.white)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'These users have disabled being added to groups/channels:',
-              style: TextStyle(color: Colors.white.withOpacity(0.7)),
-            ),
-            const SizedBox(height: 12),
-            ...blockedUsers.map((user) => Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: Row(
-                children: [
-                  _buildMemberAvatar(user['avatar_url'], user['username']),
-                  const SizedBox(width: 8),
-                  Text(
-                    user['username'] ?? 'Unknown',
-                    style: const TextStyle(color: Colors.white),
-                  ),
-                ],
-              ),
-            )),
-            const SizedBox(height: 16),
-            const Text(
-              'Send them the invitation link instead.',
-              style: TextStyle(color: Colors.orange, fontSize: 13),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: TextStyle(color: Colors.white.withOpacity(0.5))),
-          ),
-          ElevatedButton.icon(
-            onPressed: () {
-              Navigator.pop(context);
-              _shareInvitationLink();
-            },
-            icon: const Icon(Icons.share, size: 16),
-            label: const Text('Send Link'),
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF8B5CF6)),
-          ),
-        ],
-      ),
+  // ==================== VOICE RECORDING ====================
+
+  Future<void> _startRecording() async {
+    final hasPermission = await _audioRecorder.hasPermission();
+    if (!hasPermission) {
+      _showError('Microphone permission required');
+      return;
+    }
+    final dir = await getTemporaryDirectory();
+    final path = '${dir.path}/voice_note_${DateTime.now().millisecondsSinceEpoch}.m4a';
+    await _audioRecorder.start(path: path, encoder: AudioEncoder.aacLc);
+    setState(() {
+      _isRecording = true;
+      _recordingPath = path;
+      _recordingSeconds = 0;
+    });
+    _recordingTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() => _recordingSeconds++);
+    });
+  }
+
+  Future<void> _stopRecordingAndSend() async {
+    _recordingTimer?.cancel();
+    final path = await _audioRecorder.stop();
+    setState(() => _isRecording = false);
+    if (path != null) {
+      await _sendMessage();
+      setState(() => _recordingPath = null);
+    }
+  }
+
+  Future<void> _cancelRecording() async {
+    _recordingTimer?.cancel();
+    await _audioRecorder.stop();
+    if (_recordingPath != null) {
+      final file = File(_recordingPath!);
+      if (await file.exists()) await file.delete();
+    }
+    setState(() {
+      _isRecording = false;
+      _recordingPath = null;
+      _recordingSeconds = 0;
+    });
+  }
+
+  // ==================== AUDIO PLAYBACK ====================
+
+  Future<void> _playAudio(String messageId, String audioUrl) async {
+    if (_currentlyPlayingAudioId == messageId) {
+      if (_isPlayingAudio) {
+        await _audioPlayer.pause();
+      } else {
+        await _audioPlayer.play();
+      }
+    } else {
+      await _audioPlayer.stop();
+      await _audioPlayer.setUrl(audioUrl);
+      await _audioPlayer.play();
+      setState(() {
+        _currentlyPlayingAudioId = messageId;
+        _audioPosition = Duration.zero;
+      });
+    }
+  }
+
+  // ==================== HELPERS ====================
+
+  String _formatFileSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  String _formatTime(Timestamp? timestamp) {
+    if (timestamp == null) return '';
+    return DateFormat('HH:mm').format(timestamp.toDate());
+  }
+
+  String _formatDuration(int seconds) {
+    final m = (seconds ~/ 60).toString().padLeft(2, '0');
+    final s = (seconds % 60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
+  void _showError(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), backgroundColor: Colors.red),
     );
   }
 
-  Future<void> _showMemberOptions(String memberId, String memberName, String memberRole, bool isMe, bool canManage) async {
-    if (isMe) return;
-    if (!canManage) return;
+  // ==================== MESSAGE OPTIONS ====================
 
-    final chatProvider = Provider.of<ChatProvider>(context, listen: false);
-    final myRole = await _getMyRole();
-    if (myRole == null) return;
+  void _showMessageOptions(Map<String, dynamic> msg, bool isMe) {
+    final isDeleted = msg['deleted_for_everyone'] == true;
+    final messageId = msg['id'] as String?;
+    if (messageId == null) return;
 
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFF1a103c),
+      backgroundColor: _bgCard,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (context) => Container(
         padding: const EdgeInsets.all(16),
@@ -403,23 +460,158 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
           children: [
             Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(2))),
             const SizedBox(height: 16),
-            Text(memberName, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 16),
-            if (myRole == 'owner' && memberRole == 'member')
-              ListTile(
-                leading: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: const Color(0xFF8B5CF6).withOpacity(0.2), shape: BoxShape.circle), child: const Icon(Icons.admin_panel_settings, color: Color(0xFF8B5CF6))),
-                title: const Text('Promote to Admin', style: TextStyle(color: Colors.white)),
-                onTap: () { Navigator.pop(context); chatProvider.promoteToAdmin(widget.chatId, memberId); },
+            if (!isDeleted) ...[
+              // Quick reactions
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: ['❤️', '👍', '🔥', '😂', '😮', '🎉'].map((emoji) {
+                    return GestureDetector(
+                      onTap: () {
+                        Navigator.pop(context);
+                        _toggleReaction(messageId, emoji);
+                      },
+                      child: Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 6),
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(color: Colors.white.withOpacity(0.05), borderRadius: BorderRadius.circular(12)),
+                        child: Text(emoji, style: const TextStyle(fontSize: 24)),
+                      ),
+                    );
+                  }).toList(),
+                ),
               ),
-            ListTile(
-              leading: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.orange.withOpacity(0.2), shape: BoxShape.circle), child: const Icon(Icons.remove_circle, color: Colors.orange)),
-              title: const Text('Kick', style: TextStyle(color: Colors.white)),
-              onTap: () { Navigator.pop(context); _confirmKick(memberId, memberName); },
-            ),
-            ListTile(
-              leading: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.red.withOpacity(0.2), shape: BoxShape.circle), child: const Icon(Icons.block, color: Colors.red)),
-              title: const Text('Ban', style: TextStyle(color: Colors.red)),
-              onTap: () { Navigator.pop(context); _confirmBan(memberId, memberName); },
+              const Divider(color: Colors.white10),
+              if (isMe) ...[
+                ListTile(
+                  leading: const Icon(Icons.edit, color: _purple),
+                  title: const Text('Edit', style: TextStyle(color: Colors.white)),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _showEditDialog(messageId, msg['text'] ?? msg['content'] ?? '');
+                  },
+                ),
+              ],
+              ListTile(
+                leading: const Icon(Icons.push_pin, color: Colors.orange),
+                title: const Text('Pin', style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pinMessage(messageId);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.reply, color: _cyan),
+                title: const Text('Reply', style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(context);
+                  setState(() {
+                    _replyingTo = messageId;
+                    _replyingToContent = msg['text'] ?? msg['content'] ?? 'Media';
+                    _replyingToSender = msg['sender_name'] ?? 'Unknown';
+                  });
+                },
+              ),
+            ],
+            if (isMe) ...[
+              ListTile(
+                leading: const Icon(Icons.delete_forever, color: Colors.red),
+                title: const Text('Delete for Everyone', style: TextStyle(color: Colors.red)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _confirmDelete(messageId);
+                },
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showEditDialog(String messageId, String currentContent) {
+    _editController.text = currentContent;
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: _bgCard,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Edit Message', style: TextStyle(color: Colors.white)),
+        content: TextField(
+          controller: _editController,
+          maxLines: null,
+          style: const TextStyle(color: Colors.white),
+          decoration: InputDecoration(
+            hintText: 'Edit your message...',
+            hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+            filled: true,
+            fillColor: Colors.white.withOpacity(0.05),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: TextStyle(color: Colors.white.withOpacity(0.5))),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _editMessage(messageId, _editController.text);
+            },
+            child: const Text('Save', style: TextStyle(color: _purple)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmDelete(String messageId) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: _bgCard,
+        title: const Text('Delete for Everyone?', style: TextStyle(color: Colors.white)),
+        content: const Text('This will delete the message for all subscribers.', style: TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: Text('Cancel', style: TextStyle(color: Colors.white.withOpacity(0.5)))),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _deleteMessageForEveryone(messageId);
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showAttachmentMenu() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: _bgCard,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(2))),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 16,
+              runSpacing: 16,
+              alignment: WrapAlignment.center,
+              children: [
+                _buildAttachmentButton(icon: Icons.photo, label: 'Gallery', onTap: () { Navigator.pop(context); _pickImage(); }),
+                _buildAttachmentButton(icon: Icons.camera_alt, label: 'Camera', onTap: () { Navigator.pop(context); _takePhoto(); }),
+                _buildAttachmentButton(icon: Icons.videocam, label: 'Video', onTap: () { Navigator.pop(context); _pickVideo(); }),
+                _buildAttachmentButton(icon: Icons.videocam_off, label: 'Record', onTap: () { Navigator.pop(context); _recordVideo(); }),
+                _buildAttachmentButton(icon: Icons.insert_drive_file, label: 'File', onTap: () { Navigator.pop(context); _pickFile(); }),
+              ],
             ),
           ],
         ),
@@ -427,85 +619,21 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
     );
   }
 
-  Future<String?> _getMyRole() async {
-    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
-    final userId = authProvider.user?.uid ?? authProvider.mockUserId;
-    if (userId == null) return null;
-
-    final doc = await FirebaseFirestore.instance.collection('chats').doc(widget.chatId).get();
-    if (!doc.exists) return null;
-
-    final data = doc.data()!;
-    return (data['participants_data']?[userId]?['role'] ?? 'member') as String;
-  }
-
-  void _confirmKick(String memberId, String memberName) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1a103c),
-        title: Text('Kick $memberName?', style: const TextStyle(color: Colors.white)),
-        content: const Text('They will be removed from this channel.', style: TextStyle(color: Colors.white70)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: Text('Cancel', style: TextStyle(color: Colors.white.withOpacity(0.5)))),
-          ElevatedButton(
-            onPressed: () { Navigator.pop(context); Provider.of<ChatProvider>(context, listen: false).kickMember(widget.chatId, memberId); },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
-            child: const Text('Kick'),
-          ),
+  Widget _buildAttachmentButton({required IconData icon, required String label, required VoidCallback onTap}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: _purple.withOpacity(0.2), shape: BoxShape.circle), child: Icon(icon, color: _purple)),
+          const SizedBox(height: 8),
+          Text(label, style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.7))),
         ],
       ),
     );
   }
 
-  void _confirmBan(String memberId, String memberName) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1a103c),
-        title: Text('Ban $memberName?', style: const TextStyle(color: Colors.white)),
-        content: const Text('They will be removed and banned from rejoining.', style: TextStyle(color: Colors.white70)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: Text('Cancel', style: TextStyle(color: Colors.white.withOpacity(0.5)))),
-          ElevatedButton(
-            onPressed: () { Navigator.pop(context); Provider.of<ChatProvider>(context, listen: false).banMember(widget.chatId, memberId); },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Ban'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showSettings(String currentRole) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF1a103c),
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (context) => ChannelSettingsSheet(chatId: widget.chatId, currentRole: currentRole),
-    );
-  }
-
-  Future<void> _leaveChannel() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1a103c),
-        title: const Text('Leave Channel?', style: TextStyle(color: Colors.white)),
-        content: const Text('You will no longer receive messages from this channel.', style: TextStyle(color: Colors.white70)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: Text('Cancel', style: TextStyle(color: Colors.white.withOpacity(0.5)))),
-          ElevatedButton(onPressed: () => Navigator.pop(context, true), style: ElevatedButton.styleFrom(backgroundColor: Colors.red), child: const Text('Leave')),
-        ],
-      ),
-    );
-
-    if (confirmed == true) {
-      await Provider.of<ChatProvider>(context, listen: false).leaveChat(widget.chatId);
-      if (mounted) Navigator.pop(context);
-    }
-  }
+  // ==================== BUILD ====================
 
   @override
   Widget build(BuildContext context) {
@@ -513,343 +641,494 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
     final userId = authProvider.user?.uid ?? authProvider.mockUserId;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0A0A0F),
-      appBar: AppBar(
-        title: const Text('Channel Info'),
-        backgroundColor: const Color(0xFF0A0A0F),
-        elevation: 0,
-        actions: [
-          StreamBuilder<DocumentSnapshot>(
-            stream: FirebaseFirestore.instance.collection('chats').doc(widget.chatId).snapshots(),
-            builder: (context, snapshot) {
-              if (!snapshot.hasData) return const SizedBox.shrink();
-              final data = snapshot.data!.data() as Map<String, dynamic>?;
-              final myRole = (data?['participants_data']?[userId]?['role'] ?? 'member') as String;
-              final canManage = myRole == 'owner' || myRole == 'admin';
-              final isOwner = myRole == 'owner';
-
-              return Row(
-                children: [
-                  if (isOwner || myRole == 'admin') ...[
-                    IconButton(
-                      icon: const Icon(Icons.videocam, color: Colors.white70),
-                      onPressed: () => _startCall(video: true),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.call, color: Colors.white70),
-                      onPressed: () => _startCall(video: false),
-                    ),
-                  ],
-                  if (canManage)
-                    IconButton(
-                      icon: const Icon(Icons.person_add, color: Colors.white70),
-                      onPressed: () => _showAddMembersDialog(),
-                    ),
-                  IconButton(
-                    icon: const Icon(Icons.share, color: Colors.white70),
-                    onPressed: _shareInvitationLink,
-                  ),
-                  if (canManage)
-                    IconButton(
-                      icon: const Icon(Icons.settings, color: Colors.white70),
-                      onPressed: () => _showSettings(myRole),
-                    ),
-                ],
-              );
-            },
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [_bgDark, _bgCard, Color(0xFF0f172a)],
           ),
-        ],
-      ),
-      body: StreamBuilder<DocumentSnapshot>(
-        stream: FirebaseFirestore.instance.collection('chats').doc(widget.chatId).snapshots(),
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator(color: Color(0xFF8B5CF6)));
-
-          final data = snapshot.data!.data() as Map<String, dynamic>;
-          final participants = List<String>.from(data['participants'] ?? []);
-          final memberCount = data['member_count'] ?? participants.length;
-          final description = data['description'] ?? '';
-          final createdByPhone = data['created_by_phone'] as String?;
-          final myRole = (data['participants_data']?[userId]?['role'] ?? 'member') as String;
-          final canManage = myRole == 'owner' || myRole == 'admin';
-          final isOwner = myRole == 'owner';
-
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Column(
-                    children: [
-                      _buildAvatar(data['avatar_url']),
-                      const SizedBox(height: 12),
-                      VerifiedUsername(
-                        username: data['name'] ?? 'Unknown',
-                        phoneNumber: createdByPhone,
-                        style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
-                        badgeSize: 16,
-                        spacing: 6,
-                      ),
-                      if (description.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        Text(description, textAlign: TextAlign.center, style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 14)),
-                      ],
-                      const SizedBox(height: 4),
-                      Text('$memberCount members \u2022 Channel', style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 13)),
-                    ],
-                  ),
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              // Header with channel avatar from Firestore
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.03),
+                  border: Border(bottom: BorderSide(color: Colors.white.withOpacity(0.08))),
                 ),
-                const SizedBox(height: 24),
-
-                Row(
+                child: Row(
                   children: [
-                    Expanded(child: _buildActionButton(icon: Icons.share, label: 'Invite', onTap: _shareInvitationLink)),
+                    IconButton(
+                      icon: const Icon(Icons.arrow_back, color: Colors.white),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                    // FIX: Channel avatar from Firestore
+                    _channelAvatarUrl != null && _channelAvatarUrl!.isNotEmpty
+                      ? CircleAvatar(
+                          radius: 20,
+                          backgroundImage: NetworkImage(_channelAvatarUrl!),
+                          onBackgroundImageError: (_, __) {},
+                        )
+                      : CircleAvatar(
+                          radius: 20,
+                          backgroundColor: _purple.withOpacity(0.2),
+                          child: const Icon(Icons.campaign, color: _purple, size: 20),
+                        ),
                     const SizedBox(width: 12),
-                    Expanded(child: _buildActionButton(icon: Icons.exit_to_app, label: 'Leave', color: Colors.red, onTap: _leaveChannel)),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            widget.channelName,
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 16),
+                          ),
+                          Text(
+                            'Channel',
+                            style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.more_vert, color: Colors.white70),
+                      onPressed: () {
+                        Navigator.pushNamed(context, '/channel_info', arguments: {
+                          'chatId': widget.channelId,
+                          'chatName': widget.channelName,
+                          'chatAvatar': _channelAvatarUrl,
+                        });
+                      },
+                    ),
                   ],
                 ),
-                const SizedBox(height: 24),
+              ),
 
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.03),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: Colors.white.withOpacity(0.06)),
-                  ),
-                  child: Column(
-                    children: [
-                      _buildInfoRow(icon: Icons.campaign, label: 'Channel Type', value: 'Broadcast'),
-                      _buildInfoRow(icon: Icons.admin_panel_settings, label: 'Messaging', value: 'Admin-only'),
-                      _buildInfoRow(icon: Icons.visibility, label: 'Members can', value: 'View only'),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 24),
-
-                if (canManage) ...[
-                  Text('Settings', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: const Color(0xFF8B5CF6).withOpacity(0.8), letterSpacing: 1)),
-                  const SizedBox(height: 12),
-                  _buildSettingsPreview(data),
-                  const SizedBox(height: 24),
-                ],
-
-                Text('Members ($memberCount)', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: const Color(0xFF8B5CF6).withOpacity(0.8), letterSpacing: 1)),
-                const SizedBox(height: 12),
-
-                FutureBuilder<List<Map<String, dynamic>>>(
-                  future: Future.wait(participants.map((uid) async {
-                    final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
-                    final userData = doc.data() ?? {};
-                    final role = (data['participants_data']?[uid]?['role'] ?? 'member') as String;
-                    return {'uid': uid, ...userData, 'role': role};
-                  })),
+              // Messages
+              Expanded(
+                child: StreamBuilder<QuerySnapshot>(
+                  stream: _messagesStream,
                   builder: (context, snapshot) {
-                    if (!snapshot.hasData) return const Center(child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator(color: Color(0xFF8B5CF6))));
+                    if (snapshot.hasError) {
+                      return Center(child: Text('Error: ${snapshot.error}', style: const TextStyle(color: Colors.white70)));
+                    }
+                    if (!snapshot.hasData) {
+                      return const Center(child: CircularProgressIndicator(color: _purple));
+                    }
 
-                    final users = snapshot.data!;
-                    users.sort((a, b) {
-                      final roleOrder = {'owner': 0, 'admin': 1, 'member': 2};
-                      return (roleOrder[a['role']] ?? 3).compareTo(roleOrder[b['role']] ?? 3);
-                    });
+                    final messages = snapshot.data!.docs;
 
-                    return Column(
-                      children: users.map((user) {
-                        final uid = user['uid'] as String;
-                        final isMe = uid == userId;
-                        final role = user['role'] as String;
+                    if (messages.isEmpty) {
+                      return Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.campaign_outlined, size: 64, color: Colors.white.withOpacity(0.2)),
+                            const SizedBox(height: 16),
+                            Text('No messages yet', style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 16)),
+                          ],
+                        ),
+                      );
+                    }
 
-                        return ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: _buildMemberAvatar(user['avatar_url'], user['username']),
-                          title: Row(
-                            children: [
-                              Flexible(child: Text(user['username'] ?? 'Unknown', style: const TextStyle(color: Colors.white), overflow: TextOverflow.ellipsis)),
-                              if (isMe) Padding(padding: const EdgeInsets.only(left: 8), child: Text('(You)', style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 12))),
-                            ],
+                    return ListView.builder(
+                      reverse: true,
+                      controller: _scrollController,
+                      padding: const EdgeInsets.all(16),
+                      itemCount: messages.length,
+                      itemBuilder: (context, index) {
+                        final msg = messages[index].data() as Map<String, dynamic>;
+                        msg['id'] = messages[index].id;
+                        final isMe = msg['sender_id'] == userId;
+                        final isDeleted = msg['deleted_for_everyone'] == true;
+                        final hasImage = msg['image_url'] != null || msg['media_url'] != null;
+                        final mediaType = msg['media_type'] as String?;
+                        final reactions = Map<String, dynamic>.from(msg['reactions'] ?? {});
+
+                        return GestureDetector(
+                          onLongPress: () => _showMessageOptions(msg, isMe),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Container(
+                              margin: const EdgeInsets.only(bottom: 12),
+                              constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.85),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.05),
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: Colors.white.withOpacity(0.08)),
+                              ),
+                              padding: const EdgeInsets.all(12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  // Sender row
+                                  Row(
+                                    children: [
+                                      _buildMessageAvatar(msg['sender_avatar'], msg['sender_name']),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          msg['sender_name'] ?? 'Admin',
+                                          style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 13, fontWeight: FontWeight.w600),
+                                        ),
+                                      ),
+                                      Text(
+                                        _formatTime(msg['created_at'] as Timestamp?),
+                                        style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 11),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+
+                                  // Reply indicator
+                                  if (msg['reply_to'] != null)
+                                    Container(
+                                      margin: const EdgeInsets.only(bottom: 8),
+                                      padding: const EdgeInsets.all(8),
+                                      decoration: BoxDecoration(
+                                        color: Colors.black.withOpacity(0.2),
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: const Border(left: BorderSide(color: _purple, width: 3)),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(msg['reply_to_sender'] ?? 'Unknown', style: const TextStyle(color: _purple, fontSize: 11, fontWeight: FontWeight.w600)),
+                                          const SizedBox(height: 2),
+                                          Text(msg['reply_to_content'] ?? '', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.5))),
+                                        ],
+                                      ),
+                                    ),
+
+                                  // Media content
+                                  if (isDeleted)
+                                    Text('This message was deleted', style: TextStyle(color: Colors.white.withOpacity(0.4), fontStyle: FontStyle.italic))
+                                  else if (mediaType == 'image' && hasImage)
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: GestureDetector(
+                                        onTap: () => _showImageViewer(msg['media_url'] ?? msg['image_url']),
+                                        child: CachedNetworkImage(
+                                          imageUrl: msg['media_url'] ?? msg['image_url'],
+                                          fit: BoxFit.cover,
+                                          placeholder: (_, __) => Container(height: 200, color: Colors.white.withOpacity(0.1), child: const Center(child: CircularProgressIndicator(color: _purple))),
+                                        ),
+                                      ),
+                                    )
+                                  else if (mediaType == 'video' && hasImage)
+                                    _buildVideoThumbnail(msg['media_url'] ?? msg['image_url'])
+                                  else if (mediaType == 'audio')
+                                    _buildVoiceNote(msg['id'], msg['media_url'] ?? msg['image_url'], msg['duration'] as int?)
+                                  else if (mediaType == 'file')
+                                    _buildFileMessage(msg['content'] ?? msg['text'] ?? 'File', msg['file_name'], msg['file_size'])
+                                  else
+                                    Text(msg['text'] ?? msg['content'] ?? '', style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.4)),
+
+                                  // Reactions
+                                  if (reactions.isNotEmpty)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 8),
+                                      child: Wrap(
+                                        spacing: 4,
+                                        children: reactions.entries.map((entry) {
+                                          final emoji = entry.key;
+                                          final count = (entry.value as List).length;
+                                          return Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                            decoration: BoxDecoration(color: _bgCard, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white.withOpacity(0.1))),
+                                            child: Text('$emoji ${count > 1 ? count : ''}', style: const TextStyle(fontSize: 12)),
+                                          );
+                                        }).toList(),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
                           ),
-                          subtitle: Text(
-                            role == 'owner' ? 'Owner' : role == 'admin' ? 'Admin' : 'Subscriber',
-                            style: TextStyle(color: role == 'owner' ? Colors.amber : role == 'admin' ? const Color(0xFF8B5CF6) : Colors.white54, fontSize: 12),
-                          ),
-                          trailing: !isMe && canManage && role != 'owner'
-                            ? IconButton(icon: const Icon(Icons.more_vert, color: Colors.white54), onPressed: () => _showMemberOptions(uid, user['username'] ?? 'Unknown', role, isMe, canManage))
-                            : null,
-                          onTap: () {
-                            if (!isMe) {
-                              Navigator.pushNamed(context, '/public_profile', arguments: {
-                                'userId': uid, 'username': user['username'], 'avatarUrl': user['avatar_url'], 'bio': user['bio'],
-                              });
-                            }
-                          },
                         );
-                      }).toList(),
+                      },
                     );
                   },
                 ),
-              ],
-            ),
-          );
-        },
+              ),
+
+              // Reply indicator
+              if (_replyingTo != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  color: _bgCard,
+                  child: Row(
+                    children: [
+                      Container(width: 3, height: 36, decoration: BoxDecoration(color: _purple, borderRadius: BorderRadius.circular(2))),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(_replyingToSender ?? 'Unknown', style: const TextStyle(color: _purple, fontSize: 12, fontWeight: FontWeight.w600)),
+                            Text(_replyingToContent ?? '', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12)),
+                          ],
+                        ),
+                      ),
+                      IconButton(icon: const Icon(Icons.close, size: 16, color: Colors.white70), onPressed: () => setState(() { _replyingTo = null; _replyingToContent = null; _replyingToSender = null; })),
+                    ],
+                  ),
+                ),
+
+              // Selected media preview
+              if (_selectedImage != null)
+                _buildMediaPreview('Image', () => setState(() => _selectedImage = null))
+              else if (_selectedVideo != null)
+                _buildMediaPreview('Video', () => setState(() => _selectedVideo = null)),
+
+              // Recording indicator
+              if (_isRecording)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  color: Colors.red.withOpacity(0.15),
+                  child: SafeArea(
+                    child: Row(
+                      children: [
+                        Container(width: 10, height: 10, decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle)),
+                        const SizedBox(width: 12),
+                        Text('Recording ${_formatDuration(_recordingSeconds)}', style: const TextStyle(color: Colors.red, fontWeight: FontWeight.w600)),
+                        const Spacer(),
+                        GestureDetector(
+                          onTap: _cancelRecording,
+                          child: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.red.withOpacity(0.2), shape: BoxShape.circle), child: const Icon(Icons.delete, color: Colors.red, size: 20)),
+                        ),
+                        const SizedBox(width: 12),
+                        GestureDetector(
+                          onTap: _stopRecordingAndSend,
+                          child: Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), decoration: BoxDecoration(gradient: const LinearGradient(colors: [_purple, _cyan]), borderRadius: BorderRadius.circular(20)), child: const Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.send, color: Colors.white, size: 16), SizedBox(width: 4), Text('Send', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600))])),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+              // Emoji picker
+              if (_showEmojiPicker)
+                CustomEmojiPicker(
+                  onEmojiSelected: (emoji) => setState(() => _messageController.text += emoji),
+                  onClose: () => setState(() => _showEmojiPicker = false),
+                ),
+
+              // Input area
+              FutureBuilder<DocumentSnapshot>(
+                future: FirebaseFirestore.instance.collection('chats').doc(widget.channelId).get(),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) return const SizedBox.shrink();
+                  final chatData = snapshot.data!.data() as Map<String, dynamic>?;
+                  final myRole = (chatData?['participants_data']?[userId]?['role'] ?? 'member') as String;
+                  final canPost = myRole == 'owner' || myRole == 'admin';
+
+                  if (!canPost) {
+                    return Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      color: Colors.white.withOpacity(0.03),
+                      child: Center(child: Text('Only admins can post in this channel', style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 13))),
+                    );
+                  }
+
+                  return Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.03),
+                      border: Border(top: BorderSide(color: Colors.white.withOpacity(0.08))),
+                    ),
+                    child: SafeArea(
+                      child: Row(
+                        children: [
+                          IconButton(icon: const Icon(Icons.add, color: Colors.white70), onPressed: _showAttachmentMenu),
+                          IconButton(
+                            icon: Icon(_showEmojiPicker ? Icons.keyboard : Icons.emoji_emotions_outlined, color: Colors.white70),
+                            onPressed: () => setState(() => _showEmojiPicker = !_showEmojiPicker),
+                          ),
+                          Expanded(
+                            child: Container(
+                              decoration: BoxDecoration(color: Colors.white.withOpacity(0.05), borderRadius: BorderRadius.circular(24)),
+                              child: TextField(
+                                controller: _messageController,
+                                style: const TextStyle(color: Colors.white),
+                                decoration: InputDecoration(
+                                  hintText: 'Message...',
+                                  hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+                                  border: InputBorder.none,
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                ),
+                                maxLines: null,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          // Mic or Send
+                          if (_messageController.text.trim().isEmpty && !_isRecording)
+                            GestureDetector(
+                              onLongPressStart: (_) => _startRecording(),
+                              onLongPressEnd: (_) => _stopRecordingAndSend(),
+                              child: Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: const BoxDecoration(gradient: LinearGradient(colors: [_purple, _cyan]), shape: BoxShape.circle),
+                                child: const Icon(Icons.mic, color: Colors.white, size: 20),
+                              ),
+                            )
+                          else
+                            GestureDetector(
+                              onTap: _isLoading ? null : () => _sendMessage(),
+                              child: Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: const BoxDecoration(gradient: LinearGradient(colors: [_purple, _cyan]), shape: BoxShape.circle),
+                                child: _isLoading
+                                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                  : const Icon(Icons.send, color: Colors.white, size: 20),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
 
-  Widget _buildAvatar(String? avatarUrl) {
+  Widget _buildMessageAvatar(String? avatarUrl, String? username) {
     if (avatarUrl != null && avatarUrl.isNotEmpty) {
-      return CircleAvatar(radius: 40, backgroundImage: NetworkImage(avatarUrl), onBackgroundImageError: (_, __) {});
+      return CircleAvatar(radius: 14, backgroundImage: NetworkImage(avatarUrl), onBackgroundImageError: (_, __) {});
     }
-    return CircleAvatar(
-      radius: 40,
-      backgroundColor: const Color(0xFF1a103c),
-      child: const Icon(Icons.campaign, size: 40, color: Color(0xFF8B5CF6)),
+    return CircleAvatar(radius: 14, backgroundColor: _purple.withOpacity(0.3), child: Text((username ?? 'A')[0].toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 10)));
+  }
+
+  Widget _buildMediaPreview(String label, VoidCallback onRemove) {
+    return Container(
+      height: 100,
+      padding: const EdgeInsets.all(8),
+      child: Stack(
+        children: [
+          Container(
+            decoration: BoxDecoration(color: Colors.white.withOpacity(0.05), borderRadius: BorderRadius.circular(12)),
+            child: Center(child: Text(label, style: TextStyle(color: Colors.white.withOpacity(0.5)))),
+          ),
+          Positioned(
+            top: 4,
+            right: 4,
+            child: GestureDetector(
+              onTap: onRemove,
+              child: Container(padding: const EdgeInsets.all(4), decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle), child: const Icon(Icons.close, size: 16, color: Colors.white)),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
-  Widget _buildMemberAvatar(String? avatarUrl, String? username) {
-    if (avatarUrl != null && avatarUrl.isNotEmpty) {
-      return CircleAvatar(radius: 20, backgroundImage: NetworkImage(avatarUrl), onBackgroundImageError: (_, __) {});
-    }
-    return CircleAvatar(
-      radius: 20,
-      backgroundColor: const Color(0xFF1a103c),
-      child: Text((username ?? 'U')[0].toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 12)),
-    );
-  }
-
-  Widget _buildActionButton({required IconData icon, required String label, required VoidCallback onTap, Color? color}) {
-    return GestureDetector(
-      onTap: onTap,
+  Widget _buildVideoThumbnail(String videoUrl) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          color: (color ?? const Color(0xFF8B5CF6)).withOpacity(0.15),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: (color ?? const Color(0xFF8B5CF6)).withOpacity(0.3)),
-        ),
-        child: Column(
+        height: 200,
+        color: Colors.black,
+        child: const Center(child: Icon(Icons.play_circle_fill, color: Colors.white, size: 50)),
+      ),
+    );
+  }
+
+  Widget _buildVoiceNote(String messageId, String? audioUrl, int? duration) {
+    final isCurrent = _currentlyPlayingAudioId == messageId;
+    final totalDuration = isCurrent && _audioDuration != Duration.zero ? _audioDuration : Duration(seconds: duration ?? 0);
+    final progress = totalDuration.inMilliseconds > 0 ? _audioPosition.inMilliseconds / totalDuration.inMilliseconds : 0.0;
+
+    return Container(
+      width: 240,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      child: Row(
+        children: [
+          GestureDetector(
+            onTap: audioUrl != null ? () => _playAudio(messageId, audioUrl) : null,
+            child: Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(color: _purple.withOpacity(0.2), shape: BoxShape.circle),
+              child: Icon(isCurrent && _isPlayingAudio ? Icons.pause : Icons.play_arrow, color: _purple, size: 22),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(height: 3, decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(2))),
+                const SizedBox(height: 4),
+                Text(isCurrent ? '${_formatDuration(_audioPosition.inSeconds)} / ${_formatDuration(totalDuration.inSeconds)}' : _formatDuration(totalDuration.inSeconds), style: TextStyle(fontSize: 11, color: Colors.white.withOpacity(0.5))),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFileMessage(String content, String? fileName, String? fileSize) {
+    return Container(
+      width: 240,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: Colors.white.withOpacity(0.05), borderRadius: BorderRadius.circular(14)),
+      child: Row(
+        children: [
+          const Icon(Icons.insert_drive_file, color: _purple),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(fileName ?? content, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis),
+                if (fileSize != null) Text(fileSize, style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.4))),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showImageViewer(String imageUrl) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.black,
+        insetPadding: EdgeInsets.zero,
+        child: Stack(
+          fit: StackFit.expand,
           children: [
-            Icon(icon, color: color ?? const Color(0xFF8B5CF6)),
-            const SizedBox(height: 4),
-            Text(label, style: TextStyle(color: color ?? const Color(0xFF8B5CF6), fontSize: 12, fontWeight: FontWeight.w500)),
+            PhotoView(imageProvider: NetworkImage(imageUrl), minScale: PhotoViewComputedScale.contained, maxScale: PhotoViewComputedScale.covered * 2),
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 16,
+              right: 16,
+              child: Container(decoration: BoxDecoration(color: Colors.black.withOpacity(0.5), borderRadius: BorderRadius.circular(20)), child: IconButton(icon: const Icon(Icons.close, color: Colors.white), onPressed: () => Navigator.pop(context))),
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildInfoRow({required IconData icon, required String label, required String value}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        children: [
-          Icon(icon, size: 20, color: Colors.white54),
-          const SizedBox(width: 12),
-          Expanded(child: Text(label, style: TextStyle(color: Colors.white.withOpacity(0.7)))),
-          Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSettingsPreview(Map<String, dynamic> data) {
-    final settings = data['settings'] as Map<String, dynamic>? ?? {};
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white.withOpacity(0.03), borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.white.withOpacity(0.06))),
-      child: Column(
-        children: [
-          _buildSettingRow(icon: Icons.chat_bubble, label: 'Chat Enabled', value: !(settings['chat_disabled'] ?? false)),
-          _buildSettingRow(icon: Icons.attach_file, label: 'File Sharing', value: !(settings['file_sharing_disabled'] ?? false)),
-          _buildSettingRow(icon: Icons.poll, label: 'Polls', value: settings['polls_enabled'] ?? true),
-          _buildSettingRow(icon: Icons.emoji_emotions, label: 'Reactions', value: settings['reactions_enabled'] ?? true),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSettingRow({required IconData icon, required String label, required bool value}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        children: [
-          Icon(icon, size: 18, color: Colors.white54),
-          const SizedBox(width: 12),
-          Expanded(child: Text(label, style: TextStyle(color: Colors.white.withOpacity(0.7)))),
-          Icon(value ? Icons.check_circle : Icons.cancel, size: 18, color: value ? Colors.green : Colors.red),
-        ],
-      ),
-    );
-  }
-}
-
-class ChannelSettingsSheet extends StatefulWidget {
-  final String chatId;
-  final String currentRole;
-  const ChannelSettingsSheet({super.key, required this.chatId, required this.currentRole});
-
   @override
-  State<ChannelSettingsSheet> createState() => _ChannelSettingsSheetState();
-}
-
-class _ChannelSettingsSheetState extends State<ChannelSettingsSheet> {
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<DocumentSnapshot>(
-      stream: FirebaseFirestore.instance.collection('chats').doc(widget.chatId).snapshots(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) return const SizedBox(height: 200, child: Center(child: CircularProgressIndicator()));
-
-        final data = snapshot.data!.data() as Map<String, dynamic>;
-        final settings = data['settings'] as Map<String, dynamic>? ?? {};
-        final isOwner = widget.currentRole == 'owner';
-
-        return Container(
-          padding: const EdgeInsets.all(20),
-          constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.7),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(2))),
-              const SizedBox(height: 20),
-              const Text('Channel Settings', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600)),
-              const SizedBox(height: 16),
-              Expanded(
-                child: ListView(
-                  children: [
-                    _buildToggle(label: 'Disable Chat', subtitle: 'Only admins can send messages', value: settings['chat_disabled'] ?? false, onChanged: (v) => _updateSetting('chat_disabled', v)),
-                    _buildToggle(label: 'Disable File Sharing', subtitle: 'Prevent members from sending files', value: settings['file_sharing_disabled'] ?? false, onChanged: (v) => _updateSetting('file_sharing_disabled', v)),
-                    _buildToggle(label: 'Enable Polls', value: settings['polls_enabled'] ?? true, onChanged: (v) => _updateSetting('polls_enabled', v)),
-                    _buildToggle(label: 'Enable Reactions', value: settings['reactions_enabled'] ?? true, onChanged: (v) => _updateSetting('reactions_enabled', v)),
-                    _buildToggle(label: 'Allow Forwarding', value: settings['forwarding_enabled'] ?? true, onChanged: (v) => _updateSetting('forwarding_enabled', v)),
-                    if (isOwner)
-                      _buildToggle(label: 'Enable Voice Chat', value: settings['voice_chat_enabled'] ?? false, onChanged: (v) => _updateSetting('voice_chat_enabled', v)),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildToggle({required String label, String? subtitle, required bool value, required ValueChanged<bool>? onChanged}) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(color: Colors.white.withOpacity(0.03), borderRadius: BorderRadius.circular(12)),
-      child: SwitchListTile(
-        title: Text(label, style: const TextStyle(color: Colors.white)),
-        subtitle: subtitle != null ? Text(subtitle, style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 12)) : null,
-        value: value,
-        onChanged: onChanged,
-        activeColor: const Color(0xFF8B5CF6),
-      ),
-    );
-  }
-
-  Future<void> _updateSetting(String key, bool value) async {
-    await Provider.of<ChatProvider>(context, listen: false).toggleSetting(widget.chatId, key, value);
+  void dispose() {
+    _messageController.dispose();
+    _editController.dispose();
+    _scrollController.dispose();
+    _audioPlayer.dispose();
+    _audioRecorder.dispose();
+    _recordingTimer?.cancel();
+    super.dispose();
   }
 }
