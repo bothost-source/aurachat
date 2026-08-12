@@ -97,8 +97,6 @@ class _OtpScreenState extends State<OtpScreen> {
           await _clearPendingOtpState();
 
           final existingEmail = existingUser['email'] as String?;
-          final userId = existingUser['id'] as String;  // FIX: Get actual Firestore doc ID
-
           if (existingEmail != null && existingEmail.isNotEmpty) {
             await authProvider.sendEmailOtp();
             if (mounted) {
@@ -106,7 +104,7 @@ class _OtpScreenState extends State<OtpScreen> {
                 context,
                 MaterialPageRoute(
                   builder: (context) => EmailVerificationScreen(
-                    userId: userId,  // FIX: Pass actual Firestore doc ID, not phone number
+                    userId: existingUser['id'] as String,
                     backendUrl: 'https://aurachat-backend-5utu.onrender.com',
                     autoDetectedEmail: existingEmail,
                     isLoginFlow: true,
@@ -125,7 +123,7 @@ class _OtpScreenState extends State<OtpScreen> {
             context,
             MaterialPageRoute(
               builder: (context) => EmailVerificationScreen(
-                userId: authProvider.mockUserId!,  // FIX: Pass actual mock user ID
+                userId: authProvider.mockUserId!,
                 backendUrl: 'https://aurachat-backend-5utu.onrender.com',
                 isLoginFlow: false,
               ),
