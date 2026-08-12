@@ -18,11 +18,11 @@ class _NotificationsSettingsScreenState extends State<NotificationsSettingsScree
   bool _isPlaying = false;
 
   final List<Map<String, dynamic>> _ringtones = [
-    {'id': 'default', 'name': 'AURA Default', 'file': 'audio/ringtone_ambition.mp3'},
-    {'id': 'phonk', 'name': 'phonk Vibes', 'file': 'audio/ringtone_phonk.mp3'},
-    {'id': 'fadded', 'name': 'fadded Phone', 'file': 'audio/ringtone_fadded.mp3'},
-    {'id': 'pop', 'name': 'pop', 'file': 'audio/ringtone_pop.mp3'},
-  ];
+  {'id': 'default', 'name': 'AURA Default', 'file': 'assets/audio/ringtone_ambition.mp3'},
+  {'id': 'phonk', 'name': 'phonk Vibes', 'file': 'assets/audio/ringtone_phonk.mp3'},
+  {'id': 'fadded', 'name': 'fadded Phone', 'file': 'assets/audio/ringtone_fadded.mp3'},
+  {'id': 'pop', 'name': 'pop', 'file': 'assets/audio/ringtone_pop.mp3'},
+];
 
   @override
   void initState() {
