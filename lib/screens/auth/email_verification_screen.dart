@@ -41,10 +41,8 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
   @override
   void initState() {
     super.initState();
-    // If auto-detected email from existing account, use it
     if (widget.autoDetectedEmail != null) {
       _emailController.text = widget.autoDetectedEmail!;
-      // Auto-send code for login flow
       if (widget.isLoginFlow) {
         WidgetsBinding.instance.addPostFrameCallback((_) => _sendCode());
       }
@@ -52,7 +50,6 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
     _savePendingEmailState();
   }
 
-  /// Save email verification state so app reopen knows to stay here
   Future<void> _savePendingEmailState() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('pending_email_user_id', widget.userId);
@@ -60,7 +57,6 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
     await prefs.setInt('pending_email_timestamp', DateTime.now().millisecondsSinceEpoch);
   }
 
-  /// Clear email verification state on success
   Future<void> _clearPendingEmailState() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('pending_email_user_id');
@@ -131,6 +127,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
     setState(() { _isLoading = true; _error = null; });
 
     try {
+      // 1. Verify via backend API
       final response = await http.post(
         Uri.parse('${widget.backendUrl}/api/auth/verify-email'),
         headers: {'Content-Type': 'application/json'},
@@ -138,26 +135,22 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
       );
 
       if (response.statusCode == 200) {
-        // Save email to user profile
+        // 2. Backend verified — now complete local auth
         final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
-        final emailToSave = _sentEmail ?? _emailController.text.trim();
-
-        // Update email in Firestore via auth provider
-        await authProvider.setupProfile(
-          username: authProvider.userName ?? widget.userId,
-          displayName: authProvider.displayName,
-          bio: authProvider.userBio,
-          photoUrl: authProvider.userPhotoUrl,
-        );
+        final verified = await authProvider.verifyEmailOtp(code);
+        
+        if (!verified) {
+          setState(() => _error = authProvider.error ?? 'Verification failed');
+          setState(() => _isLoading = false);
+          return;
+        }
 
         await _clearPendingEmailState();
 
         if (mounted) {
           if (widget.isLoginFlow) {
-            // Existing user - go to main app
             Navigator.pushReplacementNamed(context, '/main');
           } else {
-            // New user - go to profile setup
             Navigator.pushReplacementNamed(context, '/setup_profile');
           }
         }
@@ -183,7 +176,6 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
-      // Prevent back button from skipping email verification
       onWillPop: () async => false,
       child: Scaffold(
         body: Container(
