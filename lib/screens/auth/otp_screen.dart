@@ -38,7 +38,6 @@ class _OtpScreenState extends State<OtpScreen> {
     _savePendingOtpState();
   }
 
-  /// Save that we're in OTP flow so app reopen knows to stay here
   Future<void> _savePendingOtpState() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('pending_otp_phone', widget.cleanPhoneNumber);
@@ -46,7 +45,6 @@ class _OtpScreenState extends State<OtpScreen> {
     await prefs.setInt('pending_otp_timestamp', DateTime.now().millisecondsSinceEpoch);
   }
 
-  /// Clear OTP state on success
   Future<void> _clearPendingOtpState() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('pending_otp_phone');
@@ -91,40 +89,35 @@ class _OtpScreenState extends State<OtpScreen> {
       final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
       authProvider.setMockPhone(widget.cleanPhoneNumber);
 
-      // ==================== CHECK IF PHONE EXISTS ====================
       final existingUser = await authProvider.checkPhoneExists(widget.cleanPhoneNumber);
 
       if (existingUser != null) {
-        // EXISTING USER - login directly
         final success = await authProvider.loginExistingUser(widget.cleanPhoneNumber);
         if (success && mounted) {
           await _clearPendingOtpState();
-          await OnlineStatusService.setOnline();
 
-          // Check if email exists - if yes, verify it. If no, collect it.
           final existingEmail = existingUser['email'] as String?;
           if (existingEmail != null && existingEmail.isNotEmpty) {
-            // Has email - go to email verification with auto-detected email
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(
-                builder: (context) => EmailVerificationScreen(
-                  userId: widget.cleanPhoneNumber,
-                  backendUrl: 'https://aurachat-backend-5utu.onrender.com',
-                  autoDetectedEmail: existingEmail,
-                  isLoginFlow: true,
+            await authProvider.sendEmailOtp();
+            if (mounted) {
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => EmailVerificationScreen(
+                    userId: widget.cleanPhoneNumber,
+                    backendUrl: 'https://aurachat-backend-5utu.onrender.com',
+                    autoDetectedEmail: existingEmail,
+                    isLoginFlow: true,
+                  ),
                 ),
-              ),
-            );
+              );
+            }
           } else {
-            // No email on file - go to setup (shouldn't happen for existing users)
             Navigator.pushReplacementNamed(context, '/setup_profile');
           }
         }
       } else {
-        // NEW USER - create mock user, then collect email
         await authProvider.createMockUser();
-        await OnlineStatusService.setOnline();
         if (mounted) {
           Navigator.pushReplacement(
             context,
