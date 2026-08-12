@@ -561,8 +561,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     }
   }
  
-  void _subscribeToMessages() {
-        if (_chatId == null) return;
+    void _subscribeToMessages() {
+    if (_chatId == null) return;
 
     final firestore = FirebaseFirestore.instance;
     final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
@@ -578,41 +578,31 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
         .listen((snapshot) async {
           if (!mounted) return;
 
-          final List<Map<String, dynamic>> newMessages = [];
-          final Set<String> missingUserIds = {};
+          final Set<String> allSenderIds = {};
+          final List<Map<String, dynamic>> allMessages = [];
 
-          for (final change in snapshot.docChanges) {
-            final doc = change.doc;
-            final data = doc.data()!;
+          // First pass: collect all sender IDs and build message list
+          for (final doc in snapshot.docs) {
+            final data = doc.data();
             final messageId = doc.id;
             final senderId = data['sender_id'] as String?;
 
             final deletedFor = List<String>.from(data['deleted_for'] ?? []);
             if (deletedFor.contains(currentUserId)) continue;
 
-            Map<String, dynamic>? userData;
             if (senderId != null) {
-              if (_userCache.containsKey(senderId)) {
-                userData = _userCache[senderId];
-              } else {
-                missingUserIds.add(senderId);
-              }
+              allSenderIds.add(senderId);
             }
 
-            newMessages.add({
+            allMessages.add({
               'id': messageId,
               ...data,
-              'users': userData ?? {
-                'username': 'Unknown',
-                'avatar_url': null,
-                'bio': null,
-                'phone_number': null,
-                'is_verified': false,
-              },
               'created_at': data['created_at']?.toDate()?.toIso8601String() ?? DateTime.now().toIso8601String(),
             });
           }
 
+          // Fetch ALL missing users at once (not just from changes)
+          final missingUserIds = allSenderIds.where((id) => !_userCache.containsKey(id)).toSet();
           if (missingUserIds.isNotEmpty) {
             final userDocs = await Future.wait(
               missingUserIds.map((id) => firestore.collection('users').doc(id).get()),
@@ -629,16 +619,26 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
                 };
               }
             }
-            for (final msg in newMessages) {
-              final sid = msg['sender_id'] as String?;
-              if (sid != null && _userCache.containsKey(sid)) {
-                msg['users'] = _userCache[sid];
-              }
+          }
+
+          // Second pass: apply user data to ALL messages
+          for (final msg in allMessages) {
+            final sid = msg['sender_id'] as String?;
+            if (sid != null && _userCache.containsKey(sid)) {
+              msg['users'] = _userCache[sid];
+            } else {
+              msg['users'] = {
+                'username': 'Unknown',
+                'avatar_url': null,
+                'bio': null,
+                'phone_number': null,
+                'is_verified': false,
+              };
             }
           }
 
           setState(() {
-            _messages = newMessages;
+            _messages = allMessages;
             _isLoading = false;
           });
           _scrollToBottom(force: _messages.length <= 20);
@@ -646,7 +646,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
           debugPrint('Message subscription error: $e');
           setState(() => _isLoading = false);
         });
-      }    
+  }    
 
   Future<void> _loadPinnedMessages() async {
     if (_chatId == null) return;
