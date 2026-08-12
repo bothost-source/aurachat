@@ -88,7 +88,7 @@ class ChatProvider extends ChangeNotifier {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // LOAD ALL CHATS: private + groups + channels (all from 'chats' collection)
+  // LOAD ALL CHATS: private + groups + channels
   // ═══════════════════════════════════════════════════════════════════════════
   Future<void> loadChats() async {
     _setLoading(true);
@@ -114,6 +114,10 @@ class ChatProvider extends ChangeNotifier {
         final chatId = doc.id;
         final chatType = chat['type'] as String? ?? 'direct';
 
+        // FIX: Skip deleted chats
+        final deletedFor = List<String>.from(chat['deleted_for'] ?? []);
+        if (deletedFor.contains(userId)) continue;
+
         // Skip blocked DMs
         if (chatType == 'direct') {
           final participants = List<String>.from(chat['participants'] ?? []);
@@ -137,11 +141,31 @@ class ChatProvider extends ChangeNotifier {
         // Get member count
         int participantsCount = 0;
         if (chatType == 'group' || chatType == 'channel') {
-          participantsCount = (chat['participants'] as List<dynamic>?)?.length ?? 0;
+          participantsCount = participants.length;
         }
 
         // Get role
         final role = myData['role'] ?? 'member';
+
+        // FIX: Properly read last_message_at with fallback
+        DateTime? lastMessageAt;
+        final rawLastMessageAt = chat['last_message_at'];
+        if (rawLastMessageAt is Timestamp) {
+          lastMessageAt = rawLastMessageAt.toDate();
+        } else if (rawLastMessageAt is DateTime) {
+          lastMessageAt = rawLastMessageAt;
+        }
+        // If null or in future (unresolved server timestamp), use created_at fallback
+        if (lastMessageAt == null || lastMessageAt.isAfter(DateTime.now().add(const Duration(minutes: 1)))) {
+          final createdAt = chat['created_at'];
+          if (createdAt is Timestamp) {
+            lastMessageAt = createdAt.toDate();
+          } else if (createdAt is DateTime) {
+            lastMessageAt = createdAt;
+          } else {
+            lastMessageAt = DateTime.now();
+          }
+        }
 
         formattedChats.add({
           ...chat,
@@ -149,6 +173,7 @@ class ChatProvider extends ChangeNotifier {
           'role': role,
           'unread_count': unreadCount,
           'participants_count': participantsCount,
+          'last_message_at': lastMessageAt,
         });
       }
 
@@ -186,7 +211,10 @@ class ChatProvider extends ChangeNotifier {
         .collection('chats')
         .where('participants', arrayContains: userId)
         .snapshots()
-        .listen((_) => loadChats());
+        .listen((_) {
+          // FIX: Debounce to let Firestore finish writing last_message_at
+          Future.delayed(const Duration(milliseconds: 500), () => loadChats());
+        });
   }
 
   Future<void> loadContacts() async {
@@ -237,6 +265,7 @@ class ChatProvider extends ChangeNotifier {
         },
         'created_at': FieldValue.serverTimestamp(),
         'last_message_at': FieldValue.serverTimestamp(),
+        'last_message': 'Chat started',
       });
 
       await loadChats();
@@ -280,6 +309,9 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // FIX: deleteChat uses 'deleted_for' array (consistent with chat_screen.dart)
+  // ═══════════════════════════════════════════════════════════════════════════
   Future<void> deleteChat(String chatId) async {
     try {
       final userId = _currentUserId;
@@ -289,13 +321,15 @@ class ChatProvider extends ChangeNotifier {
           .collection('chats')
           .doc(chatId)
           .update({
-            'participants': FieldValue.arrayRemove([userId]),
-            'participants_data.$userId': FieldValue.delete(),
+            'deleted_for': FieldValue.arrayUnion([userId]),
           });
 
-      await loadChats();
+      // Remove from local list immediately
+      _chats.removeWhere((chat) => chat['id'] == chatId);
+      notifyListeners();
     } catch (e) {
       _error = 'Failed to delete chat: $e';
+      notifyListeners();
     }
   }
 
