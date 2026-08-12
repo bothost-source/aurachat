@@ -310,11 +310,12 @@ Future<String?> _uploadProfileImage(String userId) async {
         }
       }
 
-      final success = await authProvider.setupProfile(
+       final success = await authProvider.setupProfile(
         username: username,
         displayName: _nameController.text.trim(),
         bio: _bioController.text.trim().isNotEmpty ? _bioController.text.trim() : null,
         photoUrl: photoUrl,
+        email: authProvider.email,
       );
 
       if (!success) {
