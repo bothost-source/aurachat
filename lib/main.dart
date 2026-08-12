@@ -281,6 +281,46 @@ class _AuthRouterState extends State<AuthRouter> {
     final mockUserId = prefs.getString('mock_user_id');
 
     if (currentUser != null || mockUserId != null) {
+      // FIX: Check if email verification is fully complete
+      final isEmailVerifiedComplete = prefs.getBool('email_verified_complete') ?? false;
+
+      if (!isEmailVerifiedComplete) {
+        final userId = currentUser?.uid ?? mockUserId;
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(userId)
+            .get();
+
+        final userData = userDoc.data();
+        final email = userData?['email'] as String?;
+
+        if (email != null && email.isNotEmpty) {
+          // Existing user with email — go to email verification (auto-send OTP)
+          setState(() {
+            _targetScreen = EmailVerificationScreen(
+              userId: userId!,
+              backendUrl: 'https://aurachat-backend-5utu.onrender.com',
+              autoDetectedEmail: email,
+              isLoginFlow: true,
+            );
+            _isChecking = false;
+          });
+          return;
+        } else {
+          // New user — go to email verification (let them enter email)
+          setState(() {
+            _targetScreen = EmailVerificationScreen(
+              userId: userId!,
+              backendUrl: 'https://aurachat-backend-5utu.onrender.com',
+              isLoginFlow: false,
+            );
+            _isChecking = false;
+          });
+          return;
+        }
+      }
+
+      // Email verification complete — go to main app
       setState(() {
         _targetScreen = const MainAppScreen();
         _isChecking = false;
