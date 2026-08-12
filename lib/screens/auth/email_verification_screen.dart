@@ -100,10 +100,10 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
         _startResendTimer();
       } else {
         final backendError = data['details'] ?? data['error'] ?? 'Unknown error';
-        setState(() => _error = 'Backend: \$backendError');
+        setState(() => _error = 'Backend: $backendError');
       }
     } catch (e) {
-      setState(() => _error = 'Network error: \$e');
+      setState(() => _error = 'Network error: $e');
     } finally {
       setState(() => _isLoading = false);
     }
@@ -127,7 +127,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
     setState(() { _isLoading = true; _error = null; });
 
     try {
-      // 1. Verify via backend API (source of truth)
+      // 1. Verify via backend API
       final response = await http.post(
         Uri.parse('${widget.backendUrl}/api/auth/verify-email'),
         headers: {'Content-Type': 'application/json'},
@@ -135,13 +135,10 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
       );
 
       if (response.statusCode == 200) {
-        // 2. Backend verified — complete local auth directly
-        // FIX: Use completeEmailVerification instead of verifyEmailOtp
-        // because verifyEmailOtp checks against a locally-generated OTP
-        // that doesn't match the backend's OTP
+        // 2. Backend verified — now complete local auth
         final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
-        final verified = await authProvider.completeEmailVerification(widget.userId);
-
+        final verified = await authProvider.verifyEmailOtp(code);
+        
         if (!verified) {
           setState(() => _error = authProvider.error ?? 'Verification failed');
           setState(() => _isLoading = false);
@@ -162,7 +159,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
         setState(() => _error = data['error'] ?? 'Invalid code');
       }
     } catch (e) {
-      setState(() => _error = 'Network error: \$e');
+      setState(() => _error = 'Network error: $e');
     } finally {
       setState(() => _isLoading = false);
     }
@@ -380,7 +377,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
                     const SizedBox(height: 16),
                     Center(
                       child: Text(
-                        'Resend in \$_resendTimer seconds',
+                        'Resend in $_resendTimer seconds',
                         style: TextStyle(
                           color: Colors.white.withOpacity(0.4),
                           fontSize: 14,
