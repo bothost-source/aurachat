@@ -244,7 +244,7 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
-  Future<Map<String, dynamic>?> startDirectChat(String otherUserId) async {
+    Future<Map<String, dynamic>?> startDirectChat(String otherUserId) async {
     try {
       final userId = _currentUserId;
       if (userId == null) return null;
@@ -254,6 +254,31 @@ class ChatProvider extends ChangeNotifier {
         notifyListeners();
         return null;
       }
+
+      // FIX: Check if direct chat already exists between these two users
+      final existingQuery = await _firestore
+          .collection('chats')
+          .where('type', isEqualTo: 'direct')
+          .where('participants', arrayContains: userId)
+          .get();
+
+      for (final doc in existingQuery.docs) {
+        final participants = List<String>.from(doc.data()['participants'] ?? []);
+        if (participants.contains(otherUserId)) {
+          // Chat already exists — return it
+          await loadChats();
+          return _chats.firstWhere(
+            (chat) => chat['id'] == doc.id,
+            orElse: () => {'id': doc.id, ...doc.data()},
+          );
+        }
+      }
+
+      // Fetch other user's profile for name/avatar
+      final otherUserDoc = await _firestore.collection('users').doc(otherUserId).get();
+      final otherUserData = otherUserDoc.data();
+      final otherUserName = otherUserData?['username'] ?? otherUserData?['display_name'] ?? 'Unknown';
+      final otherUserAvatar = otherUserData?['avatar_url'];
 
       final chatId = const Uuid().v4();
 
@@ -265,6 +290,8 @@ class ChatProvider extends ChangeNotifier {
           userId: {'role': 'member', 'joined_at': FieldValue.serverTimestamp()},
           otherUserId: {'role': 'member', 'joined_at': FieldValue.serverTimestamp()},
         },
+        'name': otherUserName,           // FIX: Save other user's name
+        'avatar_url': otherUserAvatar,   // FIX: Save other user's avatar
         'created_at': FieldValue.serverTimestamp(),
         'last_message_at': FieldValue.serverTimestamp(),
         'last_message': 'Chat started',
