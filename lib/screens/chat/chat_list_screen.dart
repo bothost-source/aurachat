@@ -82,6 +82,44 @@ class _ChatListScreenState extends State<ChatListScreen> {
         final isChannel = chatType == 'channel';
         final isGroupOrChannel = isGroup || isChannel;
 
+        // FIX: For direct chats, fetch the other user's data from Firestore
+        if (!isGroupOrChannel) {
+          final currentUserId = authProvider.user?.uid ?? authProvider.mockUserId;
+          final participants = List<String>.from(chat['participants'] ?? []);
+          final otherUserId = participants.firstWhere(
+            (id) => id != currentUserId,
+            orElse: () => '',
+          );
+
+          if (otherUserId.isNotEmpty) {
+            return _DirectChatTile(
+              chat: chat,
+              otherUserId: otherUserId,
+              currentUserId: currentUserId!,
+              unreadCount: unreadCount,
+              lastMessage: lastMessage,
+              lastMessageAt: lastMessageAt,
+              onTap: () {
+                chatProvider.markMessagesAsRead(chat['id']);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ChatScreen(
+                      chatId: chat['id'],
+                      chatName: chat['name'],
+                      chatAvatar: chat['avatar_url'],
+                      isGroup: false,
+                    ),
+                  ),
+                );
+              },
+              onArchive: () => chatProvider.archiveChat(chat['id']),
+              onDelete: () => _showDeleteDialog(context, chat['id']),
+            );
+          }
+        }
+
+        // Group/Channel tile (unchanged logic)
         return Slidable(
           key: ValueKey(chat['id']),
           endActionPane: ActionPane(
@@ -150,7 +188,6 @@ class _ChatListScreenState extends State<ChatListScreen> {
                         overflow: TextOverflow.ellipsis,
                       ),
                 ),
-                // FIX: Use custom time formatting instead of timeago
                 if (lastMessageAt != null)
                   Text(
                     _formatChatListTime(lastMessageAt),
@@ -201,8 +238,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   const SizedBox(width: 6),
                 ],
                 Expanded(
+                  // FIX: Format last message text properly
                   child: Text(
-                    lastMessage ?? 'No messages yet',
+                    _formatLastMessage(lastMessage, chat['last_message_type'] as String?),
                     style: TextStyle(
                       fontWeight: unreadCount > 0 ? FontWeight.w600 : FontWeight.normal,
                       color: unreadCount > 0 ? null : Colors.grey,
@@ -289,9 +327,27 @@ class _ChatListScreenState extends State<ChatListScreen> {
     );
   }
 
-  // ============================================
-  // NEW: Custom time formatting for chat list
-  // ============================================
+  // FIX: Format last message text for display
+  String _formatLastMessage(String? lastMessage, String? type) {
+    if (lastMessage == null || lastMessage.isEmpty) return 'No messages yet';
+    
+    // If it's a media file name, show friendly label
+    if (type == 'image' || lastMessage.endsWith('.jpg') || lastMessage.endsWith('.jpeg') || lastMessage.endsWith('.png')) {
+      return '📷 Photo';
+    }
+    if (type == 'video' || lastMessage.endsWith('.mp4') || lastMessage.endsWith('.mov')) {
+      return '🎥 Video';
+    }
+    if (type == 'audio' || lastMessage.endsWith('.m4a') || lastMessage.endsWith('.mp3')) {
+      return '🎤 Voice Message';
+    }
+    if (type == 'file') {
+      return '📎 ${lastMessage.split('/').last}';
+    }
+    
+    return lastMessage;
+  }
+
   String _formatChatListTime(DateTime dateTime) {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
@@ -301,7 +357,6 @@ class _ChatListScreenState extends State<ChatListScreen> {
     final diffHours = now.difference(dateTime).inHours;
 
     if (diffDays == 0) {
-      // Today
       if (diffMinutes < 1) {
         return 'Now';
       } else if (diffMinutes < 60) {
@@ -312,13 +367,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
     } else if (diffDays == 1) {
       return 'Yesterday';
     } else if (diffDays < 7) {
-      // Within last week - show day name
       return _getDayName(dateTime.weekday);
     } else if (dateTime.year == now.year) {
-      // Same year - show "Aug 8"
       return '${_getMonthName(dateTime.month)} ${dateTime.day}';
     } else {
-      // Different year - show "Aug 8, 2024"
       return '${_getMonthName(dateTime.month)} ${dateTime.day}, ${dateTime.year}';
     }
   }
@@ -380,5 +432,203 @@ class _ChatListScreenState extends State<ChatListScreen> {
         ],
       ),
     );
+  }
+}
+
+// ============================================================================
+// NEW: Direct chat tile that fetches other user's data from Firestore
+// ============================================================================
+class _DirectChatTile extends StatelessWidget {
+  final Map<String, dynamic> chat;
+  final String otherUserId;
+  final String currentUserId;
+  final int unreadCount;
+  final String? lastMessage;
+  final DateTime? lastMessageAt;
+  final VoidCallback onTap;
+  final VoidCallback onArchive;
+  final VoidCallback onDelete;
+
+  const _DirectChatTile({
+    required this.chat,
+    required this.otherUserId,
+    required this.currentUserId,
+    required this.unreadCount,
+    required this.lastMessage,
+    required this.lastMessageAt,
+    required this.onTap,
+    required this.onArchive,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('users')
+          .doc(otherUserId)
+          .snapshots(),
+      builder: (context, userSnapshot) {
+        final userData = userSnapshot.data?.data() as Map<String, dynamic>?;
+
+        // FIX: Get name from user document, not chat document
+        final displayName = userData?['display_name'] as String? ??
+                           userData?['name'] as String? ??
+                           userData?['username'] as String? ??
+                           'Unknown';
+
+        final avatarUrl = userData?['avatar_url'] as String?;
+        final phone = userData?['phone'] as String?;
+
+        return Slidable(
+          key: ValueKey(chat['id']),
+          endActionPane: ActionPane(
+            motion: const ScrollMotion(),
+            children: [
+              SlidableAction(
+                onPressed: (_) => onArchive(),
+                backgroundColor: Colors.blue,
+                foregroundColor: Colors.white,
+                icon: Icons.archive,
+                label: 'Archive',
+              ),
+              SlidableAction(
+                onPressed: (_) => onDelete(),
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+                icon: Icons.delete,
+                label: 'Delete',
+              ),
+            ],
+          ),
+          child: ListTile(
+            leading: _buildUserAvatar(avatarUrl),
+            title: Row(
+              children: [
+                Expanded(
+                  child: VerifiedUsername(
+                    username: displayName,
+                    phoneNumber: phone,
+                    style: TextStyle(
+                      fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.w600,
+                      fontSize: 15,
+                    ),
+                    badgeSize: 14,
+                    spacing: 6,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (lastMessageAt != null)
+                  Text(
+                    _formatTime(lastMessageAt!),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: unreadCount > 0
+                          ? Theme.of(context).primaryColor
+                          : Colors.grey,
+                    ),
+                  ),
+              ],
+            ),
+            subtitle: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    _formatLastMessage(lastMessage, chat['last_message_type'] as String?),
+                    style: TextStyle(
+                      fontWeight: unreadCount > 0 ? FontWeight.w600 : FontWeight.normal,
+                      color: unreadCount > 0 ? null : Colors.grey,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (unreadCount > 0)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).primaryColor,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      unreadCount.toString(),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            onTap: onTap,
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildUserAvatar(String? avatarUrl) {
+    if (avatarUrl != null && avatarUrl.isNotEmpty) {
+      return CircleAvatar(
+        radius: 28,
+        backgroundImage: NetworkImage(avatarUrl),
+        onBackgroundImageError: (_, __) {},
+      );
+    }
+
+    return CircleAvatar(
+      radius: 28,
+      backgroundColor: const Color(0xFF8B5CF6).withOpacity(0.2),
+      child: const Icon(
+        Icons.person,
+        color: Color(0xFF8B5CF6),
+      ),
+    );
+  }
+
+  String _formatTime(DateTime dateTime) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final messageDate = DateTime(dateTime.year, dateTime.month, dateTime.day);
+    final diffDays = today.difference(messageDate).inDays;
+    final diffMinutes = now.difference(dateTime).inMinutes;
+    final diffHours = now.difference(dateTime).inHours;
+
+    if (diffDays == 0) {
+      if (diffMinutes < 1) return 'Now';
+      if (diffMinutes < 60) return '${diffMinutes}m ago';
+      return '${diffHours}h ago';
+    } else if (diffDays == 1) {
+      return 'Yesterday';
+    } else if (diffDays < 7) {
+      const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      return days[dateTime.weekday - 1];
+    } else if (dateTime.year == now.year) {
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      return '${months[dateTime.month - 1]} ${dateTime.day}';
+    } else {
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      return '${months[dateTime.month - 1]} ${dateTime.day}, ${dateTime.year}';
+    }
+  }
+
+  String _formatLastMessage(String? lastMessage, String? type) {
+    if (lastMessage == null || lastMessage.isEmpty) return 'No messages yet';
+    
+    if (type == 'image' || lastMessage.endsWith('.jpg') || lastMessage.endsWith('.jpeg') || lastMessage.endsWith('.png')) {
+      return '📷 Photo';
+    }
+    if (type == 'video' || lastMessage.endsWith('.mp4') || lastMessage.endsWith('.mov')) {
+      return '🎥 Video';
+    }
+    if (type == 'audio' || lastMessage.endsWith('.m4a') || lastMessage.endsWith('.mp3')) {
+      return '🎤 Voice Message';
+    }
+    if (type == 'file') {
+      return '📎 ${lastMessage.split('/').last}';
+    }
+    
+    return lastMessage;
   }
 }
