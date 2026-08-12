@@ -276,6 +276,7 @@ class _AuthRouterState extends State<AuthRouter> {
       }
     }
 
+    // MOCK USER SUPPORT PRESERVED
     final currentUser = FirebaseAuth.instance.currentUser;
     final mockUserId = prefs.getString('mock_user_id');
 
@@ -372,9 +373,7 @@ class AuraChatApp extends StatefulWidget {
 }
 
 class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
-  DateTime? _backgroundTime;
-  bool _isLocked = false;
-  bool _lockChecked = false;
+  bool _initialLockChecked = false;
 
   @override
   void initState() {
@@ -390,7 +389,21 @@ class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
           navigatorKey.currentState!.pushNamed('/chat', arguments: {'chatId': chatId});
         }
       };
+
+      // Check if lock should show on cold start
+      _checkInitialLock();
     });
+  }
+
+  Future<void> _checkInitialLock() async {
+    final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+    final isAuthenticated = FirebaseAuth.instance.currentUser != null || authProvider.currentUserId != null;
+
+    if (isAuthenticated) {
+      await settingsProvider.shouldShowLockScreen();
+    }
+    setState(() => _initialLockChecked = true);
   }
 
   @override
@@ -405,27 +418,22 @@ class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
     final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
 
     if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
-      _backgroundTime = DateTime.now();
-      if (settingsProvider.biometricLock || settingsProvider.appPasscode) {
-        setState(() => _isLocked = true);
-      }
+      // App going to background — just save the timestamp, DO NOT lock yet
+      settingsProvider.onAppBackground();
     } else if (state == AppLifecycleState.resumed) {
+      // App coming back — check if timeout passed, then decide to lock
       OnlineStatusService.setOnline();
       final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
       authProvider.refreshSession();
 
-      if (_isLocked && _backgroundTime != null) {
-        final elapsed = DateTime.now().difference(_backgroundTime!);
-        final timeoutMinutes = settingsProvider.autoLockTimeout;
-
-        if (elapsed.inMinutes < timeoutMinutes) {
-          // Timeout NOT reached — unlock immediately
-          setState(() => _isLocked = false);
-        }
-        // If timeout IS reached, _isLocked stays true and _buildLockScreen() shows.
-        // The LockScreen widget itself handles biometric/passcode auth on init.
-      }
+      _checkLockOnResume();
     }
+  }
+
+  Future<void> _checkLockOnResume() async {
+    final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+    await settingsProvider.shouldShowLockScreen();
+    // shouldShowLockScreen() calls notifyListeners() if locked, which triggers rebuild
   }
 
   @override
@@ -450,22 +458,12 @@ class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
             themeMode: themeProvider.themeMode,
             initialRoute: '/',
             builder: (context, child) {
-              Widget app = CallListener(child: child!);
+              final settingsProvider = Provider.of<SettingsProvider>(context);
+              final app = CallListener(child: child!);
 
-              if (!_lockChecked) {
-                _lockChecked = true;
-                final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
-                final currentUser = FirebaseAuth.instance.currentUser;
-
-                if (currentUser != null && (settingsProvider.biometricLock || settingsProvider.appPasscode)) {
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    setState(() => _isLocked = true);
-                  });
-                }
-              }
-
-              if (_isLocked) {
-                return _buildLockScreen();
+              // If locked, show lock screen OVER everything
+              if (settingsProvider.isLocked) {
+                return _buildLockScreen(settingsProvider);
               }
 
               // FIX: Check both Firebase user AND mock user for ban status
@@ -479,7 +477,7 @@ class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
                       .doc(userId)
                       .snapshots(),
                   builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
+                    if (snapshot.connectionState == ConnectionState.waiting && !_initialLockChecked) {
                       return const Scaffold(
                         backgroundColor: Color(0xFF0A0A0F),
                         body: Center(child: CircularProgressIndicator(color: Color(0xFF8B5CF6))),
@@ -574,10 +572,10 @@ class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildLockScreen() {
+  Widget _buildLockScreen(SettingsProvider settingsProvider) {
     return LockScreen(
       onUnlocked: () {
-        setState(() => _isLocked = false);
+        settingsProvider.unlock();
       },
     );
   }
