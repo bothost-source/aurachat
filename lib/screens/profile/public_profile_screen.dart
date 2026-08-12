@@ -22,12 +22,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
 
     final userId = args?['userId'] as String?;
-    final username = args?['username'] as String? ?? 
-               args?['display_name'] as String? ?? 
-               args?['name'] as String? ?? 
-               'Unknown';
     final passedAvatarUrl = args?['avatarUrl'] as String? ?? args?['avatar_url'] as String?;
-    final bio = args?['bio'] as String?;
 
     final currentUserId = context.read<AuraAuthProvider>().user?.uid ??
                          context.read<AuraAuthProvider>().mockUserId;
@@ -35,7 +30,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0F),
       appBar: AppBar(
-        title: Text('@$username'),
+        title: const Text('Profile'),
         backgroundColor: const Color(0xFF0A0A0F),
         elevation: 0,
         leading: IconButton(
@@ -47,7 +42,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
             color: const Color(0xFF1a103c),
             icon: const Icon(Icons.more_vert, color: Colors.white70),
             onSelected: (value) {
-              if (value == 'report') _showReportDialog(context, userId, username);
+              if (value == 'report') _showReportDialog(context, userId, 'User');
             },
             itemBuilder: (context) => [
               const PopupMenuItem(
@@ -73,8 +68,19 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                   .snapshots(),
               builder: (context, userSnapshot) {
                 final liveData = userSnapshot.data?.data() as Map<String, dynamic>?;
+
+                // FIX: Properly extract name fields from Firestore
+                // Priority: display_name > name > username > 'Unknown'
+                // Phone number is NEVER used as the display name
+                final displayName = liveData?['display_name'] as String? ??
+                                   liveData?['name'] as String? ??
+                                   liveData?['username'] as String? ??
+                                   'Unknown';
+
+                final userUsername = liveData?['username'] as String?;
                 final avatarUrl = liveData?['avatar_url'] as String? ?? passedAvatarUrl;
                 final phone = liveData?['phone'] as String?;
+                final bio = liveData?['bio'] as String? ?? args?['bio'] as String?;
 
                 return StreamBuilder<DocumentSnapshot>(
                   stream: FirebaseFirestore.instance
@@ -94,15 +100,13 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                           const SizedBox(height: 32),
 
                           // Profile Avatar
-                          Center(child: _buildAvatar(avatarUrl, username)),
+                          Center(child: _buildAvatar(avatarUrl, displayName)),
 
                           const SizedBox(height: 24),
 
-                          // Username with verified badge - uses same logic as profile screen
+                          // FIX: Display Name with verified badge (uses phone number check)
                           VerifiedUsername(
-                            username: liveData?['display_name'] as String? ?? 
-                                     liveData?['username'] as String? ?? 
-                                     username,
+                            username: displayName,
                             phoneNumber: phone,
                             style: const TextStyle(
                               fontSize: 24,
@@ -113,7 +117,31 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                             spacing: 8,
                           ),
 
+                          const SizedBox(height: 4),
+
+                          // Username with @ prefix (if exists)
+                          if (userUsername != null && userUsername.isNotEmpty)
+                            Text(
+                              '@$userUsername',
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: Colors.white.withOpacity(0.5),
+                              ),
+                            ),
+
                           const SizedBox(height: 8),
+
+                          // Phone number shown separately (not as identity)
+                          if (phone != null && phone.isNotEmpty)
+                            Text(
+                              phone,
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.white.withOpacity(0.4),
+                              ),
+                            ),
+
+                          const SizedBox(height: 16),
 
                           // Bio
                           if (bio != null && bio.isNotEmpty)
@@ -171,7 +199,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                                                 '/chat',
                                                 arguments: {
                                                   'chatId': chat['id'],
-                                                  'chatName': username,
+                                                  'chatName': displayName,
                                                   'chatAvatar': avatarUrl,
                                                   'isGroup': false,
                                                 },
@@ -232,7 +260,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                                     label: isBlocked ? 'Unblock' : 'Block',
                                     color: isBlocked ? Colors.grey : Colors.red,
                                     isLoading: _isBlocking,
-                                    onTap: () => _toggleBlock(currentUserId, userId, isBlocked, username),
+                                    onTap: () => _toggleBlock(currentUserId, userId, isBlocked, displayName),
                                   ),
                                 ),
                               ],
@@ -251,7 +279,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
   }
 
   /// Toggle block/unblock user
-  Future<void> _toggleBlock(String currentUserId, String targetUserId, bool isBlocked, String username) async {
+  Future<void> _toggleBlock(String currentUserId, String targetUserId, bool isBlocked, String displayName) async {
     setState(() => _isBlocking = true);
 
     try {
@@ -264,7 +292,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
         }, SetOptions(merge: true));
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Unblocked @$username')),
+            SnackBar(content: Text('Unblocked $displayName')),
           );
         }
       } else {
@@ -276,7 +304,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Blocked @$username'),
+              content: Text('Blocked $displayName'),
               backgroundColor: Colors.red,
             ),
           );
@@ -336,7 +364,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
   }
 
   /// Report user dialog
-  void _showReportDialog(BuildContext context, String? reportedUserId, String reportedUsername) {
+  void _showReportDialog(BuildContext context, String? reportedUserId, String reportedDisplayName) {
     final reasonController = TextEditingController();
 
     showDialog(
@@ -345,7 +373,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
         backgroundColor: const Color(0xFF1a103c),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text(
-          'Report @$reportedUsername?',
+          'Report $reportedDisplayName?',
           style: const TextStyle(color: Colors.white, fontSize: 18),
         ),
         content: Column(
@@ -394,7 +422,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                 await FirebaseFirestore.instance.collection('reports').add({
                   'reporter_id': currentUserId,
                   'reported_user_id': reportedUserId,
-                  'reported_username': reportedUsername,
+                  'reported_username': reportedDisplayName,
                   'reason': reasonController.text.trim().isEmpty ? 'No reason provided' : reasonController.text.trim(),
                   'status': 'pending',
                   'created_at': FieldValue.serverTimestamp(),
@@ -424,8 +452,8 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     );
   }
 
-  Widget _buildAvatar(String? avatarUrl, String username) {
-    final initial = username.isNotEmpty ? username[0].toUpperCase() : '?';
+  Widget _buildAvatar(String? avatarUrl, String displayName) {
+    final initial = displayName.isNotEmpty ? displayName[0].toUpperCase() : '?';
 
     if (avatarUrl == null || avatarUrl.isEmpty) {
       return Container(
