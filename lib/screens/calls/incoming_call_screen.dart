@@ -34,20 +34,20 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
 
       String assetPath;
       switch (selectedRingtone) {
-        case 'ambition':
-          assetPath = 'assets/audio/ringtone_ambition.mp3';
-          break;
-        case 'fadded':
-          assetPath = 'assets/audio/ringtone_fadded.mp3';
-          break;
-        case 'Phonk':
-          assetPath = 'assets/audio/ringtone_phonk.mp3';
-          break;
-        case 'pop':
-        default:
-          assetPath = 'assets/audio/ringtone_pop.mp3';
-          break;
-      }
+  case 'phonk':
+    assetPath = 'assets/audio/ringtone_phonk.mp3';
+    break;
+  case 'fadded':
+    assetPath = 'assets/audio/ringtone_fadded.mp3';
+    break;
+  case 'pop':
+    assetPath = 'assets/audio/ringtone_pop.mp3';
+    break;
+  case 'default':
+  default:
+    assetPath = 'assets/audio/ringtone_ambition.mp3';
+    break;
+}
 
       await _audioPlayer.setLoopMode(LoopMode.all);
       await _audioPlayer.setAudioSource(AudioSource.asset(assetPath));
