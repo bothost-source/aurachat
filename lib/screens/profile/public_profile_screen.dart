@@ -131,16 +131,6 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
 
                           const SizedBox(height: 8),
 
-                          // Phone number shown separately (not as identity)
-                          if (phone != null && phone.isNotEmpty)
-                            Text(
-                              phone,
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: Colors.white.withOpacity(0.4),
-                              ),
-                            ),
-
                           const SizedBox(height: 16),
 
                           // Bio
