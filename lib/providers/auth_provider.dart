@@ -345,7 +345,7 @@ class AuraAuthProvider extends ChangeNotifier {
       return false;
     }
   }
-  void listenToAuthChanges() {
+    void listenToAuthChanges() {
     _auth.authStateChanges().listen((firebase_auth.User? user) {
       if (user != null) {
         _user = user;
@@ -353,8 +353,13 @@ class AuraAuthProvider extends ChangeNotifier {
         _loadUserProfile();
         OnlineStatusService.setOnline();
       } else {
-        OnlineStatusService.setOffline();
-        _clearAuth();
+        // FIX: Only clear if we have a real Firebase user
+        // Don't clear mock users on auth state changes
+        if (_user != null) {
+          OnlineStatusService.setOffline();
+          _clearAuth();
+        }
+        // If _mockUserId exists, keep mock auth alive
       }
       notifyListeners();
     });
