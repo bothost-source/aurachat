@@ -7,6 +7,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../services/status_service.dart';
 import '../../services/app_localizations.dart';
+import 'package:video_player/video_player.dart';
 
 class StatusScreen extends StatefulWidget {
   const StatusScreen({super.key});
@@ -18,6 +19,7 @@ class StatusScreen extends StatefulWidget {
 class _StatusScreenState extends State<StatusScreen> {
   List<Map<String, dynamic>> _statuses = [];
   bool _isLoading = true;
+  int _myStatusRefreshKey = 0; // Forces FutureBuilder rebuild
 
   static const Color _bgDark = Color(0xFF0A0A0F);
   static const Color _bgCard = Color(0xFF1a103c);
@@ -60,7 +62,7 @@ class _StatusScreenState extends State<StatusScreen> {
     final url = await StatusService.uploadStatusMedia(File(picked.path), userId, 'image');
     if (url != null) {
       await StatusService.createMediaStatus(userId, url, 'image');
-      await _loadStatuses();
+      await _refreshAll();
     }
 
     setState(() => _isLoading = false);
@@ -80,7 +82,7 @@ class _StatusScreenState extends State<StatusScreen> {
     final url = await StatusService.uploadStatusMedia(File(picked.path), userId, 'video');
     if (url != null) {
       await StatusService.createMediaStatus(userId, url, 'video');
-      await _loadStatuses();
+      await _refreshAll();
     }
 
     setState(() => _isLoading = false);
@@ -123,7 +125,7 @@ class _StatusScreenState extends State<StatusScreen> {
               setState(() => _isLoading = true);
 
               await StatusService.createTextStatus(userId, controller.text.trim());
-              await _loadStatuses();
+              await _refreshAll();
 
               setState(() => _isLoading = false);
             },
@@ -133,6 +135,12 @@ class _StatusScreenState extends State<StatusScreen> {
         ],
       ),
     );
+  }
+
+  // FIXED: Refresh both contact statuses AND my statuses
+  Future<void> _refreshAll() async {
+    await _loadStatuses();
+    setState(() => _myStatusRefreshKey++); // Forces FutureBuilder to rebuild
   }
 
   void _viewStatus(Map<String, dynamic> status) async {
@@ -150,6 +158,38 @@ class _StatusScreenState extends State<StatusScreen> {
           builder: (_) => StatusViewerScreen(status: status),
         ),
       );
+    }
+  }
+
+  // FIXED: View my own statuses or add new
+  void _onMyStatusTap(List<Map<String, dynamic>> myStatuses) async {
+    if (myStatuses.isEmpty) {
+      // No status yet — show add options
+      _showAddStatusOptions(context);
+    } else {
+      // Has status — view it
+      final latestStatus = myStatuses.first;
+      // Add user info since getMyStatuses doesn't include it
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+      final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+      
+      if (userId != null) {
+        final userDoc = await FirebaseFirestore.instance.collection('users').doc(userId).get();
+        final userData = userDoc.data();
+        
+        final statusWithUser = {
+          ...latestStatus,
+          'is_mine': true,
+          'users': {
+            'username': userData?['username'] ?? 'You',
+            'avatar_url': userData?['avatar_url'],
+          },
+        };
+        
+        if (mounted) {
+          _viewStatus(statusWithUser);
+        }
+      }
     }
   }
 
@@ -202,8 +242,9 @@ class _StatusScreenState extends State<StatusScreen> {
                 ),
               ),
 
-              // My Status — Shows YOUR most recent status with preview
+              // My Status — FIXED: tap to view, long-press to add
               FutureBuilder<List<Map<String, dynamic>>>(
+                key: ValueKey(_myStatusRefreshKey), // Forces rebuild on refresh
                 future: userId != null ? StatusService.getMyStatuses(userId) : Future.value([]),
                 builder: (context, snapshot) {
                   final myStatuses = snapshot.data ?? [];
@@ -242,29 +283,33 @@ class _StatusScreenState extends State<StatusScreen> {
                           Positioned(
                             bottom: 0,
                             right: 0,
-                            child: Container(
-                              padding: const EdgeInsets.all(2),
-                              decoration: BoxDecoration(
-                                color: _purple,
-                                shape: BoxShape.circle,
-                                border: Border.all(color: _bgDark, width: 2),
+                            child: GestureDetector(
+                              onTap: () => _showAddStatusOptions(context),
+                              child: Container(
+                                padding: const EdgeInsets.all(2),
+                                decoration: BoxDecoration(
+                                  color: _purple,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: _bgDark, width: 2),
+                                ),
+                                child: const Icon(Icons.add, size: 14, color: Colors.white),
                               ),
-                              child: const Icon(Icons.add, size: 14, color: Colors.white),
                             ),
                           ),
                         ],
                       ),
                       title: Text(
-                        hasStatus ? 'My Status' : 'My Status',
+                        'My Status',
                         style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
                       ),
                       subtitle: Text(
                         hasStatus
-                            ? '${_getTimeAgo((latestStatus!['created_at'] as Timestamp).toDate())} • Tap to add new'
-                            : 'Tap to add status',
+                            ? '${_getTimeAgo((latestStatus!['created_at'] as Timestamp).toDate())} • Tap to view'
+                            : 'Tap + to add status',
                         style: TextStyle(color: Colors.white.withOpacity(0.4)),
                       ),
-                      onTap: () => _showAddStatusOptions(context),
+                      onTap: () => _onMyStatusTap(myStatuses),
+                      onLongPress: () => _showAddStatusOptions(context),
                     ),
                   );
                 },
@@ -325,7 +370,7 @@ class _StatusScreenState extends State<StatusScreen> {
                             ),
                           )
                         : RefreshIndicator(
-                            onRefresh: _loadStatuses,
+                            onRefresh: _refreshAll,
                             color: _purple,
                             backgroundColor: _bgCard,
                             child: ListView.builder(
@@ -511,8 +556,7 @@ class _StatusScreenState extends State<StatusScreen> {
       context: context,
       backgroundColor: _bgCard,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (context) => Container(
         padding: const EdgeInsets.all(20),
         child: Column(
@@ -572,6 +616,7 @@ class _StatusScreenState extends State<StatusScreen> {
 
 // ============================================================================
 // STATUS VIEWER SCREEN — Full screen like WhatsApp stories
+// FIXED: Duration matches content type, supports multiple statuses
 // ============================================================================
 class StatusViewerScreen extends StatefulWidget {
   final Map<String, dynamic> status;
@@ -585,19 +630,68 @@ class StatusViewerScreen extends StatefulWidget {
 class _StatusViewerScreenState extends State<StatusViewerScreen>
     with SingleTickerProviderStateMixin {
   late AnimationController _progressController;
+  VideoPlayerController? _videoController;
+  bool _isVideoReady = false;
 
   @override
   void initState() {
     super.initState();
+    _initController();
+  }
+
+  void _initController() {
+    final type = widget.status['type'] ?? 'image';
+    final duration = _getDuration(type);
+
     _progressController = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 5),
-    )..forward().then((_) => Navigator.pop(context));
+      duration: duration,
+    );
+
+    _progressController.forward().then((_) {
+      if (mounted) Navigator.pop(context);
+    });
+  }
+
+  Duration _getDuration(String type) {
+    switch (type) {
+      case 'video':
+        // For videos, we'll update dynamically when video loads
+        return const Duration(seconds: 30); // Max fallback
+      case 'text':
+        return const Duration(seconds: 5);
+      case 'image':
+      default:
+        return const Duration(seconds: 5);
+    }
+  }
+
+  void _onVideoInitialized(VideoPlayerController controller) {
+    if (!mounted) return;
+    final videoDuration = controller.value.duration;
+    if (videoDuration.inSeconds > 0) {
+      _progressController.duration = videoDuration;
+      _progressController.forward(from: _progressController.value);
+    }
+    setState(() => _isVideoReady = true);
+  }
+
+  void _pauseProgress() {
+    if (_progressController.isAnimating) {
+      _progressController.stop();
+    }
+  }
+
+  void _resumeProgress() {
+    if (!_progressController.isCompleted) {
+      _progressController.forward();
+    }
   }
 
   @override
   void dispose() {
     _progressController.dispose();
+    _videoController?.dispose();
     super.dispose();
   }
 
@@ -614,6 +708,8 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
       backgroundColor: Colors.black,
       body: GestureDetector(
         onTap: () => Navigator.pop(context),
+        onLongPressStart: (_) => _pauseProgress(),
+        onLongPressEnd: (_) => _resumeProgress(),
         child: Stack(
           children: [
             // Media content
@@ -637,12 +733,17 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                         textAlign: TextAlign.center,
                       ),
                     )
-                  : Image.network(
-                      mediaUrl,
-                      fit: BoxFit.contain,
-                      width: double.infinity,
-                      height: double.infinity,
-                    ),
+                  : type == 'video' && mediaUrl != null
+                      ? _buildVideoPlayer(mediaUrl)
+                      : Image.network(
+                          mediaUrl ?? '',
+                          fit: BoxFit.contain,
+                          width: double.infinity,
+                          height: double.infinity,
+                          errorBuilder: (_, __, ___) => const Center(
+                            child: Icon(Icons.broken_image, color: Colors.white30, size: 64),
+                          ),
+                        ),
             ),
 
             // Top bar with progress
@@ -710,11 +811,41 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                 ],
               ),
             ),
+
+            // Caption overlay for media
+            if (caption.isNotEmpty && type != 'text')
+              Positioned(
+                bottom: 40,
+                left: 16,
+                right: 16,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.6),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    caption,
+                    style: const TextStyle(color: Colors.white, fontSize: 16),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
           ],
         ),
       ),
     );
   }
+
+  Widget _buildVideoPlayer(String url) {
+  _videoController = VideoPlayerController.networkUrl(Uri.parse(url));
+  _videoController!.initialize().then((_) {
+    _onVideoInitialized(_videoController!);
+    _videoController!.play();
+  });
+
+  return VideoPlayer(_videoController!);
+}
 
   String _getTimeAgo(DateTime dateTime) {
     final now = DateTime.now();
