@@ -252,4 +252,64 @@ class InvitationService {
       'type': data['type'] ?? 'group',
     };
   }
+
+  /// Regenerate an invitation link (invalidates old, creates new)
+  static Future<String?> regenerateLink(String chatId, String createdBy) async {
+    // Get current chat data
+    final chatDoc = await _firestore.collection('chats').doc(chatId).get();
+    if (!chatDoc.exists) return null;
+
+    final chatData = chatDoc.data()!;
+    final oldInvitation = chatData['invitation'] as Map<String, dynamic>?;
+    final chatName = chatData['name'] ?? 'Unknown';
+    final chatType = chatData['type'] ?? 'channel';
+
+    // Revoke old invitation if exists
+    if (oldInvitation != null) {
+      final oldCode = oldInvitation['code'] as String?;
+      if (oldCode != null) {
+        final oldQuery = await _firestore
+            .collection('invitations')
+            .where('code', isEqualTo: oldCode)
+            .limit(1)
+            .get();
+        if (oldQuery.docs.isNotEmpty) {
+          await _firestore.collection('invitations').doc(oldQuery.docs.first.id).update({
+            'is_active': false,
+            'revoked_at': FieldValue.serverTimestamp(),
+          });
+        }
+      }
+    }
+
+    // Create new invitation
+    final newCode = _generateRandomCode(8);
+    final newLink = 'https://aurachat.page.link/join/$newCode';
+    final invitationId = _firestore.collection('invitations').doc().id;
+
+    await _firestore.collection('invitations').doc(invitationId).set({
+      'id': invitationId,
+      'chat_id': chatId,
+      'chat_name': chatName,
+      'chat_type': chatType,
+      'code': newCode,
+      'link': newLink,
+      'created_by': createdBy,
+      'created_at': FieldValue.serverTimestamp(),
+      'expires_at': null,
+      'max_uses': null,
+      'used_count': 0,
+      'is_active': true,
+    });
+
+    await _firestore.collection('chats').doc(chatId).update({
+      'invitation': {
+        'code': newCode,
+        'link': newLink,
+        'enabled': true,
+      },
+    });
+
+    return newLink;
+  }
 }
