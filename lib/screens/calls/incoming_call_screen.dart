@@ -34,18 +34,18 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
 
       String assetPath;
       switch (selectedRingtone) {
-        case 'chill':
-          assetPath = 'assets/audio/ringtone_chill.mp3';
+        case 'ambition':
+          assetPath = 'assets/audio/ringtone_ambition.mp3';
           break;
-        case 'classic':
-          assetPath = 'assets/audio/ringtone_classic.mp3';
+        case 'fadded':
+          assetPath = 'assets/audio/ringtone_fadded.mp3';
           break;
-        case 'electronic':
-          assetPath = 'assets/audio/ringtone_electronic.mp3';
+        case 'Phonk':
+          assetPath = 'assets/audio/ringtone_phonk.mp3';
           break;
-        case 'default':
+        case 'pop':
         default:
-          assetPath = 'assets/audio/ringtone_default.mp3';
+          assetPath = 'assets/audio/ringtone_pop.mp3';
           break;
       }
 
@@ -55,8 +55,8 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
     } catch (e) {
       debugPrint('Ringtone error: $e');
       try {
-        await _audioPlayer.setReleaseMode(ReleaseMode.loop);
-        await _audioPlayer.setAudioSource(AudioSource.asset('assets/audio/ringtone_default.mp3'));
+        await _audioPlayer.setLoopMode(LoopMode.all);
+        await _audioPlayer.setAudioSource(AudioSource.asset('assets/audio/ringtone_ambition.mp3'));
         await _audioPlayer.play();
       } catch (_) {}
     }
