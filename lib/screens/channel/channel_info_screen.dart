@@ -645,7 +645,7 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
 
     try {
       final chatProvider = Provider.of<ChatProvider>(context, listen: false);
-      final success = await chatProvider.deleteChat(widget.chatId);
+      final success = await chatProvider.permanentlyDeleteChat(widget.chatId);
 
       if (success && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
