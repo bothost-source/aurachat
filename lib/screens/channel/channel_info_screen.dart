@@ -614,6 +614,66 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
     }
   }
 
+  /// ==================== DELETE CHANNEL (OWNER ONLY) ====================
+  Future<void> _deleteChannel() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1a103c),
+        title: const Text('Delete Channel?', style: TextStyle(color: Colors.white)),
+        content: const Text(
+          'This will permanently delete the channel and all its messages. This action cannot be undone.',
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel', style: TextStyle(color: Colors.white.withOpacity(0.5))),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade700),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() => _isLoading = true);
+
+    try {
+      final chatProvider = Provider.of<ChatProvider>(context, listen: false);
+      final success = await chatProvider.deleteChat(widget.chatId);
+
+      if (success && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Channel deleted'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        Navigator.pop(context);
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(chatProvider.error ?? 'Failed to delete channel'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: \$e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuraAuthProvider>(context);
@@ -714,6 +774,10 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
                     Expanded(child: _buildActionButton(icon: Icons.share, label: 'Invite', onTap: _shareInvitationLink)),
                     const SizedBox(width: 12),
                     Expanded(child: _buildActionButton(icon: Icons.exit_to_app, label: 'Leave', color: Colors.red, onTap: _leaveChannel)),
+                    if (isOwner) ...[
+                      const SizedBox(width: 12),
+                      Expanded(child: _buildActionButton(icon: Icons.delete_forever, label: 'Delete', color: Colors.red.shade700, onTap: _deleteChannel)),
+                    ],
                   ],
                 ),
                 const SizedBox(height: 24),
