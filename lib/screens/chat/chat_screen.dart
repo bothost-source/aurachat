@@ -114,6 +114,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
   Timer? _typingTimer;
   Timer? _statusTimer;
   final Map<String, Map<String, dynamic>> _userCache = {};
+  final ValueNotifier<bool> _hasText = ValueNotifier(false);
 
 
   @override
@@ -121,6 +122,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _initAudioPlayer();
+    _messageController.addListener(_onTextChanged);
+  }
+
+  void _onTextChanged() {
+    final newValue = _messageController.text.trim().isNotEmpty;
+    if (_hasText.value != newValue) {
+      _hasText.value = newValue;
+    }
   }
 
   void _initAudioPlayer() {
@@ -183,6 +192,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
 
   @override
   void dispose() {
+    _messageController.removeListener(_onTextChanged);
+    _hasText.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _messageController.dispose();
     _editController.dispose();
@@ -2787,43 +2798,54 @@ Future<void> _openLink(String url) async {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  // Mic or Send button
-                  if (_messageController.text.trim().isEmpty && !_isRecording)
-                    GestureDetector(
-                      onLongPressStart: (_) => _startRecording(),
-                      onLongPressEnd: (_) => _stopRecordingAndSend(),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: (_isBlocked && !_isGroup) || !_canSend || _isAnnouncementsOnly
-                              ? [Colors.grey, Colors.grey]
-                              : [const Color(0xFF8B5CF6), const Color(0xFF06B6D4)],
+                  // Mic or Send button — PERFECT FIX: ValueListenableBuilder for instant toggle
+                  ValueListenableBuilder<bool>(
+                    valueListenable: _hasText,
+                    builder: (context, hasText, child) {
+                      final isDisabled = (_isBlocked && !_isGroup) || !_canSend || _isAnnouncementsOnly;
+                      
+                      if (!hasText && !_isRecording) {
+                        // MIC BUTTON
+                        return GestureDetector(
+                          onLongPressStart: isDisabled ? null : (_) => _startRecording(),
+                          onLongPressEnd: isDisabled ? null : (_) => _stopRecordingAndSend(),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: isDisabled
+                                  ? [Colors.grey, Colors.grey]
+                                  : [const Color(0xFF8B5CF6), const Color(0xFF06B6D4)],
+                              ),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: IconButton(
+                              icon: const Icon(Icons.mic, color: Colors.white, size: 20),
+                              onPressed: null,
+                            ),
                           ),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: IconButton(
-                          icon: const Icon(Icons.mic, color: Colors.white, size: 20),
-                          onPressed: null,
-                        ),
-                      ),
-                    )
-                  else if (!_isRecording)
-                    Container(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: (_isBlocked && !_isGroup) || !_canSend || _isAnnouncementsOnly || _messageController.text.trim().isEmpty
-                            ? [Colors.grey, Colors.grey]
-                            : [const Color(0xFF8B5CF6), const Color(0xFF06B6D4)],
-                        ),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: IconButton(
-                        icon: const Icon(Icons.send, color: Colors.white, size: 20),
-                        onPressed: (_canSend && !_isAnnouncementsOnly && _messageController.text.trim().isNotEmpty && !(_isBlocked && !_isGroup))
-                          ? _sendTextMessage
-                          : null,
-                      ),
-                    ),
+                        );
+                      } else if (!_isRecording) {
+                        // SEND BUTTON
+                        return Container(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: isDisabled || !hasText
+                                ? [Colors.grey, Colors.grey]
+                                : [const Color(0xFF8B5CF6), const Color(0xFF06B6D4)],
+                            ),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: IconButton(
+                            icon: const Icon(Icons.send, color: Colors.white, size: 20),
+                            onPressed: (_canSend && !_isAnnouncementsOnly && hasText && !(_isBlocked && !_isGroup))
+                              ? _sendTextMessage
+                              : null,
+                          ),
+                        );
+                      }
+                      return const SizedBox.shrink();
+                    },
+                  ),
                 ],
               ),
             ),
@@ -3814,6 +3836,6 @@ class _FullScreenVideoPlayerState extends State<_FullScreenVideoPlayer> {
           ],
         ],
       ),
-    );
+    );    
   }
 }    
