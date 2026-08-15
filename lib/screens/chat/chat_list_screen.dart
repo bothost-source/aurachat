@@ -293,34 +293,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 );
               }
             },
-            onLongPress: isGroupOrChannel
-              ? () {
-                  if (isChannel) {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => ChannelInfoScreen(
-                          chatId: chat['id'],
-                          chatName: chat['name'] ?? 'Unknown',
-                          chatAvatar: chat['avatar_url'],
-                        ),
-                      ),
-                    );
-                  } else {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => GroupInfoScreen(
-                          chatId: chat['id'],
-                          chatName: chat['name'] ?? 'Unknown',
-                          chatAvatar: chat['avatar_url'],
-                          isChannel: false,
-                        ),
-                      ),
-                    );
-                  }
-                }
-              : null,
+            onLongPress: () => _showChatOptions(context, chat, isGroupOrChannel),
           ),
         );
       },
@@ -353,26 +326,41 @@ class _ChatListScreenState extends State<ChatListScreen> {
     final today = DateTime(now.year, now.month, now.day);
     final messageDate = DateTime(dateTime.year, dateTime.month, dateTime.day);
     final diffDays = today.difference(messageDate).inDays;
-    final diffMinutes = now.difference(dateTime).inMinutes;
-    final diffHours = now.difference(dateTime).inHours;
 
+    // FIX: Today — show time for older messages, "Now" only for very recent
     if (diffDays == 0) {
+      final diffMinutes = now.difference(dateTime).inMinutes;
       if (diffMinutes < 1) {
         return 'Now';
       } else if (diffMinutes < 60) {
         return '${diffMinutes}m ago';
       } else {
-        return '${diffHours}h ago';
+        // Show actual time instead of "Xh ago"
+        return _formatTimeOnly(dateTime);
       }
-    } else if (diffDays == 1) {
+    } 
+    // FIX: Yesterday
+    else if (diffDays == 1) {
       return 'Yesterday';
-    } else if (diffDays < 7) {
+    } 
+    // This week
+    else if (diffDays < 7) {
       return _getDayName(dateTime.weekday);
-    } else if (dateTime.year == now.year) {
+    } 
+    // This year
+    else if (dateTime.year == now.year) {
       return '${_getMonthName(dateTime.month)} ${dateTime.day}';
-    } else {
+    } 
+    // Different year
+    else {
       return '${_getMonthName(dateTime.month)} ${dateTime.day}, ${dateTime.year}';
     }
+  }
+  
+  String _formatTimeOnly(DateTime dateTime) {
+    final hour = dateTime.hour.toString().padLeft(2, '0');
+    final minute = dateTime.minute.toString().padLeft(2, '0');
+    return '$hour:$minute';
   }
 
   String _getDayName(int weekday) {
@@ -407,6 +395,194 @@ class _ChatListScreenState extends State<ChatListScreen> {
       child: Icon(
         isGroupOrChannel ? Icons.group : Icons.person,
         color: Theme.of(context).primaryColor,
+      ),
+    );
+  }
+
+  // NEW: Show options menu on long-press for any chat type
+  void _showChatOptions(BuildContext context, Map<String, dynamic> chat, bool isGroupOrChannel) {
+    final chatId = chat['id'] as String;
+    final chatName = chat['name'] as String? ?? 'Unknown';
+    final chatType = chat['type'] as String? ?? 'direct';
+    final isArchived = chat['is_archived'] == true;
+    final role = chat['role'] as String? ?? 'member';
+    final isOwner = role == 'owner';
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1a103c),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Drag handle
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 16),
+            
+            // Chat name header
+            Text(
+              chatName,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              isGroupOrChannel
+                ? (chatType == 'channel' ? 'Channel' : 'Group')
+                : 'Direct Message',
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.4),
+                fontSize: 12,
+              ),
+            ),
+            const Divider(color: Colors.white10, height: 24),
+            
+            // Mark as read / unread
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF06B6D4).withOpacity(0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.done_all, color: Color(0xFF06B6D4)),
+              ),
+              title: const Text('Mark as Read', style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(context);
+                Provider.of<ChatProvider>(context, listen: false).markMessagesAsRead(chatId);
+              },
+            ),
+            
+            // Archive / Unarchive
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withOpacity(0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  isArchived ? Icons.unarchive : Icons.archive,
+                  color: Colors.blue,
+                ),
+              ),
+              title: Text(
+                isArchived ? 'Unarchive' : 'Archive',
+                style: const TextStyle(color: Colors.white),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                if (isArchived) {
+                  Provider.of<ChatProvider>(context, listen: false).unarchiveChat(chatId);
+                } else {
+                  Provider.of<ChatProvider>(context, listen: false).archiveChat(chatId);
+                }
+              },
+            ),
+            
+            // Mute / Unmute notifications
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.notifications_off, color: Colors.orange),
+              ),
+              title: const Text('Mute Notifications', style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(context);
+                // TODO: Implement mute logic
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Notifications muted')),
+                );
+              },
+            ),
+            
+            // Info (for groups/channels)
+            if (isGroupOrChannel) ...[
+              const Divider(color: Colors.white10),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF8B5CF6).withOpacity(0.2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.info_outline, color: Color(0xFF8B5CF6)),
+                ),
+                title: const Text('Info', style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(context);
+                  if (chatType == 'channel') {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => ChannelInfoScreen(
+                          chatId: chatId,
+                          chatName: chatName,
+                          chatAvatar: chat['avatar_url'],
+                        ),
+                      ),
+                    );
+                  } else {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => GroupInfoScreen(
+                          chatId: chatId,
+                          chatName: chatName,
+                          chatAvatar: chat['avatar_url'],
+                          isChannel: false,
+                        ),
+                      ),
+                    );
+                  }
+                },
+              ),
+            ],
+            
+            // Delete (owner-only for groups/channels)
+            if (!isGroupOrChannel || isOwner) ...[
+              const Divider(color: Colors.white10),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withOpacity(0.2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.delete_outline, color: Colors.red),
+                ),
+                title: const Text('Delete Chat', style: TextStyle(color: Colors.red)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showDeleteDialog(context, chatId);
+                },
+              ),
+            ],
+            
+            const SizedBox(height: 8),
+          ],
+        ),
       ),
     );
   }
@@ -562,6 +738,7 @@ class _DirectChatTile extends StatelessWidget {
               ],
             ),
             onTap: onTap,
+            onLongPress: () => _showDirectChatOptions(context),
           ),
         );
       },
@@ -592,22 +769,33 @@ class _DirectChatTile extends StatelessWidget {
     final today = DateTime(now.year, now.month, now.day);
     final messageDate = DateTime(dateTime.year, dateTime.month, dateTime.day);
     final diffDays = today.difference(messageDate).inDays;
-    final diffMinutes = now.difference(dateTime).inMinutes;
-    final diffHours = now.difference(dateTime).inHours;
 
+    // FIX: Today
     if (diffDays == 0) {
+      final diffMinutes = now.difference(dateTime).inMinutes;
       if (diffMinutes < 1) return 'Now';
       if (diffMinutes < 60) return '${diffMinutes}m ago';
-      return '${diffHours}h ago';
-    } else if (diffDays == 1) {
+      // Show actual time instead of "Xh ago"
+      final hour = dateTime.hour.toString().padLeft(2, '0');
+      final minute = dateTime.minute.toString().padLeft(2, '0');
+      return '$hour:$minute';
+    } 
+    // FIX: Yesterday
+    else if (diffDays == 1) {
       return 'Yesterday';
-    } else if (diffDays < 7) {
+    } 
+    // This week
+    else if (diffDays < 7) {
       const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
       return days[dateTime.weekday - 1];
-    } else if (dateTime.year == now.year) {
+    } 
+    // This year
+    else if (dateTime.year == now.year) {
       const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       return '${months[dateTime.month - 1]} ${dateTime.day}';
-    } else {
+    } 
+    // Different year
+    else {
       const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       return '${months[dateTime.month - 1]} ${dateTime.day}, ${dateTime.year}';
     }
@@ -631,4 +819,132 @@ class _DirectChatTile extends StatelessWidget {
     
     return lastMessage;
   }
+
+  void _showDirectChatOptions(BuildContext context) {
+    final chatId = chat['id'] as String;
+    final isArchived = chat['is_archived'] == true;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1a103c),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 16),
+            
+            Text(
+              chat['name'] ?? 'Unknown',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Direct Message',
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.4),
+                fontSize: 12,
+              ),
+            ),
+            const Divider(color: Colors.white10, height: 24),
+            
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF06B6D4).withOpacity(0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.done_all, color: Color(0xFF06B6D4)),
+              ),
+              title: const Text('Mark as Read', style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(context);
+                Provider.of<ChatProvider>(context, listen: false).markMessagesAsRead(chatId);
+              },
+            ),
+            
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withOpacity(0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  isArchived ? Icons.unarchive : Icons.archive,
+                  color: Colors.blue,
+                ),
+              ),
+              title: Text(
+                isArchived ? 'Unarchive' : 'Archive',
+                style: const TextStyle(color: Colors.white),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                if (isArchived) {
+                  Provider.of<ChatProvider>(context, listen: false).unarchiveChat(chatId);
+                } else {
+                  Provider.of<ChatProvider>(context, listen: false).archiveChat(chatId);
+                }
+              },
+            ),
+            
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.notifications_off, color: Colors.orange),
+              ),
+              title: const Text('Mute Notifications', style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Notifications muted')),
+                );
+              },
+            ),
+            
+            const Divider(color: Colors.white10),
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.delete_outline, color: Colors.red),
+              ),
+              title: const Text('Delete Chat', style: TextStyle(color: Colors.red)),
+              onTap: () {
+                Navigator.pop(context);
+                onDelete();
+              },
+            ),
+            
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
 }
+   
