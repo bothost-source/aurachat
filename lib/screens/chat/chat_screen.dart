@@ -114,6 +114,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
   Timer? _typingTimer;
   Timer? _statusTimer;
   final Map<String, Map<String, dynamic>> _userCache = {};
+  final Set<String> _pendingUserFetches = {};
   final ValueNotifier<bool> _hasText = ValueNotifier(false);
 
 
@@ -528,10 +529,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
       }
 
       // Batch fetch all users at once
-      if (userIds.isNotEmpty) {
+      final missingUserIds = userIds.where((id) => !_userCache.containsKey(id) && !_pendingUserFetches.contains(id)).toSet();
+      
+      if (missingUserIds.isNotEmpty) {
+        _pendingUserFetches.addAll(missingUserIds);
+        
         final userDocs = await Future.wait(
-          userIds.map((id) => firestore.collection('users').doc(id).get()),
+          missingUserIds.map((id) => firestore.collection('users').doc(id).get()),
         );
+        
+        _pendingUserFetches.removeAll(missingUserIds);
         for (final userDoc in userDocs) {
           if (userDoc.exists) {
             final u = userDoc.data()!;
@@ -613,11 +620,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
           }
 
           // Fetch ALL missing users at once (not just from changes)
-          final missingUserIds = allSenderIds.where((id) => !_userCache.containsKey(id)).toSet();
+          final missingUserIds = allSenderIds
+              .where((id) => !_userCache.containsKey(id) && !_pendingUserFetches.contains(id))
+              .toSet();
+          
           if (missingUserIds.isNotEmpty) {
+            _pendingUserFetches.addAll(missingUserIds);
+            
             final userDocs = await Future.wait(
               missingUserIds.map((id) => firestore.collection('users').doc(id).get()),
             );
+            
+            _pendingUserFetches.removeAll(missingUserIds);
+            
             for (final userDoc in userDocs) {
               if (userDoc.exists) {
                 final u = userDoc.data()!;
@@ -2985,7 +3000,8 @@ Future<void> _openLink(String url) async {
     final content = message['content'] ?? '';
     final mediaUrl = message['media_url'];
     final createdAt = DateTime.parse(message['created_at']);
-    final user = message['users'];
+    final rawUser = message['users'];
+    final Map<String, dynamic>? user = rawUser is Map<String, dynamic> ? rawUser : null;
     final isEdited = message['is_edited'] == true;
     final senderId = message['sender_id'] as String?;
     final senderPhone = user?['phone_number'] as String?;
@@ -3058,7 +3074,7 @@ Future<void> _openLink(String url) async {
                               child: Padding(
                                 padding: const EdgeInsets.only(bottom: 4),
                                 child: VerifiedUsername(
-                                  username: user?['username'] ?? 'Unknown',
+                                  username: user?['username'] ?? (senderId != null ? 'Loading...' : 'Unknown'),
                                   phoneNumber: senderPhone,
                                   style: TextStyle(
                                     fontSize: 12, 
@@ -3679,7 +3695,7 @@ Future<void> _openLink(String url) async {
         ],
       ),
     );
-  }
+  }     
 
   String _formatFileSize(int bytes) {
     if (bytes < 1024) return '$bytes B';
