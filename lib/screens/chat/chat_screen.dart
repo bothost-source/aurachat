@@ -34,6 +34,7 @@ class ChatScreen extends StatefulWidget {
   final String? chatName;
   final String? chatAvatar;
   final bool isGroup;
+  final bool isChannel;
 
   const ChatScreen({
     super.key,
@@ -41,6 +42,7 @@ class ChatScreen extends StatefulWidget {
     this.chatName,
     this.chatAvatar,
     this.isGroup = false,
+    this.isChannel = false,
   });
 
   @override
@@ -99,6 +101,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
   String? _chatName;
   String? _chatAvatar;
   bool _isGroup = false;
+  bool _isChannel = false;
   String? _creatorPhone;
   String? _myRole;
   Map<String, dynamic>? _chatSettings;
@@ -163,6 +166,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
       _chatName = args['chatName'] as String?;
       _chatAvatar = args['chatAvatar'] as String?;
       _isGroup = args['isGroup'] as bool? ?? false;
+      _isChannel = args['isChannel'] as bool? ?? false;
     }
 
     if (_chatId != null && _messages.isEmpty && _isLoading) {
@@ -2298,19 +2302,19 @@ Future<void> _openLink(String url) async {
                 onPressed: () => Navigator.pop(context),
               ),
               title: GestureDetector(
-                onTap: _isGroup && _chatId != null
+                onTap: _chatId != null && (_isGroup || _isChannel)
                   ? () => Navigator.push(
                       context,
                       MaterialPageRoute(
                         builder: (context) => GroupInfoScreen(
                           chatId: _chatId!,
-                          chatName: _chatName ?? 'Group',
+                          chatName: _chatName ?? (_isChannel ? 'Channel' : 'Group'),
                           chatAvatar: _chatAvatar,
-                          isChannel: false,
+                          isChannel: _isChannel,
                         ),
                       ),
                     )
-                  : !_isGroup && _otherUserId != null && !_isBlocked
+                  : !_isGroup && !_isChannel && _otherUserId != null && !_isBlocked
                     ? () => Navigator.pushNamed(context, '/public_profile', arguments: {
                         'userId': _otherUserId,
                         'username': _chatName,
@@ -2385,7 +2389,7 @@ Future<void> _openLink(String url) async {
                   icon: const Icon(Icons.call, color: Colors.white70), 
                   onPressed: (_isBlocked && !_isGroup) ? _showBlockedWarning : () {}
                 ),
-                if (_isGroup && _chatId != null)
+                if ((_isGroup || _isChannel) && _chatId != null)
                   IconButton(
                     icon: const Icon(Icons.info_outline, color: Colors.white70),
                     onPressed: () => Navigator.push(
@@ -2393,9 +2397,9 @@ Future<void> _openLink(String url) async {
                       MaterialPageRoute(
                         builder: (context) => GroupInfoScreen(
                           chatId: _chatId!,
-                          chatName: _chatName ?? 'Group',
+                          chatName: _chatName ?? (_isChannel ? 'Channel' : 'Group'),
                           chatAvatar: _chatAvatar,
-                          isChannel: false,
+                          isChannel: _isChannel,
                         ),
                       ),
                     ),
