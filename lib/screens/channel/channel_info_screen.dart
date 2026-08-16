@@ -109,7 +109,6 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
       final newLink = await InvitationService.regenerateLink(widget.chatId, createdBy);
 
       if (newLink != null && mounted) {
-        // Reload to get the new code too
         await _loadInvitationLink();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -516,6 +515,19 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
               ListTile(
                 leading: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: const Color(0xFF8B5CF6).withOpacity(0.2), shape: BoxShape.circle), child: const Icon(Icons.admin_panel_settings, color: Color(0xFF8B5CF6))),
                 title: const Text('Promote to Admin', style: TextStyle(color: Colors.white)),
+                onTap: () Container(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(2))),
+            const SizedBox(height: 16),
+            Text(memberName, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 16),
+            if (myRole == 'owner' && memberRole == 'member')
+              ListTile(
+                leading: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: const Color(0xFF8B5CF6).withOpacity(0.2), shape: BoxShape.circle), child: const Icon(Icons.admin_panel_settings, color: Color(0xFF8B5CF6))),
+                title: const Text('Promote to Admin', style: TextStyle(color: Colors.white)),
                 onTap: () { Navigator.pop(context); chatProvider.promoteToAdmin(widget.chatId, memberId); },
               ),
             ListTile(
@@ -589,12 +601,39 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
       context: context,
       backgroundColor: const Color(0xFF1a103c),
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
       builder: (context) => ChannelSettingsSheet(chatId: widget.chatId, currentRole: currentRole),
     );
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // LEAVE CHANNEL (NON-OWNER ONLY)
+  // ═══════════════════════════════════════════════════════════════════════════
   Future<void> _leaveChannel() async {
+    // SECURITY FIX: Owner cannot leave, must delete instead
+    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+    final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+    
+    final chatDoc = await FirebaseFirestore.instance.collection('chats').doc(widget.chatId).get();
+    if (!chatDoc.exists) return;
+    
+    final data = chatDoc.data()!;
+    final myRole = (data['participants_data']?[userId]?['role'] ?? 'member') as String;
+    
+    if (myRole == 'owner') {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Owner cannot leave. Delete the channel instead.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -602,8 +641,15 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
         title: const Text('Leave Channel?', style: TextStyle(color: Colors.white)),
         content: const Text('You will no longer receive messages from this channel.', style: TextStyle(color: Colors.white70)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: Text('Cancel', style: TextStyle(color: Colors.white.withOpacity(0.5)))),
-          ElevatedButton(onPressed: () => Navigator.pop(context, true), style: ElevatedButton.styleFrom(backgroundColor: Colors.red), child: const Text('Leave')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel', style: TextStyle(color: Colors.white.withOpacity(0.5))),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Leave'),
+          ),
         ],
       ),
     );
@@ -614,8 +660,32 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
     }
   }
 
-  /// ==================== DELETE CHANNEL (OWNER ONLY) ====================
+  // ═══════════════════════════════════════════════════════════════════════════
+  // DELETE CHANNEL (OWNER ONLY)
+  // ═══════════════════════════════════════════════════════════════════════════
   Future<void> _deleteChannel() async {
+    // SECURITY FIX: Verify owner before showing dialog
+    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+    final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+    
+    final chatDoc = await FirebaseFirestore.instance.collection('chats').doc(widget.chatId).get();
+    if (!chatDoc.exists) return;
+    
+    final data = chatDoc.data()!;
+    final myRole = (data['participants_data']?[userId]?['role'] ?? 'member') as String;
+    
+    if (myRole != 'owner') {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Only the owner can delete this channel'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -666,7 +736,7 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: \$e'), backgroundColor: Colors.red),
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -769,14 +839,18 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
                 ),
                 const SizedBox(height: 24),
 
+                // Actions — FIX: Owner sees Delete, non-owner sees Leave
                 Row(
                   children: [
                     Expanded(child: _buildActionButton(icon: Icons.share, label: 'Invite', onTap: _shareInvitationLink)),
                     const SizedBox(width: 12),
-                    Expanded(child: _buildActionButton(icon: Icons.exit_to_app, label: 'Leave', color: Colors.red, onTap: _leaveChannel)),
-                    if (isOwner) ...[
+                    if (!isOwner) ...[
+                      Expanded(child: _buildActionButton(icon: Icons.exit_to_app, label: 'Leave', color: Colors.red, onTap: _leaveChannel)),
                       const SizedBox(width: 12),
+                    ],
+                    if (isOwner) ...[
                       Expanded(child: _buildActionButton(icon: Icons.delete_forever, label: 'Delete', color: Colors.red.shade700, onTap: _deleteChannel)),
+                      const SizedBox(width: 12),
                     ],
                   ],
                 ),
@@ -1219,7 +1293,10 @@ class _ChannelSettingsSheetState extends State<ChannelSettingsSheet> {
   Widget _buildToggle({required String label, String? subtitle, required bool value, required ValueChanged<bool>? onChanged}) {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(color: Colors.white.withOpacity(0.03), borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.03),
+        borderRadius: BorderRadius.circular(12),
+      ),
       child: SwitchListTile(
         title: Text(label, style: const TextStyle(color: Colors.white)),
         subtitle: subtitle != null ? Text(subtitle, style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 12)) : null,
