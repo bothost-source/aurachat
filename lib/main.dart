@@ -1,5 +1,4 @@
-import 'dart:async';  // FIX: Added for StreamSubscription
-
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -373,8 +372,6 @@ class AuraChatApp extends StatefulWidget {
 }
 
 class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
-  bool _initialLockChecked = false;
-
   @override
   void initState() {
     super.initState();
@@ -389,21 +386,7 @@ class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
           navigatorKey.currentState!.pushNamed('/chat', arguments: {'chatId': chatId});
         }
       };
-
-      // Check if lock should show on cold start
-      _checkInitialLock();
     });
-  }
-
-  Future<void> _checkInitialLock() async {
-    final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
-    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
-    final isAuthenticated = FirebaseAuth.instance.currentUser != null || authProvider.currentUserId != null;
-
-    if (isAuthenticated) {
-      await settingsProvider.shouldShowLockScreen();
-    }
-    setState(() => _initialLockChecked = true);
   }
 
   @override
@@ -418,7 +401,7 @@ class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
     final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
 
     if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
-      // App going to background — just save the timestamp, DO NOT lock yet
+      // App going to background — save timestamp
       settingsProvider.onAppBackground();
     } else if (state == AppLifecycleState.resumed) {
       // App coming back — check if timeout passed, then decide to lock
@@ -426,14 +409,9 @@ class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
       final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
       authProvider.refreshSession();
 
-      _checkLockOnResume();
+      // Check lock on resume (this will trigger rebuild if locked)
+      settingsProvider.shouldShowLockScreen();
     }
-  }
-
-  Future<void> _checkLockOnResume() async {
-    final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
-    await settingsProvider.shouldShowLockScreen();
-    // shouldShowLockScreen() calls notifyListeners() if locked, which triggers rebuild
   }
 
   @override
@@ -458,8 +436,8 @@ class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
             themeMode: themeProvider.themeMode,
             initialRoute: '/',
             builder: (context, child) {
-              final isLocked = context.select<SettingsProvider, bool>((s) => s.isLocked);
-              final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+              final settingsProvider = Provider.of<SettingsProvider>(context);
+              final isLocked = settingsProvider.isLocked;
               final app = CallListener(child: child!);
 
               // If locked, show lock screen OVER everything
@@ -467,7 +445,7 @@ class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
                 return _buildLockScreen(settingsProvider);
               }
 
-              // FIX: Check both Firebase user AND mock user for ban status
+              // Check ban status for authenticated users
               final currentUser = FirebaseAuth.instance.currentUser;
               final userId = currentUser?.uid ?? authProvider.currentUserId;
 
@@ -478,7 +456,7 @@ class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
                       .doc(userId)
                       .snapshots(),
                   builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting && !_initialLockChecked) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
                       return const Scaffold(
                         backgroundColor: Color(0xFF0A0A0F),
                         body: Center(child: CircularProgressIndicator(color: Color(0xFF8B5CF6))),
