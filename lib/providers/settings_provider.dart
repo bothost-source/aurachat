@@ -24,7 +24,7 @@ class SettingsProvider extends ChangeNotifier {
   bool _inAppVibrate = true;
   bool _showPreview = true;
 
-  // NEW: Call Ringtone
+  // Call Ringtone
   String _callRingtone = 'default';
 
   // Privacy Settings
@@ -49,7 +49,7 @@ class SettingsProvider extends ChangeNotifier {
   bool _saveToGallery = true;
 
   // =========================================================================
-  // APP LOCK TRACKING — ADDED
+  // APP LOCK TRACKING
   // =========================================================================
   DateTime? _lastBackgroundTime;
   bool _isLocked = false;
@@ -65,6 +65,7 @@ class SettingsProvider extends ChangeNotifier {
     _lastBackgroundTime = now;
     final prefs = await _prefs;
     await prefs.setInt('last_background_time', now.millisecondsSinceEpoch);
+    await prefs.setBool('has_ever_backgrounded', true);
   }
 
   /// Call this when app resumes — returns true if lock screen should show
@@ -80,7 +81,12 @@ class SettingsProvider extends ChangeNotifier {
 
     // No background time recorded — app was killed or first launch
     if (lastBg == null) {
-      // If lock is configured, lock on first open after fresh start too
+      // Only lock if this is a resume from background (not first install)
+      final hasEverBeenBackgrounded = prefs.getBool('has_ever_backgrounded') ?? false;
+      if (!hasEverBeenBackgrounded) {
+        return false; // First time user, don't lock
+      }
+      
       _isLocked = true;
       notifyListeners();
       return true;
@@ -137,7 +143,7 @@ class SettingsProvider extends ChangeNotifier {
   bool get inAppVibrate => _inAppVibrate;
   bool get showPreview => _showPreview;
 
-  // NEW: Call Ringtone Getter
+  // Call Ringtone Getter
   String get callRingtone => _callRingtone;
 
   bool get phoneNumberVisible => _phoneNumberVisible;
@@ -179,7 +185,7 @@ class SettingsProvider extends ChangeNotifier {
     _inAppVibrate = prefs.getBool('in_app_vibrate') ?? true;
     _showPreview = prefs.getBool('show_preview') ?? true;
 
-    // NEW: Load Call Ringtone
+    // Load Call Ringtone
     _callRingtone = prefs.getString('call_ringtone') ?? 'default';
 
     // Privacy
@@ -239,7 +245,7 @@ class SettingsProvider extends ChangeNotifier {
         _inAppSounds = data['in_app_sounds'] ?? _inAppSounds;
         _inAppVibrate = data['in_app_vibrate'] ?? _inAppVibrate;
         _showPreview = data['show_preview'] ?? _showPreview;
-        // NEW: Sync Call Ringtone from Firebase
+        // Sync Call Ringtone from Firebase
         _callRingtone = data['call_ringtone'] ?? _callRingtone;
         // Privacy
         _phoneNumberVisible = data['phone_number_visible'] ?? _phoneNumberVisible;
@@ -276,6 +282,9 @@ class SettingsProvider extends ChangeNotifier {
         'user_id': userId,
         // Security
         'two_step_verification': _twoStepVerification,
+        'app_passcode': _appPasscode,
+        'biometric_lock': _biometricLock,
+        'auto_lock_timeout': _autoLockTimeout,
         // Privacy
         'phone_number_visible': _phoneNumberVisible,
         'last_seen_visible': _lastSeenVisible,
@@ -292,7 +301,7 @@ class SettingsProvider extends ChangeNotifier {
         // Theme & Language
         'theme_mode': _themeMode == ThemeMode.light ? 'light' : _themeMode == ThemeMode.system ? 'system' : 'dark',
         'language': _language,
-        // NEW: Save Call Ringtone to Firebase
+        // Call Ringtone
         'call_ringtone': _callRingtone,
         'updated_at': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
@@ -315,6 +324,7 @@ class SettingsProvider extends ChangeNotifier {
     final prefs = await _prefs;
     await prefs.setBool('app_passcode', value);
     notifyListeners();
+    _saveToFirebase();
   }
 
   Future<void> setBiometricLock(bool value) async {
@@ -322,6 +332,7 @@ class SettingsProvider extends ChangeNotifier {
     final prefs = await _prefs;
     await prefs.setBool('biometric_lock', value);
     notifyListeners();
+    _saveToFirebase();
   }
 
   Future<void> setPasscode(String value) async {
@@ -329,6 +340,7 @@ class SettingsProvider extends ChangeNotifier {
     final prefs = await _prefs;
     await prefs.setString('passcode', value);
     notifyListeners();
+    _saveToFirebase();
   }
 
   Future<void> setAutoLockTimeout(int value) async {
@@ -336,6 +348,7 @@ class SettingsProvider extends ChangeNotifier {
     final prefs = await _prefs;
     await prefs.setInt('auto_lock_timeout', value);
     notifyListeners();
+    _saveToFirebase();
   }
 
   // Notification Setters
@@ -388,7 +401,7 @@ class SettingsProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // NEW: Call Ringtone Setter
+  // Call Ringtone Setter
   Future<void> setCallRingtone(String ringtoneId) async {
     _callRingtone = ringtoneId;
     final prefs = await _prefs;
