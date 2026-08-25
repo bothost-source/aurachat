@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:path/path.dart' as path;
+import '../../services/cloudinary_service.dart';
 
 class StatusService {
   static final FirebaseStorage _storage = FirebaseStorage.instance;
@@ -37,7 +38,8 @@ class StatusService {
         'type': 'text',
         'created_at': Timestamp.now(),
         'expires_at': Timestamp.fromDate(expiresAt),
-        'viewed_by': [],
+        'view_count': 0,
+        'likes': [],
       });
       return true;
     } catch (e) {
@@ -58,7 +60,8 @@ class StatusService {
         'type': type,
         'created_at': Timestamp.now(),
         'expires_at': Timestamp.fromDate(expiresAt),
-        'viewed_by': [],
+        'view_count': 0,
+        'likes': [],
       });
       return true;
     } catch (e) {
@@ -67,13 +70,9 @@ class StatusService {
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // FIXED: Get statuses from saved contacts + user's own status
-  // Uses simple query + client-side filtering to avoid composite index issues
-  // ═══════════════════════════════════════════════════════════════════════════
+  // Get statuses from saved contacts + user's own status
   static Future<List<Map<String, dynamic>>> getContactStatuses(String userId) async {
     try {
-      // Get saved contacts for this user
       final contactsSnapshot = await _firestore
           .collection('users')
           .doc(userId)
@@ -81,7 +80,6 @@ class StatusService {
           .get();
 
       final contactIds = contactsSnapshot.docs.map((d) => d.id).toList();
-      // Always include userId so YOUR status shows even with no contacts
       final allUserIds = [...contactIds, userId];
 
       if (allUserIds.isEmpty) return [];
@@ -89,15 +87,12 @@ class StatusService {
       final statuses = <Map<String, dynamic>>[];
       final now = DateTime.now();
 
-      // Fetch in batches of 10 (Firestore whereIn limit)
       for (int i = 0; i < allUserIds.length; i += 10) {
         final batch = allUserIds.sublist(
           i,
           i + 10 > allUserIds.length ? allUserIds.length : i + 10,
         );
 
-        // FIXED: Simple query without orderBy to avoid composite index requirement
-        // We sort client-side instead
         final snapshot = await _firestore
             .collection('statuses')
             .where('user_id', whereIn: batch)
@@ -107,18 +102,23 @@ class StatusService {
           final data = doc.data();
           final expiresAt = (data['expires_at'] as Timestamp?)?.toDate();
           
-          // Client-side expiry check
           if (expiresAt == null || expiresAt.isBefore(now)) continue;
 
           final statusUserId = data['user_id'] as String;
-
-          // Get user info
           final userDoc = await _firestore.collection('users').doc(statusUserId).get();
           final userData = userDoc.data();
+
+          final viewsSnapshot = await _firestore
+              .collection('statuses')
+              .doc(doc.id)
+              .collection('views')
+              .get();
 
           statuses.add({
             'id': doc.id,
             ...data,
+            'view_count': viewsSnapshot.docs.length,
+            'likes': data['likes'] ?? [],
             'is_mine': statusUserId == userId,
             'users': {
               'username': userData?['username'] ?? 'Unknown',
@@ -128,7 +128,6 @@ class StatusService {
         }
       }
 
-      // Sort by created_at descending so newest appears first
       statuses.sort((a, b) {
         final aTime = (a['created_at'] as Timestamp).toDate();
         final bTime = (b['created_at'] as Timestamp).toDate();
@@ -145,16 +144,104 @@ class StatusService {
   // Mark a status as viewed by current user
   static Future<void> markAsViewed(String statusId, String userId) async {
     try {
-      await _firestore
+      final viewRef = _firestore
           .collection('statuses')
           .doc(statusId)
           .collection('views')
-          .doc(userId)
-          .set({
-        'viewed_at': Timestamp.now(),
-      });
+          .doc(userId);
+
+      final doc = await viewRef.get();
+      if (!doc.exists) {
+        await viewRef.set({
+          'viewed_at': Timestamp.now(),
+        });
+        
+        await _firestore.collection('statuses').doc(statusId).update({
+          'view_count': FieldValue.increment(1),
+        });
+      }
     } catch (e) {
       print('Mark as viewed error: $e');
+    }
+  }
+
+  // Toggle like on a status
+  static Future<void> toggleLike(String statusId, String userId) async {
+    try {
+      final docRef = _firestore.collection('statuses').doc(statusId);
+      final doc = await docRef.get();
+      
+      if (!doc.exists) return;
+      
+      final data = doc.data()!;
+      final likes = List<String>.from(data['likes'] ?? []);
+      
+      if (likes.contains(userId)) {
+        likes.remove(userId);
+      } else {
+        likes.add(userId);
+      }
+      
+      await docRef.update({'likes': likes});
+    } catch (e) {
+      print('Toggle like error: $e');
+    }
+  }
+
+  // Get views list with user details
+  static Future<List<Map<String, dynamic>>> getViews(String statusId) async {
+    try {
+      final viewsSnapshot = await _firestore
+          .collection('statuses')
+          .doc(statusId)
+          .collection('views')
+          .orderBy('viewed_at', descending: true)
+          .get();
+
+      final views = <Map<String, dynamic>>[];
+      
+      for (final viewDoc in viewsSnapshot.docs) {
+        final userId = viewDoc.id;
+        final userDoc = await _firestore.collection('users').doc(userId).get();
+        final userData = userDoc.data();
+        
+        views.add({
+          'user_id': userId,
+          'username': userData?['username'] ?? 'Unknown',
+          'avatar_url': userData?['avatar_url'],
+          'viewed_at': viewDoc.data()['viewed_at'],
+        });
+      }
+      
+      return views;
+    } catch (e) {
+      print('Get views error: $e');
+      return [];
+    }
+  }
+
+  // Reply to a status
+  static Future<bool> replyToStatus(String statusId, String userId, String text) async {
+    try {
+      final statusDoc = await _firestore.collection('statuses').doc(statusId).get();
+      if (!statusDoc.exists) return false;
+      
+      final statusData = statusDoc.data()!;
+      final recipientId = statusData['user_id'] as String;
+      
+      await _firestore.collection('messages').add({
+        'sender_id': userId,
+        'recipient_id': recipientId,
+        'text': text,
+        'status_reply_to': statusId,
+        'created_at': Timestamp.now(),
+        'read': false,
+      });
+      
+      return true;
+    } catch (e) {
+      print('Reply to status error: $e');
+      return false;
     }
   }
 
@@ -192,11 +279,10 @@ class StatusService {
     }
   }
 
-  // Get active statuses (not expired) — all users
+  // Get active statuses (not expired)
   static Future<List<Map<String, dynamic>>> getActiveStatuses() async {
     try {
       final now = Timestamp.now();
-      // FIXED: Simple query, client-side filter for user data
       final snapshot = await _firestore
           .collection('statuses')
           .where('expires_at', isGreaterThan: now)
@@ -211,9 +297,17 @@ class StatusService {
         final userDoc = await _firestore.collection('users').doc(userId).get();
         final userData = userDoc.data();
         
+        final viewsSnapshot = await _firestore
+            .collection('statuses')
+            .doc(doc.id)
+            .collection('views')
+            .get();
+
         statuses.add({
           'id': doc.id,
           ...data,
+          'view_count': viewsSnapshot.docs.length,
+          'likes': data['likes'] ?? [],
           'users': {
             'username': userData?['username'],
             'avatar_url': userData?['avatar_url'],
@@ -221,7 +315,6 @@ class StatusService {
         });
       }
 
-      // Sort client-side
       statuses.sort((a, b) {
         final aTime = (a['created_at'] as Timestamp).toDate();
         final bTime = (b['created_at'] as Timestamp).toDate();
@@ -235,8 +328,7 @@ class StatusService {
     }
   }
 
-  // Get my statuses — works for both Firebase and mock users
-  // FIXED: Simple query without composite index
+  // Get my statuses
   static Future<List<Map<String, dynamic>>> getMyStatuses(String userId) async {
     try {
       final snapshot = await _firestore
@@ -245,18 +337,27 @@ class StatusService {
           .get();
 
       final now = DateTime.now();
-      final statuses = snapshot.docs
-          .map((doc) => {
-            'id': doc.id,
-            ...doc.data(),
-          })
-          .where((s) {
-            final expiresAt = (s['expires_at'] as Timestamp?)?.toDate();
-            return expiresAt != null && expiresAt.isAfter(now);
-          })
-          .toList();
+      final statuses = <Map<String, dynamic>>[];
 
-      // Sort client-side
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+        final expiresAt = (data['expires_at'] as Timestamp?)?.toDate();
+        if (expiresAt == null || expiresAt.isBefore(now)) continue;
+
+        final viewsSnapshot = await _firestore
+            .collection('statuses')
+            .doc(doc.id)
+            .collection('views')
+            .get();
+
+        statuses.add({
+          'id': doc.id,
+          ...data,
+          'view_count': viewsSnapshot.docs.length,
+          'likes': data['likes'] ?? [],
+        });
+      }
+
       statuses.sort((a, b) {
         final aTime = (a['created_at'] as Timestamp).toDate();
         final bTime = (b['created_at'] as Timestamp).toDate();
@@ -270,7 +371,9 @@ class StatusService {
     }
   }
 
-  // Delete expired statuses (call periodically)
+  // ═══════════════════════════════════════════════════════════════════════════
+  // FIXED: Delete expired statuses + delete media from Cloudinary
+  // ═══════════════════════════════════════════════════════════════════════════
   static Future<void> deleteExpiredStatuses() async {
     try {
       final now = Timestamp.now();
@@ -279,19 +382,35 @@ class StatusService {
           .where('expires_at', isLessThan: now)
           .get();
 
+      int deletedCount = 0;
+      int cloudinaryDeleted = 0;
+
       for (final doc in snapshot.docs) {
         final data = doc.data();
-        if (data['media_url'] != null) {
-          try {
-            final mediaUrl = data['media_url'] as String;
-            final ref = _storage.refFromURL(mediaUrl);
-            await ref.delete();
-          } catch (e) {
-            print('Delete media error: $e');
-          }
+        
+        // Delete from Cloudinary
+        final publicId = data['cloudinary_public_id'] as String?;
+        final mediaUrl = data['media_url'] as String?;
+        
+        bool cloudinarySuccess = false;
+        
+        if (publicId != null && publicId.isNotEmpty) {
+          cloudinarySuccess = await CloudinaryService.deleteByPublicId(publicId);
+        } else if (mediaUrl != null && mediaUrl.isNotEmpty) {
+          cloudinarySuccess = await CloudinaryService.deleteFile(mediaUrl);
         }
+        
+        if (cloudinarySuccess) {
+          cloudinaryDeleted++;
+        }
+
+        // Delete the Firestore document
         await doc.reference.delete();
+        deletedCount++;
       }
+      
+      print('Deleted $deletedCount expired statuses');
+      print('Deleted $cloudinaryDeleted media files from Cloudinary');
     } catch (e) {
       print('Delete expired error: $e');
     }
