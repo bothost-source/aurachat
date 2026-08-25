@@ -51,6 +51,9 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // FIXED: Stores cloudinary_public_id for later deletion
+  // ═══════════════════════════════════════════════════════════════════════════
   Future<void> _createStatus() async {
     if (_textController.text.trim().isEmpty && _selectedImage == null) {
       _showError('Please add text or an image');
@@ -60,7 +63,6 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // FIX: Support both Firebase and mock users
       final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
       final userId = authProvider.user?.uid ?? authProvider.mockUserId;
 
@@ -69,34 +71,36 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
       }
 
       String? mediaUrl;
+      String? cloudinaryPublicId;
       String type = 'text';
 
       // Upload image via Cloudinary if selected
       if (_selectedImage != null) {
         type = 'image';
-        mediaUrl = await CloudinaryService.uploadImage(
+        final uploadResult = await CloudinaryService.uploadImageWithId(
           _selectedImage!,
           'aurachat/statuses/$userId',
         );
-        if (mediaUrl == null) {
+        if (uploadResult == null) {
           throw Exception('Failed to upload image to Cloudinary');
         }
+        mediaUrl = uploadResult.secureUrl;
+        cloudinaryPublicId = uploadResult.publicId;
       }
 
-      // FIX: Use same field names as StatusService and status_screen expects
       final now = DateTime.now();
       final expiresAt = now.add(const Duration(hours: 24));
 
       await FirebaseFirestore.instance.collection('statuses').add({
         'user_id': userId,
-        // FIX: Use 'caption' not 'text' — matches status_screen.dart and StatusService
         'caption': _textController.text.trim().isNotEmpty ? _textController.text.trim() : null,
         'media_url': mediaUrl,
-        // FIX: Add 'type' field so status_screen knows how to render it
+        'cloudinary_public_id': cloudinaryPublicId,
         'type': type,
         'created_at': Timestamp.fromDate(now),
         'expires_at': Timestamp.fromDate(expiresAt),
-        'viewed_by': [],
+        'view_count': 0,
+        'likes': [],
       });
 
       setState(() => _isLoading = false);
