@@ -1,532 +1,865 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:provider/provider.dart';
+import '../../providers/settings_provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../providers/auth_provider.dart' show AuraAuthProvider;
 
-class SettingsProvider extends ChangeNotifier {
-  final _prefs = SharedPreferences.getInstance();
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+class PrivacySettingsScreen extends StatefulWidget {
+  const PrivacySettingsScreen({super.key});
 
-  // Security Settings
-  bool _twoStepVerification = false;
-  bool _appPasscode = false;
-  bool _biometricLock = false;
-  String _passcode = '';
-  int _autoLockTimeout = 5; // minutes
+  @override
+  State<PrivacySettingsScreen> createState() => _PrivacySettingsScreenState();
+}
 
-  // Notification Settings
-  bool _messageTones = true;
-  bool _groupNotifications = true;
-  bool _channelNotifications = true;
-  bool _voiceVideoCalls = true;
-  bool _inAppSounds = true;
-  bool _inAppVibrate = true;
-  bool _showPreview = true;
+class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color(0xFF0A0A0F),
+              Color(0xFF1a103c),
+              Color(0xFF0d1b2a),
+              Color(0xFF0A0A0F),
+            ],
+            stops: [0.0, 0.3, 0.7, 1.0],
+          ),
+        ),
+        child: SafeArea(
+          child: Consumer<SettingsProvider>(
+            builder: (context, settings, child) {
+              return Column(
+                children: [
+                  // Header
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                    child: Row(
+                      children: [
+                        GestureDetector(
+                          onTap: () => Navigator.pop(context),
+                          child: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.05),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: Colors.white.withOpacity(0.08),
+                              ),
+                            ),
+                            child: Icon(
+                              Icons.arrow_back_ios_new_rounded,
+                              color: Colors.white.withOpacity(0.7),
+                              size: 18,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        const Text(
+                          'Privacy',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: -0.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
 
-  // Call Ringtone
-  String _callRingtone = 'default';
+                  const SizedBox(height: 16),
 
-  // Privacy Settings
-  bool _phoneNumberVisible = true;
-  bool _lastSeenVisible = true;
-  bool _profilePhotoVisible = true;
-  bool _forwardedMessages = true;
-  bool _addToGroups = true;
-  bool _voiceVideoCallsVisible = true;
-  bool _findByPhone = true;
-  bool _findByUsername = true;
+                  // Content
+                  Expanded(
+                    child: ListView(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      children: [
+                        // ── Who Can See My Info ──
+                        _buildSectionHeader('Who Can See My Info'),
+                        _buildGlassToggleTile(
+                          icon: Icons.phone_outlined,
+                          title: 'Phone Number',
+                          subtitle: 'Show my phone number to others',
+                          value: settings.phoneNumberVisible,
+                          onChanged: (v) {
+                            settings.setPhoneNumberVisible(v);
+                            _syncToFirestore(settings);
+                          },
+                        ),
+                        _buildGlassToggleTile(
+                          icon: Icons.access_time_outlined,
+                          title: 'Last Seen',
+                          subtitle: 'Show when I was last online',
+                          value: settings.lastSeenVisible,
+                          onChanged: (v) {
+                            settings.setLastSeenVisible(v);
+                            _syncToFirestore(settings);
+                          },
+                        ),
+                        _buildGlassToggleTile(
+                          icon: Icons.photo_outlined,
+                          title: 'Profile Photo',
+                          subtitle: 'Show my profile photo to others',
+                          value: settings.profilePhotoVisible,
+                          onChanged: (v) {
+                            settings.setProfilePhotoVisible(v);
+                            _syncToFirestore(settings);
+                          },
+                        ),
 
-  // Theme
-  ThemeMode _themeMode = ThemeMode.dark;
+                        const SizedBox(height: 24),
 
-  // Language
-  String _language = 'en';
+                        // ── Messaging ──
+                        _buildSectionHeader('Messaging'),
+                        _buildGlassToggleTile(
+                          icon: Icons.forward_to_inbox_outlined,
+                          title: 'Forwarded Messages',
+                          subtitle: 'Allow others to forward my messages',
+                          value: settings.forwardedMessages,
+                          onChanged: (v) {
+                            settings.setForwardedMessages(v);
+                            _syncToFirestore(settings);
+                          },
+                        ),
+                        _buildGlassToggleTile(
+                          icon: Icons.group_add_outlined,
+                          title: 'Add to Groups',
+                          subtitle: 'Allow others to add me to groups',
+                          value: settings.addToGroups,
+                          onChanged: (v) {
+                            settings.setAddToGroups(v);
+                            _syncToFirestore(settings);
+                          },
+                        ),
+                        _buildGlassToggleTile(
+                          icon: Icons.call_outlined,
+                          title: 'Voice & Video Calls',
+                          subtitle: 'Allow others to call me',
+                          value: settings.voiceVideoCallsVisible,
+                          onChanged: (v) {
+                            settings.setVoiceVideoCallsVisible(v);
+                            _syncToFirestore(settings);
+                          },
+                        ),
 
-  // Data Storage
-  bool _autoDownloadMedia = true;
-  bool _autoDownloadDocuments = false;
-  bool _saveToGallery = true;
+                        const SizedBox(height: 24),
 
-  // =========================================================================
-  // APP LOCK TRACKING
-  // =========================================================================
-  DateTime? _lastBackgroundTime;
-  bool _isLocked = false;
+                        // ── Find Me ──
+                        _buildSectionHeader('Find Me'),
+                        _buildGlassToggleTile(
+                          icon: Icons.phone_android_outlined,
+                          title: 'Find by Phone Number',
+                          subtitle: 'People can find me using my phone',
+                          value: settings.findByPhone,
+                          onChanged: (v) {
+                            settings.setFindByPhone(v);
+                            _syncToFirestore(settings);
+                          },
+                        ),
+                        _buildGlassToggleTile(
+                          icon: Icons.alternate_email_outlined,
+                          title: 'Find by Username',
+                          subtitle: 'People can find me using my username',
+                          value: settings.findByUsername,
+                          onChanged: (v) {
+                            settings.setFindByUsername(v);
+                            _syncToFirestore(settings);
+                          },
+                        ),
 
-  bool get isLocked => _isLocked;
+                        const SizedBox(height: 24),
 
-  /// Call this when app goes to background (paused/detached)
-  Future<void> onAppBackground() async {
-    // Only track if lock is actually configured
-    if (!_appPasscode && !_biometricLock) return;
+                        // ── Security ──
+                        _buildSectionHeader('Security'),
+                        _buildGlassToggleTile(
+                          icon: Icons.fingerprint,
+                          title: 'Biometric Lock',
+                          subtitle: 'Lock app with fingerprint/face',
+                          value: settings.biometricLock,
+                          onChanged: (v) {
+                            settings.setBiometricLock(v);
+                            _syncToFirestore(settings);
+                          },
+                        ),
+                        _buildGlassToggleTile(
+                          icon: Icons.lock_outline,
+                          title: 'App Passcode',
+                          subtitle: 'Lock app with a PIN',
+                          value: settings.appPasscode,
+                          onChanged: (v) {
+                            settings.setAppPasscode(v);
+                            _syncToFirestore(settings);
+                          },
+                        ),
 
-    final now = DateTime.now();
-    _lastBackgroundTime = now;
-    final prefs = await _prefs;
-    await prefs.setInt('last_background_time', now.millisecondsSinceEpoch);
-    await prefs.setBool('has_ever_backgrounded', true);
+                        // Auto-lock timeout picker
+                        if (settings.appPasscode || settings.biometricLock)
+                          _buildGlassActionTile(
+                            icon: Icons.timer_outlined,
+                            title: 'Auto-Lock Timeout',
+                            subtitle: '${settings.autoLockTimeout} minute${settings.autoLockTimeout == 1 ? '' : 's'}',
+                            onTap: () => _showTimeoutPicker(context, settings),
+                          ),
+
+                        // Change Passcode
+                        if (settings.appPasscode)
+                          _buildGlassActionTile(
+                            icon: Icons.pin_outlined,
+                            title: 'Change Passcode',
+                            subtitle: settings.passcode.isEmpty ? 'No passcode set' : 'Passcode is set',
+                            onTap: () => _showPasscodeDialog(context, settings),
+                          ),
+
+                        // Lock Now button
+                        if (settings.appPasscode || settings.biometricLock)
+                          _buildGlassActionTile(
+                            icon: Icons.lock_person_outlined,
+                            title: 'Lock Now',
+                            subtitle: 'Manually lock the app immediately',
+                            onTap: () {
+                              settings.lock();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: const Text('App locked. Reopen to authenticate.'),
+                                  backgroundColor: const Color(0xFF8B5CF6),
+                                  behavior: SnackBarBehavior.floating,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+
+                        const SizedBox(height: 24),
+
+                        // ── Info Card ──
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(20),
+                          child: BackdropFilter(
+                            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                            child: Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  colors: [
+                                    Colors.white.withOpacity(0.08),
+                                    Colors.white.withOpacity(0.02),
+                                  ],
+                                ),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: Colors.white.withOpacity(0.08),
+                                ),
+                              ),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF8B5CF6).withOpacity(0.15),
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: const Icon(
+                                      Icons.info_outline,
+                                      color: Color(0xFF8B5CF6),
+                                      size: 20,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(
+                                      'These settings control your visibility and how others can interact with you. Changes are saved locally and synced to your account when online.',
+                                      style: TextStyle(
+                                        color: Colors.white.withOpacity(0.4),
+                                        fontSize: 13,
+                                        height: 1.5,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(height: 32),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
   }
 
-  /// Call this when app resumes — returns true if lock screen should show
-  Future<bool> shouldShowLockScreen() async {
-    // No lock configured
-    if (!_appPasscode && !_biometricLock) return false;
+  Future<void> _syncToFirestore(SettingsProvider settings) async {
+    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+    final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+    if (userId == null) return;
 
-    // Already locked (e.g. manually locked)
-    if (_isLocked) return true;
-
-    final prefs = await _prefs;
-    final lastBg = prefs.getInt('last_background_time');
-
-    // No background time recorded — app was killed or first launch
-    if (lastBg == null) {
-      // Only lock if this is a resume from background (not first install)
-      final hasEverBeenBackgrounded = prefs.getBool('has_ever_backgrounded') ?? false;
-      if (!hasEverBeenBackgrounded) {
-        return false; // First time user, don't lock
-      }
-      
-      _isLocked = true;
-      notifyListeners();
-      return true;
-    }
-
-    final lastBgTime = DateTime.fromMillisecondsSinceEpoch(lastBg);
-    final now = DateTime.now();
-    final diff = now.difference(lastBgTime).inMinutes;
-
-    if (diff >= _autoLockTimeout) {
-      _isLocked = true;
-      notifyListeners();
-      return true;
-    }
-
-    // Timeout not reached — clear background time, stay unlocked
-    await prefs.remove('last_background_time');
-    _lastBackgroundTime = null;
-    return false;
+    await FirebaseFirestore.instance.collection('users').doc(userId).set({
+      'privacy_settings': {
+        'phone_number_visible': settings.phoneNumberVisible,
+        'last_seen_visible': settings.lastSeenVisible,
+        'profile_photo_visible': settings.profilePhotoVisible,
+        'forwarded_messages': settings.forwardedMessages,
+        'add_to_groups': settings.addToGroups,
+        'voice_video_calls_visible': settings.voiceVideoCallsVisible,
+        'find_by_phone': settings.findByPhone,
+        'find_by_username': settings.findByUsername,
+        'biometric_lock': settings.biometricLock,
+        'app_passcode': settings.appPasscode,
+        'auto_lock_timeout': settings.autoLockTimeout,
+      },
+      'updated_at': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
   }
 
-  /// Call this after successful unlock (biometric or passcode)
-  Future<void> unlock() async {
-    _isLocked = false;
-    final prefs = await _prefs;
-    await prefs.remove('last_background_time');
-    notifyListeners();
+  // ─── Auto-Lock Timeout Picker ───
+  void _showTimeoutPicker(BuildContext context, SettingsProvider settings) {
+    final options = [1, 5, 15, 30];
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFF1C1C1E),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          border: Border.all(color: Colors.white.withOpacity(0.08)),
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                margin: const EdgeInsets.only(top: 12),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.all(20),
+                child: Text(
+                  'Auto-Lock Timeout',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              ...options.map((minutes) => ListTile(
+                leading: Icon(
+                  Icons.timer_outlined,
+                  color: settings.autoLockTimeout == minutes
+                      ? const Color(0xFF8B5CF6)
+                      : Colors.white54,
+                ),
+                title: Text(
+                  '$minutes minute${minutes == 1 ? '' : 's'}',
+                  style: TextStyle(
+                    color: settings.autoLockTimeout == minutes
+                        ? const Color(0xFF8B5CF6)
+                        : Colors.white,
+                    fontWeight: settings.autoLockTimeout == minutes
+                        ? FontWeight.w600
+                        : FontWeight.normal,
+                  ),
+                ),
+                trailing: settings.autoLockTimeout == minutes
+                    ? const Icon(Icons.check_circle, color: Color(0xFF8B5CF6))
+                    : null,
+                onTap: () {
+                  settings.setAutoLockTimeout(minutes);
+                  _syncToFirestore(settings);
+                  Navigator.pop(context);
+                },
+              )),
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
-  /// For manual lock trigger
-  Future<void> lock() async {
-    _isLocked = true;
-    notifyListeners();
+  // ─── Section Header ───
+  Widget _buildSectionHeader(String title) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12, left: 4),
+      child: Text(
+        title,
+        style: TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w700,
+          color: const Color(0xFF8B5CF6).withOpacity(0.8),
+          letterSpacing: 0.5,
+        ),
+      ),
+    );
   }
 
-  /// Check if device supports biometric authentication
-  Future<bool> canUseBiometric() async {
-    // This would need local_auth package — return true for now
-    // In real implementation, check with LocalAuthentication().isDeviceSupported()
-    return true;
-  }
-  // =========================================================================
-  // END APP LOCK TRACKING
-  // =========================================================================
-
-  // Getters
-  bool get twoStepVerification => _twoStepVerification;
-  bool get appPasscode => _appPasscode;
-  bool get biometricLock => _biometricLock;
-  String get passcode => _passcode;
-  int get autoLockTimeout => _autoLockTimeout;
-
-  // Alias for appPasscode (used by lock screen)
-  bool get passcodeLock => _appPasscode;
-
-  bool get messageTones => _messageTones;
-  bool get groupNotifications => _groupNotifications;
-  bool get channelNotifications => _channelNotifications;
-  bool get voiceVideoCalls => _voiceVideoCalls;
-  bool get inAppSounds => _inAppSounds;
-  bool get inAppVibrate => _inAppVibrate;
-  bool get showPreview => _showPreview;
-
-  // Call Ringtone Getter
-  String get callRingtone => _callRingtone;
-
-  bool get phoneNumberVisible => _phoneNumberVisible;
-  bool get lastSeenVisible => _lastSeenVisible;
-  bool get profilePhotoVisible => _profilePhotoVisible;
-  bool get forwardedMessages => _forwardedMessages;
-  bool get addToGroups => _addToGroups;
-  bool get voiceVideoCallsVisible => _voiceVideoCallsVisible;
-  bool get findByPhone => _findByPhone;
-  bool get findByUsername => _findByUsername;
-
-  ThemeMode get themeMode => _themeMode;
-  String get language => _language;
-
-  bool get autoDownloadMedia => _autoDownloadMedia;
-  bool get autoDownloadDocuments => _autoDownloadDocuments;
-  bool get saveToGallery => _saveToGallery;
-
-  SettingsProvider() {
-    _loadSettings();
-  }
-
-  Future<void> _loadSettings() async {
-    final prefs = await _prefs;
-
-    // Security
-    _twoStepVerification = prefs.getBool('two_step_verification') ?? false;
-    _appPasscode = prefs.getBool('app_passcode') ?? false;
-    _biometricLock = prefs.getBool('biometric_lock') ?? false;
-    _passcode = prefs.getString('passcode') ?? '';
-    _autoLockTimeout = prefs.getInt('auto_lock_timeout') ?? 5;
-
-    // Notifications
-    _messageTones = prefs.getBool('message_tones') ?? true;
-    _groupNotifications = prefs.getBool('group_notifications') ?? true;
-    _channelNotifications = prefs.getBool('channel_notifications') ?? true;
-    _voiceVideoCalls = prefs.getBool('voice_video_calls') ?? true;
-    _inAppSounds = prefs.getBool('in_app_sounds') ?? true;
-    _inAppVibrate = prefs.getBool('in_app_vibrate') ?? true;
-    _showPreview = prefs.getBool('show_preview') ?? true;
-
-    // Load Call Ringtone
-    _callRingtone = prefs.getString('call_ringtone') ?? 'default';
-
-    // Privacy
-    _phoneNumberVisible = prefs.getBool('phone_number_visible') ?? true;
-    _lastSeenVisible = prefs.getBool('last_seen_visible') ?? true;
-    _profilePhotoVisible = prefs.getBool('profile_photo_visible') ?? true;
-    _forwardedMessages = prefs.getBool('forwarded_messages') ?? true;
-    _addToGroups = prefs.getBool('add_to_groups') ?? true;
-    _voiceVideoCallsVisible = prefs.getBool('voice_video_calls_visible') ?? true;
-    _findByPhone = prefs.getBool('find_by_phone') ?? true;
-    _findByUsername = prefs.getBool('find_by_username') ?? true;
-
-    // Theme
-    final themeString = prefs.getString('theme_mode') ?? 'dark';
-    _themeMode = themeString == 'light' ? ThemeMode.light : 
-                 themeString == 'system' ? ThemeMode.system : ThemeMode.dark;
-
-    // Language
-    _language = prefs.getString('language') ?? 'en';
-
-    // Data
-    _autoDownloadMedia = prefs.getBool('auto_download_media') ?? true;
-    _autoDownloadDocuments = prefs.getBool('auto_download_documents') ?? false;
-    _saveToGallery = prefs.getBool('save_to_gallery') ?? true;
-
-    notifyListeners();
-
-    _syncFromFirebase();
+  // ─── Glassmorphism Toggle Tile ───
+  Widget _buildGlassToggleTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Colors.white.withOpacity(0.08),
+                  Colors.white.withOpacity(0.02),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: value
+                    ? const Color(0xFF8B5CF6).withOpacity(0.2)
+                    : Colors.white.withOpacity(0.08),
+              ),
+              boxShadow: value
+                  ? [
+                      BoxShadow(
+                        color: const Color(0xFF8B5CF6).withOpacity(0.08),
+                        blurRadius: 20,
+                        spreadRadius: -5,
+                        offset: const Offset(0, 4),
+                      ),
+                    ]
+                  : null,
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF8B5CF6).withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: const Color(0xFF8B5CF6).withOpacity(0.2),
+                    ),
+                  ),
+                  child: Icon(
+                    icon,
+                    color: const Color(0xFF8B5CF6),
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.4),
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Switch(
+                  value: value,
+                  onChanged: onChanged,
+                  activeColor: const Color(0xFF8B5CF6),
+                  activeTrackColor: const Color(0xFF8B5CF6).withOpacity(0.3),
+                  inactiveThumbColor: Colors.grey,
+                  inactiveTrackColor: Colors.white12,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
-  String? _mockUserId;
-
-  void setMockUserId(String? id) {
-    _mockUserId = id;
+  // ─── Glassmorphism Action Tile ───
+  Widget _buildGlassActionTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: GestureDetector(
+            onTap: onTap,
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Colors.white.withOpacity(0.08),
+                    Colors.white.withOpacity(0.02),
+                  ],
+                ),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: Colors.white.withOpacity(0.08),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF8B5CF6).withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: const Color(0xFF8B5CF6).withOpacity(0.2),
+                      ),
+                    ),
+                    child: Icon(
+                      icon,
+                      color: const Color(0xFF8B5CF6),
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          subtitle,
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.4),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    color: Colors.white.withOpacity(0.3),
+                    size: 20,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
-  Future<void> _syncFromFirebase() async {
-    try {
-      final userId = _auth.currentUser?.uid ?? _mockUserId;
-      if (userId == null) return;
+  // ─── Passcode Dialog with Old Passcode Validation ───
+  void _showPasscodeDialog(BuildContext context, SettingsProvider settings) {
+    // Steps: 0 = enter old, 1 = enter new, 2 = confirm new
+    int step = settings.passcode.isEmpty ? 1 : 0;
+    String oldEntered = '';
+    String newEntered = '';
+    String confirm = '';
 
-      final doc = await _firestore.collection('user_settings').doc(userId).get();
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          String getTitle() {
+            switch (step) {
+              case 0: return 'Enter Current Passcode';
+              case 1: return 'Enter New Passcode';
+              case 2: return 'Confirm New Passcode';
+              default: return '';
+            }
+          }
 
-      if (doc.exists) {
-        final data = doc.data()!;
-        // Security
-        _twoStepVerification = data['two_step_verification'] ?? _twoStepVerification;
-        _appPasscode = data['app_passcode'] ?? _appPasscode;
-        _biometricLock = data['biometric_lock'] ?? _biometricLock;
-        _passcode = data['passcode'] ?? _passcode;
-        _autoLockTimeout = data['auto_lock_timeout'] ?? _autoLockTimeout;
-        // Notifications
-        _messageTones = data['message_tones'] ?? _messageTones;
-        _groupNotifications = data['group_notifications'] ?? _groupNotifications;
-        _channelNotifications = data['channel_notifications'] ?? _channelNotifications;
-        _voiceVideoCalls = data['voice_video_calls'] ?? _voiceVideoCalls;
-        _inAppSounds = data['in_app_sounds'] ?? _inAppSounds;
-        _inAppVibrate = data['in_app_vibrate'] ?? _inAppVibrate;
-        _showPreview = data['show_preview'] ?? _showPreview;
-        // Sync Call Ringtone from Firebase
-        _callRingtone = data['call_ringtone'] ?? _callRingtone;
-        // Privacy
-        _phoneNumberVisible = data['phone_number_visible'] ?? _phoneNumberVisible;
-        _lastSeenVisible = data['last_seen_visible'] ?? _lastSeenVisible;
-        _profilePhotoVisible = data['profile_photo_visible'] ?? _profilePhotoVisible;
-        _forwardedMessages = data['forwarded_messages'] ?? _forwardedMessages;
-        _addToGroups = data['add_to_groups'] ?? _addToGroups;
-        _voiceVideoCallsVisible = data['voice_video_calls_visible'] ?? _voiceVideoCallsVisible;
-        _findByPhone = data['find_by_phone'] ?? _findByPhone;
-        _findByUsername = data['find_by_username'] ?? _findByUsername;
-        // Theme
-        final themeString = data['theme_mode'] ?? 'dark';
-        _themeMode = themeString == 'light' ? ThemeMode.light : 
-                     themeString == 'system' ? ThemeMode.system : ThemeMode.dark;
-        // Language
-        _language = data['language'] ?? _language;
-        // Data
-        _autoDownloadMedia = data['auto_download_media'] ?? _autoDownloadMedia;
-        _autoDownloadDocuments = data['auto_download_documents'] ?? _autoDownloadDocuments;
-        _saveToGallery = data['save_to_gallery'] ?? _saveToGallery;
-        notifyListeners();
-      }
-    } catch (e) {
-      debugPrint('Sync from Firebase error: $e');
-    }
+          String getSubtitle() {
+            switch (step) {
+              case 0: return 'Verify your identity first';
+              case 1: return 'Choose a 6-digit PIN';
+              case 2: return 'Enter it again to confirm';
+              default: return '';
+            }
+          }
+
+          String currentInput() {
+            switch (step) {
+              case 0: return oldEntered;
+              case 1: return newEntered;
+              case 2: return confirm;
+              default: return '';
+            }
+          }
+
+          void onDigit(String d) {
+            setDialogState(() {
+              switch (step) {
+                case 0:
+                  if (oldEntered.length < 6) oldEntered += d;
+                  if (oldEntered.length == 6) {
+                    if (oldEntered == settings.passcode) {
+                      step = 1;
+                      oldEntered = '';
+                    } else {
+                      oldEntered = '';
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: const Text('Incorrect passcode. Try again.'),
+                          backgroundColor: Colors.red,
+                          behavior: SnackBarBehavior.floating,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      );
+                    }
+                  }
+                  break;
+                case 1:
+                  if (newEntered.length < 6) newEntered += d;
+                  if (newEntered.length == 6) step = 2;
+                  break;
+                case 2:
+                  if (confirm.length < 6) confirm += d;
+                  if (confirm.length == 6) {
+                    if (confirm == newEntered) {
+                      settings.setPasscode(confirm);
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: const Text('Passcode updated successfully'),
+                          backgroundColor: const Color(0xFF8B5CF6),
+                          behavior: SnackBarBehavior.floating,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      );
+                    } else {
+                      confirm = '';
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: const Text('Passcodes do not match. Try again.'),
+                          backgroundColor: Colors.red,
+                          behavior: SnackBarBehavior.floating,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      );
+                    }
+                  }
+                  break;
+              }
+            });
+          }
+
+          void onBackspace() {
+            setDialogState(() {
+              switch (step) {
+                case 0:
+                  if (oldEntered.isNotEmpty) oldEntered = oldEntered.substring(0, oldEntered.length - 1);
+                  break;
+                case 1:
+                  if (newEntered.isNotEmpty) newEntered = newEntered.substring(0, newEntered.length - 1);
+                  break;
+                case 2:
+                  if (confirm.isNotEmpty) confirm = confirm.substring(0, confirm.length - 1);
+                  break;
+              }
+            });
+          }
+
+          return Dialog(
+            backgroundColor: Colors.transparent,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(24),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                child: Container(
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        Colors.white.withOpacity(0.1),
+                        Colors.white.withOpacity(0.05),
+                      ],
+                    ),
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(
+                      color: Colors.white.withOpacity(0.1),
+                    ),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF8B5CF6).withOpacity(0.15),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: const Color(0xFF8B5CF6).withOpacity(0.3),
+                          ),
+                        ),
+                        child: Icon(
+                          step == 0 ? Icons.lock_outline : Icons.pin_outlined,
+                          size: 32,
+                          color: const Color(0xFF8B5CF6),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        getTitle(),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        getSubtitle(),
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.5),
+                          fontSize: 13,
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      // Dots
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: List.generate(6, (index) {
+                          final current = currentInput();
+                          return Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 6),
+                            width: 14,
+                            height: 14,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: index < current.length
+                                  ? const Color(0xFF8B5CF6)
+                                  : Colors.white.withOpacity(0.2),
+                              boxShadow: index < current.length
+                                  ? [
+                                      BoxShadow(
+                                        color: const Color(0xFF8B5CF6).withOpacity(0.5),
+                                        blurRadius: 8,
+                                        spreadRadius: 1,
+                                      ),
+                                    ]
+                                  : null,
+                            ),
+                          );
+                        }),
+                      ),
+                      const SizedBox(height: 24),
+                      // Number pad
+                      GridView.count(
+                        shrinkWrap: true,
+                        crossAxisCount: 3,
+                        childAspectRatio: 1.5,
+                        physics: const NeverScrollableScrollPhysics(),
+                        children: [
+                          for (var i = 1; i <= 9; i++)
+                            _buildDigitButton(i.toString(), () => onDigit(i.toString())),
+                          const SizedBox.shrink(),
+                          _buildDigitButton('0', () => onDigit('0')),
+                          IconButton(
+                            onPressed: onBackspace,
+                            icon: Icon(
+                              Icons.backspace_outlined,
+                              color: Colors.white.withOpacity(0.6),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: Text(
+                          'Cancel',
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.5),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
   }
 
-  Future<void> _saveToFirebase() async {
-    try {
-      final userId = _auth.currentUser?.uid ?? _mockUserId;
-      if (userId == null) return;
-
-      await _firestore.collection('user_settings').doc(userId).set({
-        'user_id': userId,
-        // Security
-        'two_step_verification': _twoStepVerification,
-        'app_passcode': _appPasscode,
-        'biometric_lock': _biometricLock,
-        'auto_lock_timeout': _autoLockTimeout,
-        // Privacy
-        'phone_number_visible': _phoneNumberVisible,
-        'last_seen_visible': _lastSeenVisible,
-        'profile_photo_visible': _profilePhotoVisible,
-        'forwarded_messages': _forwardedMessages,
-        'add_to_groups': _addToGroups,
-        'voice_video_calls_visible': _voiceVideoCallsVisible,
-        'find_by_phone': _findByPhone,
-        'find_by_username': _findByUsername,
-        // Data Storage
-        'auto_download_media': _autoDownloadMedia,
-        'auto_download_documents': _autoDownloadDocuments,
-        'save_to_gallery': _saveToGallery,
-        // Theme & Language
-        'theme_mode': _themeMode == ThemeMode.light ? 'light' : _themeMode == ThemeMode.system ? 'system' : 'dark',
-        'language': _language,
-        // Call Ringtone
-        'call_ringtone': _callRingtone,
-        'updated_at': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-    } catch (e) {
-      debugPrint('Save to Firebase error: $e');
-    }
-  }
-
-  // Security Setters
-  Future<void> setTwoStepVerification(bool value) async {
-    _twoStepVerification = value;
-    final prefs = await _prefs;
-    await prefs.setBool('two_step_verification', value);
-    notifyListeners();
-    _saveToFirebase();
-  }
-
-  Future<void> setAppPasscode(bool value) async {
-    _appPasscode = value;
-    final prefs = await _prefs;
-    await prefs.setBool('app_passcode', value);
-    notifyListeners();
-    _saveToFirebase();
-  }
-
-  Future<void> setBiometricLock(bool value) async {
-    _biometricLock = value;
-    final prefs = await _prefs;
-    await prefs.setBool('biometric_lock', value);
-    notifyListeners();
-    _saveToFirebase();
-  }
-
-  Future<void> setPasscode(String value) async {
-    _passcode = value;
-    final prefs = await _prefs;
-    await prefs.setString('passcode', value);
-    notifyListeners();
-    _saveToFirebase();
-  }
-
-  Future<void> setAutoLockTimeout(int value) async {
-    _autoLockTimeout = value;
-    final prefs = await _prefs;
-    await prefs.setInt('auto_lock_timeout', value);
-    notifyListeners();
-    _saveToFirebase();
-  }
-
-  // Notification Setters
-  Future<void> setMessageTones(bool value) async {
-    _messageTones = value;
-    final prefs = await _prefs;
-    await prefs.setBool('message_tones', value);
-    notifyListeners();
-  }
-
-  Future<void> setGroupNotifications(bool value) async {
-    _groupNotifications = value;
-    final prefs = await _prefs;
-    await prefs.setBool('group_notifications', value);
-    notifyListeners();
-  }
-
-  Future<void> setChannelNotifications(bool value) async {
-    _channelNotifications = value;
-    final prefs = await _prefs;
-    await prefs.setBool('channel_notifications', value);
-    notifyListeners();
-  }
-
-  Future<void> setVoiceVideoCalls(bool value) async {
-    _voiceVideoCalls = value;
-    final prefs = await _prefs;
-    await prefs.setBool('voice_video_calls', value);
-    notifyListeners();
-  }
-
-  Future<void> setInAppSounds(bool value) async {
-    _inAppSounds = value;
-    final prefs = await _prefs;
-    await prefs.setBool('in_app_sounds', value);
-    notifyListeners();
-  }
-
-  Future<void> setInAppVibrate(bool value) async {
-    _inAppVibrate = value;
-    final prefs = await _prefs;
-    await prefs.setBool('in_app_vibrate', value);
-    notifyListeners();
-  }
-
-  Future<void> setShowPreview(bool value) async {
-    _showPreview = value;
-    final prefs = await _prefs;
-    await prefs.setBool('show_preview', value);
-    notifyListeners();
-  }
-
-  // Call Ringtone Setter
-  Future<void> setCallRingtone(String ringtoneId) async {
-    _callRingtone = ringtoneId;
-    final prefs = await _prefs;
-    await prefs.setString('call_ringtone', ringtoneId);
-    notifyListeners();
-    _saveToFirebase();
-  }
-
-  // Privacy Setters
-  Future<void> setPhoneNumberVisible(bool value) async {
-    _phoneNumberVisible = value;
-    final prefs = await _prefs;
-    await prefs.setBool('phone_number_visible', value);
-    notifyListeners();
-    _saveToFirebase();
-  }
-
-  Future<void> setLastSeenVisible(bool value) async {
-    _lastSeenVisible = value;
-    final prefs = await _prefs;
-    await prefs.setBool('last_seen_visible', value);
-    notifyListeners();
-    _saveToFirebase();
-  }
-
-  Future<void> setProfilePhotoVisible(bool value) async {
-    _profilePhotoVisible = value;
-    final prefs = await _prefs;
-    await prefs.setBool('profile_photo_visible', value);
-    notifyListeners();
-    _saveToFirebase();
-  }
-
-  Future<void> setForwardedMessages(bool value) async {
-    _forwardedMessages = value;
-    final prefs = await _prefs;
-    await prefs.setBool('forwarded_messages', value);
-    notifyListeners();
-    _saveToFirebase();
-  }
-
-  Future<void> setAddToGroups(bool value) async {
-    _addToGroups = value;
-    final prefs = await _prefs;
-    await prefs.setBool('add_to_groups', value);
-    notifyListeners();
-    _saveToFirebase();
-  }
-
-  Future<void> setVoiceVideoCallsVisible(bool value) async {
-    _voiceVideoCallsVisible = value;
-    final prefs = await _prefs;
-    await prefs.setBool('voice_video_calls_visible', value);
-    notifyListeners();
-    _saveToFirebase();
-  }
-
-  Future<void> setFindByPhone(bool value) async {
-    _findByPhone = value;
-    final prefs = await _prefs;
-    await prefs.setBool('find_by_phone', value);
-    notifyListeners();
-    _saveToFirebase();
-  }
-
-  Future<void> setFindByUsername(bool value) async {
-    _findByUsername = value;
-    final prefs = await _prefs;
-    await prefs.setBool('find_by_username', value);
-    notifyListeners();
-    _saveToFirebase();
-  }
-
-  // Theme
-  Future<void> setThemeMode(ThemeMode mode) async {
-    _themeMode = mode;
-    final prefs = await _prefs;
-    String modeString = 'dark';
-    if (mode == ThemeMode.light) modeString = 'light';
-    if (mode == ThemeMode.system) modeString = 'system';
-    await prefs.setString('theme_mode', modeString);
-    notifyListeners();
-  }
-
-  // Language
-  Future<void> setLanguage(String lang) async {
-    _language = lang;
-    final prefs = await _prefs;
-    await prefs.setString('language', lang);
-    notifyListeners();
-  }
-
-  // Data Storage Setters
-  Future<void> setAutoDownloadMedia(bool value) async {
-    _autoDownloadMedia = value;
-    final prefs = await _prefs;
-    await prefs.setBool('auto_download_media', value);
-    notifyListeners();
-  }
-
-  Future<void> setAutoDownloadDocuments(bool value) async {
-    _autoDownloadDocuments = value;
-    final prefs = await _prefs;
-    await prefs.setBool('auto_download_documents', value);
-    notifyListeners();
-  }
-
-  Future<void> setSaveToGallery(bool value) async {
-    _saveToGallery = value;
-    final prefs = await _prefs;
-    await prefs.setBool('save_to_gallery', value);
-    notifyListeners();
-  }
-
-  // Reset all settings
-  Future<void> resetSettings() async {
-    final prefs = await _prefs;
-    await prefs.clear();
-    await _loadSettings();
+  Widget _buildDigitButton(String digit, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(40),
+      child: Container(
+        alignment: Alignment.center,
+        child: Text(
+          digit,
+          style: const TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.w500,
+            color: Colors.white,
+          ),
+        ),
+      ),
+    );
   }
 }
