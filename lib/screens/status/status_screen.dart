@@ -19,7 +19,7 @@ class StatusScreen extends StatefulWidget {
 class _StatusScreenState extends State<StatusScreen> {
   List<Map<String, dynamic>> _statuses = [];
   bool _isLoading = true;
-  int _myStatusRefreshKey = 0; // Forces FutureBuilder rebuild
+  int _myStatusRefreshKey = 0;
 
   static const Color _bgDark = Color(0xFF0A0A0F);
   static const Color _bgCard = Color(0xFF1a103c);
@@ -30,6 +30,7 @@ class _StatusScreenState extends State<StatusScreen> {
   void initState() {
     super.initState();
     _loadStatuses();
+    unawaited(StatusService.deleteExpiredStatuses());
   }
 
   Future<void> _loadStatuses() async {
@@ -137,10 +138,9 @@ class _StatusScreenState extends State<StatusScreen> {
     );
   }
 
-  // FIXED: Refresh both contact statuses AND my statuses
   Future<void> _refreshAll() async {
     await _loadStatuses();
-    setState(() => _myStatusRefreshKey++); // Forces FutureBuilder to rebuild
+    setState(() => _myStatusRefreshKey++);
   }
 
   void _viewStatus(Map<String, dynamic> status) async {
@@ -157,19 +157,17 @@ class _StatusScreenState extends State<StatusScreen> {
         MaterialPageRoute(
           builder: (_) => StatusViewerScreen(status: status),
         ),
-      );
+      ).then((_) {
+        _refreshAll();
+      });
     }
   }
 
-  // FIXED: View my own statuses or add new
   void _onMyStatusTap(List<Map<String, dynamic>> myStatuses) async {
     if (myStatuses.isEmpty) {
-      // No status yet — show add options
       _showAddStatusOptions(context);
     } else {
-      // Has status — view it
       final latestStatus = myStatuses.first;
-      // Add user info since getMyStatuses doesn't include it
       final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
       final userId = authProvider.user?.uid ?? authProvider.mockUserId;
       
@@ -210,7 +208,6 @@ class _StatusScreenState extends State<StatusScreen> {
         child: SafeArea(
           child: Column(
             children: [
-              // Header
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
                 child: Row(
@@ -242,9 +239,8 @@ class _StatusScreenState extends State<StatusScreen> {
                 ),
               ),
 
-              // My Status — FIXED: tap to view, long-press to add
               FutureBuilder<List<Map<String, dynamic>>>(
-                key: ValueKey(_myStatusRefreshKey), // Forces rebuild on refresh
+                key: ValueKey(_myStatusRefreshKey),
                 future: userId != null ? StatusService.getMyStatuses(userId) : Future.value([]),
                 builder: (context, snapshot) {
                   final myStatuses = snapshot.data ?? [];
@@ -302,11 +298,27 @@ class _StatusScreenState extends State<StatusScreen> {
                         'My Status',
                         style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
                       ),
-                      subtitle: Text(
-                        hasStatus
-                            ? '${_getTimeAgo((latestStatus!['created_at'] as Timestamp).toDate())} • Tap to view'
-                            : 'Tap + to add status',
-                        style: TextStyle(color: Colors.white.withOpacity(0.4)),
+                      subtitle: Row(
+                        children: [
+                          Text(
+                            hasStatus
+                                ? '${_getTimeAgo((latestStatus!['created_at'] as Timestamp).toDate())} • '
+                                : 'Tap + to add status',
+                            style: TextStyle(color: Colors.white.withOpacity(0.4)),
+                          ),
+                          if (hasStatus) ...[
+                            Icon(
+                              Icons.remove_red_eye,
+                              size: 12,
+                              color: Colors.white.withOpacity(0.3),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              '${latestStatus!['view_count'] ?? 0}',
+                              style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 12),
+                            ),
+                          ],
+                        ],
                       ),
                       onTap: () => _onMyStatusTap(myStatuses),
                       onLongPress: () => _showAddStatusOptions(context),
@@ -317,7 +329,6 @@ class _StatusScreenState extends State<StatusScreen> {
 
               const Divider(color: Colors.white12, indent: 24, endIndent: 24),
 
-              // Recent updates
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                 child: Align(
@@ -334,7 +345,6 @@ class _StatusScreenState extends State<StatusScreen> {
                 ),
               ),
 
-              // Statuses list
               Expanded(
                 child: _isLoading
                     ? const Center(
@@ -418,6 +428,8 @@ class _StatusScreenState extends State<StatusScreen> {
     final createdAt = (status['created_at'] as Timestamp).toDate();
     final timeAgo = _getTimeAgo(createdAt);
     final isMine = status['is_mine'] == true;
+    final viewCount = status['view_count'] ?? 0;
+    final likes = status['likes'] ?? [];
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -445,9 +457,35 @@ class _StatusScreenState extends State<StatusScreen> {
           isMine ? 'You' : username,
           style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
         ),
-        subtitle: Text(
-          timeAgo,
-          style: TextStyle(color: Colors.white.withOpacity(0.4)),
+        subtitle: Row(
+          children: [
+            Text(
+              timeAgo,
+              style: TextStyle(color: Colors.white.withOpacity(0.4)),
+            ),
+            const SizedBox(width: 8),
+            Icon(
+              Icons.remove_red_eye,
+              size: 14,
+              color: Colors.white.withOpacity(0.3),
+            ),
+            const SizedBox(width: 4),
+            Text(
+              '$viewCount',
+              style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 12),
+            ),
+            const SizedBox(width: 12),
+            Icon(
+              Icons.favorite,
+              size: 14,
+              color: Colors.white.withOpacity(0.3),
+            ),
+            const SizedBox(width: 4),
+            Text(
+              '${likes.length}',
+              style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 12),
+            ),
+          ],
         ),
         trailing: type == 'text'
             ? Container(
@@ -615,8 +653,7 @@ class _StatusScreenState extends State<StatusScreen> {
 }
 
 // ============================================================================
-// STATUS VIEWER SCREEN — Full screen like WhatsApp stories
-// FIXED: Duration matches content type, supports multiple statuses
+// STATUS VIEWER SCREEN
 // ============================================================================
 class StatusViewerScreen extends StatefulWidget {
   final Map<String, dynamic> status;
@@ -632,11 +669,13 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
   late AnimationController _progressController;
   VideoPlayerController? _videoController;
   bool _isVideoReady = false;
+  bool _isLiked = false;
 
   @override
   void initState() {
     super.initState();
     _initController();
+    _checkIfLiked();
   }
 
   void _initController() {
@@ -653,11 +692,17 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
     });
   }
 
+  void _checkIfLiked() {
+    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+    final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+    final likes = widget.status['likes'] ?? [];
+    setState(() => _isLiked = likes.contains(userId));
+  }
+
   Duration _getDuration(String type) {
     switch (type) {
       case 'video':
-        // For videos, we'll update dynamically when video loads
-        return const Duration(seconds: 30); // Max fallback
+        return const Duration(seconds: 30);
       case 'text':
         return const Duration(seconds: 5);
       case 'image':
@@ -688,6 +733,149 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
     }
   }
 
+  Future<void> _toggleLike(String statusId) async {
+    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+    final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+    if (userId == null) return;
+
+    await StatusService.toggleLike(statusId, userId);
+    setState(() => _isLiked = !_isLiked);
+  }
+
+  void _showViewsList(String statusId) async {
+    _pauseProgress();
+    final views = await StatusService.getViews(statusId);
+
+    if (!mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1a103c),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'Viewed by ${views.length}',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 16),
+            if (views.isEmpty)
+              Text(
+                'No views yet',
+                style: TextStyle(color: Colors.white.withOpacity(0.4)),
+              )
+            else
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: views.length,
+                  itemBuilder: (context, index) {
+                    final view = views[index];
+                    return ListTile(
+                      leading: CircleAvatar(
+                        backgroundImage: view['avatar_url'] != null
+                            ? NetworkImage(view['avatar_url'])
+                            : null,
+                        backgroundColor: const Color(0xFF8B5CF6),
+                        child: view['avatar_url'] == null
+                            ? Text(
+                                (view['username'] ?? '?')[0].toUpperCase(),
+                                style: const TextStyle(color: Colors.white),
+                              )
+                            : null,
+                      ),
+                      title: Text(
+                        view['username'] ?? 'Unknown',
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                      subtitle: Text(
+                        _getTimeAgo((view['viewed_at'] as Timestamp).toDate()),
+                        style: TextStyle(color: Colors.white.withOpacity(0.4)),
+                      ),
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
+      ),
+    ).whenComplete(() => _resumeProgress());
+  }
+
+  void _showReplyDialog(Map<String, dynamic> status) {
+    _pauseProgress();
+    final controller = TextEditingController();
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1a103c),
+        title: const Text('Reply to Status', style: TextStyle(color: Colors.white)),
+        content: TextField(
+          controller: controller,
+          style: const TextStyle(color: Colors.white),
+          decoration: InputDecoration(
+            hintText: 'Type a message...',
+            hintStyle: TextStyle(color: Colors.white.withOpacity(0.4)),
+            filled: true,
+            fillColor: Colors.white.withOpacity(0.05),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _resumeProgress();
+            },
+            child: Text('Cancel', style: TextStyle(color: Colors.white.withOpacity(0.6))),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              if (controller.text.trim().isEmpty) return;
+              final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+              final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+              if (userId == null) return;
+
+              await StatusService.replyToStatus(status['id'], userId, controller.text.trim());
+              Navigator.pop(context);
+              _resumeProgress();
+              
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Reply sent!'),
+                    backgroundColor: Color(0xFF8B5CF6),
+                  ),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF8B5CF6)),
+            child: const Text('Send'),
+          ),
+        ],
+      ),
+    ).whenComplete(() => _resumeProgress());
+  }
+
   @override
   void dispose() {
     _progressController.dispose();
@@ -698,11 +886,16 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
   @override
   Widget build(BuildContext context) {
     final status = widget.status;
+    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+    final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+    final isMine = status['user_id'] == userId || status['is_mine'] == true;
     final username = status['users']?['username'] ?? 'Unknown';
     final avatar = status['users']?['avatar_url'];
     final mediaUrl = status['media_url'];
     final caption = status['caption'] ?? '';
     final type = status['type'] ?? 'image';
+    final viewCount = status['view_count'] ?? 0;
+    final likes = status['likes'] ?? [];
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -712,7 +905,6 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
         onLongPressEnd: (_) => _resumeProgress(),
         child: Stack(
           children: [
-            // Media content
             Center(
               child: type == 'text'
                   ? Container(
@@ -746,11 +938,9 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                         ),
             ),
 
-            // Top bar with progress
             SafeArea(
               child: Column(
                 children: [
-                  // Progress bar
                   AnimatedBuilder(
                     animation: _progressController,
                     builder: (context, child) {
@@ -762,7 +952,6 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                     },
                   ),
 
-                  // User info
                   Padding(
                     padding: const EdgeInsets.all(16),
                     child: Row(
@@ -812,10 +1001,92 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
               ),
             ),
 
-            // Caption overlay for media
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.bottomCenter,
+                    end: Alignment.topCenter,
+                    colors: [Colors.black.withOpacity(0.8), Colors.transparent],
+                  ),
+                ),
+                child: SafeArea(
+                  child: Row(
+                    children: [
+                      GestureDetector(
+                        onTap: () => _toggleLike(status['id']),
+                        child: Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.1),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            Icons.favorite,
+                            color: _isLiked ? Colors.red : Colors.white,
+                            size: 24,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '${likes.length}',
+                        style: const TextStyle(color: Colors.white, fontSize: 14),
+                      ),
+                      const SizedBox(width: 24),
+                      GestureDetector(
+                        onTap: isMine ? () => _showViewsList(status['id']) : null,
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.remove_red_eye,
+                              color: isMine ? Colors.white : Colors.white.withOpacity(0.5),
+                              size: 20,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              '$viewCount',
+                              style: TextStyle(
+                                color: isMine ? Colors.white : Colors.white.withOpacity(0.5),
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Spacer(),
+                      if (!isMine)
+                        GestureDetector(
+                          onTap: () => _showReplyDialog(status),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)]),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.reply, color: Colors.white, size: 18),
+                                SizedBox(width: 6),
+                                Text('Reply', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
             if (caption.isNotEmpty && type != 'text')
               Positioned(
-                bottom: 40,
+                bottom: 100,
                 left: 16,
                 right: 16,
                 child: Container(
@@ -838,14 +1109,14 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
   }
 
   Widget _buildVideoPlayer(String url) {
-  _videoController = VideoPlayerController.networkUrl(Uri.parse(url));
-  _videoController!.initialize().then((_) {
-    _onVideoInitialized(_videoController!);
-    _videoController!.play();
-  });
+    _videoController = VideoPlayerController.networkUrl(Uri.parse(url));
+    _videoController!.initialize().then((_) {
+      _onVideoInitialized(_videoController!);
+      _videoController!.play();
+    });
 
-  return VideoPlayer(_videoController!);
-}
+    return VideoPlayer(_videoController!);
+  }
 
   String _getTimeAgo(DateTime dateTime) {
     final now = DateTime.now();
