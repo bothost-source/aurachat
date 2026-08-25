@@ -362,6 +362,64 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // NEW: Permanently delete a group/channel (owner only)
+  // Deletes Firestore doc + all messages subcollection
+  // ═══════════════════════════════════════════════════════════════════════════
+  Future<bool> permanentlyDeleteChat(String chatId) async {
+    try {
+      final userId = _currentUserId;
+      if (userId == null) {
+        _error = 'Not authenticated';
+        notifyListeners();
+        return false;
+      }
+
+      // Verify ownership
+      final chatDoc = await _firestore.collection('chats').doc(chatId).get();
+      if (!chatDoc.exists) {
+        _error = 'Chat not found';
+        notifyListeners();
+        return false;
+      }
+
+      final chatData = chatDoc.data()!;
+      final myRole = (chatData['participants_data']?[userId]?['role'] ?? 'member') as String;
+
+      if (myRole != 'owner') {
+        _error = 'Only the owner can delete this group';
+        notifyListeners();
+        return false;
+      }
+
+      // Delete all messages in subcollection
+      final messagesSnapshot = await _firestore
+          .collection('chats')
+          .doc(chatId)
+          .collection('messages')
+          .get();
+
+      final batch = _firestore.batch();
+      for (final doc in messagesSnapshot.docs) {
+        batch.delete(doc.reference);
+      }
+      await batch.commit();
+
+      // Delete the chat document itself
+      await _firestore.collection('chats').doc(chatId).delete();
+
+      // Remove from local list
+      _chats.removeWhere((chat) => chat['id'] == chatId);
+      notifyListeners();
+
+      return true;
+    } catch (e) {
+      _error = 'Failed to delete group: $e';
+      notifyListeners();
+      return false;
+    }
+  }
+
   Future<void> archiveChat(String chatId) async {
     try {
       final userId = _currentUserId;
