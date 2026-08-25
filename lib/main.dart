@@ -513,6 +513,7 @@ class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
               '/bot_creator': (context) => const BotCreatorScreen(),
               '/privacy_settings': (context) => const PrivacySettingsScreen(),
               '/security': (context) => const SecurityScreen(),
+              '/restore_chats': (context) => const RestoreChatsScreen(),
               '/blocked_users': (context) => const BlockedUsersScreen(),
               '/appearance': (context) => const AppearanceScreen(),
               '/language': (context) => const LanguageScreen(),
