@@ -3,6 +3,19 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:cloudinary_public/cloudinary_public.dart';
 
+// ═══════════════════════════════════════════════════════════════════════════
+// NEW: Result class for uploads that need public_id
+// ═══════════════════════════════════════════════════════════════════════════
+class CloudinaryUploadResult {
+  final String secureUrl;
+  final String publicId;
+
+  CloudinaryUploadResult({
+    required this.secureUrl,
+    required this.publicId,
+  });
+}
+
 class CloudinaryService {
   static final _cloudinary = CloudinaryPublic(
     'dn2mwp1lc',
@@ -15,6 +28,58 @@ class CloudinaryService {
 
   // Backend API key for delete authentication
   static const String _backendApiKey = 'aura_chat_secret_2026_xyz';
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // NEW: Upload methods that return both secureUrl AND public_id
+  // These are NEW — your existing uploadImage/uploadVideo are UNCHANGED below
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  static Future<CloudinaryUploadResult?> uploadImageWithId(File file, String folder) async {
+    try {
+      final response = await _cloudinary.uploadFile(
+        CloudinaryFile.fromFile(
+          file.path,
+          folder: folder,
+          resourceType: CloudinaryResourceType.Image,
+        ),
+      );
+      print('Cloudinary image upload successful: ${response.secureUrl}');
+      return CloudinaryUploadResult(
+        secureUrl: response.secureUrl,
+        publicId: response.publicId,
+      );
+    } catch (e, stackTrace) {
+      print('Cloudinary image upload error: $e');
+      print('Stack trace: $stackTrace');
+      return null;
+    }
+  }
+
+  static Future<CloudinaryUploadResult?> uploadVideoWithId(File file, String folder) async {
+    try {
+      final response = await _cloudinary.uploadFile(
+        CloudinaryFile.fromFile(
+          file.path,
+          folder: folder,
+          resourceType: CloudinaryResourceType.Video,
+        ),
+      );
+      print('Cloudinary video upload successful: ${response.secureUrl}');
+      return CloudinaryUploadResult(
+        secureUrl: response.secureUrl,
+        publicId: response.publicId,
+      );
+    } catch (e, stackTrace) {
+      print('Cloudinary video upload error: $e');
+      print('Stack trace: $stackTrace');
+      return null;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // EXISTING METHODS — COMPLETELY UNCHANGED
+  // Your chat messages, profile pics, etc. use these. DO NOT TOUCH.
+  // ═══════════════════════════════════════════════════════════════════════════
 
   static Future<String?> uploadImage(File file, String folder) async {
     try {
@@ -116,6 +181,14 @@ class CloudinaryService {
       return false;
     }
 
+    return deleteByPublicId(publicId);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // NEW: Delete by public_id directly (used by status expiry cleanup)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  static Future<bool> deleteByPublicId(String publicId) async {
     try {
       print('Deleting from Cloudinary: $publicId');
       final response = await http.post(
