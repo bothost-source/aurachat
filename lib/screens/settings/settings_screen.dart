@@ -5,6 +5,8 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../utils/verified_badge.dart';
 import '../../services/cloudinary_service.dart';
@@ -191,6 +193,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
   File? _newProfileImage;
   bool _isUploading = false;
 
+  @override
+  void initState() {
+    super.initState();
+    _loadLanguage();
+  }
+
+  Future<void> _loadLanguage() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedLang = prefs.getString('app_language');
+    if (savedLang != null && mounted) {
+      setState(() {
+        AppLocalizations.currentLanguage = savedLang;
+      });
+    }
+  }
+
   Future<void> _pickNewProfileImage() async {
     final picker = ImagePicker();
     final picked = await picker.pickImage(
@@ -261,8 +279,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final publicUrl = jsonData['secure_url'] as String;
       // ─────────────────────────────────────────────────────────────
 
-           // Save to Firestore
-      // ✅ FIX: Use .set() with merge instead of .update()
+      // Save to Firestore
       final firestore = FirebaseFirestore.instance;
       await firestore.collection('users').doc(userId).set({
         'avatar_url': publicUrl,
@@ -272,9 +289,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       // Update local provider
       await authProvider.updateProfile(photoUrl: publicUrl);
 
-      setState(() => _isUploading = false);
-
       if (mounted) {
+        setState(() => _isUploading = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('${AppLocalizations.get('avatar')} updated!'),
@@ -283,9 +299,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         );
       }
     } catch (e) {
-      setState(() => _isUploading = false);
-      debugPrint('Cloudinary upload error: $e');
       if (mounted) {
+        setState(() => _isUploading = false);
+        debugPrint('Cloudinary upload error: $e');
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Failed to upload: $e'),
@@ -300,13 +316,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
       final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+      final userEmail = authProvider.user?.email;
       
       if (userId == null) {
         _showBackupError('Not authenticated');
         return;
       }
 
-      setState(() => _isUploading = true);
+      if (mounted) setState(() => _isUploading = true);
 
       // Fetch all user's chats
       final chatsSnapshot = await FirebaseFirestore.instance
@@ -325,13 +342,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
             .orderBy('timestamp')
             .get();
 
-        final messages = messagesSnapshot.docs.map((m) => {
-          'id': m.id,
-          'sender_id': m.data()['sender_id'],
-          'text': m.data()['text'],
-          'timestamp': m.data()['timestamp']?.toDate()?.toIso8601String(),
-          'type': m.data()['type'] ?? 'text',
-          'media_url': m.data()['media_url'],
+        final messages = messagesSnapshot.docs.map((m) {
+          final data = m.data();
+          final ts = data['timestamp'];
+          return {
+            'id': m.id,
+            'sender_id': data['sender_id'],
+            'text': data['text'],
+            'timestamp': ts is Timestamp ? ts.toDate().toIso8601String() : null,
+            'type': data['type'] ?? 'text',
+            'media_url': data['media_url'],
+          };
         }).toList();
 
         backupData.add({
@@ -349,45 +370,65 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
       // Write to temp file
       final tempDir = Directory.systemTemp;
-      final file = File('${tempDir.path}/aura_backup_${DateTime.now().millisecondsSinceEpoch}.json');
+      final fileName = 'aura_backup_${DateTime.now().millisecondsSinceEpoch}.json';
+      final file = File('${tempDir.path}/$fileName');
       await file.writeAsString(jsonString);
 
-      // Share via email (using share_plus or url_launcher)
-      // For now, show success with file path
-      setState(() => _isUploading = false);
+      if (mounted) setState(() => _isUploading = false);
 
-      if (mounted) {
-        showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            backgroundColor: const Color(0xFF1a103c),
-            title: const Text('Backup Ready', style: TextStyle(color: Colors.white)),
-            content: Text(
-              'Chat backup saved locally.\n\nFile: ${file.path}\n\n${backupData.length} chats backed up.',
-              style: TextStyle(color: Colors.white.withOpacity(0.7)),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('OK', style: TextStyle(color: Color(0xFF8B5CF6))),
+      // Open email with backup summary + file path
+      final emailBody = Uri.encodeComponent(
+        'AURA Chat Backup\n\n'
+        'Exported: ${DateTime.now().toIso8601String()}\n'
+        'Chats backed up: ${backupData.length}\n\n'
+        'Please attach the backup file from:\n${file.path}\n\n'
+        'To restore: Save this email and use the Restore feature in AURA Chat settings.'
+      );
+
+      final emailSubject = Uri.encodeComponent('AURA Chat Backup - ${DateTime.now().toLocal()}');
+      final emailUri = Uri.parse(
+        'mailto:${userEmail ?? ''}?subject=$emailSubject&body=$emailBody'
+      );
+
+      if (await canLaunchUrl(emailUri)) {
+        await launchUrl(emailUri);
+      } else {
+        // Fallback: show dialog with file path
+        if (mounted) {
+          showDialog(
+            context: context,
+            builder: (context) => AlertDialog(
+              backgroundColor: const Color(0xFF1a103c),
+              title: const Text('Backup Ready', style: TextStyle(color: Colors.white)),
+              content: Text(
+                'Chat backup saved locally.\n\nFile: ${file.path}\n\n${backupData.length} chats backed up.\n\nPlease manually email this file to yourself for safekeeping.',
+                style: TextStyle(color: Colors.white.withOpacity(0.7)),
               ),
-            ],
-          ),
-        );
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('OK', style: TextStyle(color: Color(0xFF8B5CF6))),
+                ),
+              ],
+            ),
+          );
+        }
       }
     } catch (e) {
-      setState(() => _isUploading = false);
+      if (mounted) setState(() => _isUploading = false);
       _showBackupError('Backup failed: $e');
     }
   }
 
   void _showBackupError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-      ),
-    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   void _showLanguagePicker() {
@@ -443,7 +484,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
                   ),
                 ),
-                onTap: () {
+                onTap: () async {
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.setString('app_language', lang['code']!);
                   setState(() {
                     AppLocalizations.currentLanguage = lang['code']!;
                   });
@@ -721,7 +764,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   iconColor: const Color(0xFF8B5CF6),
                   title: AppLocalizations.get('chats'),
                   subtitle: AppLocalizations.get('theme_wallpapers'),
-                  onTap: () => Navigator.pushNamed(context, '/settings'),
+                  onTap: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Chat settings coming soon'),
+                        backgroundColor: Color(0xFF8B5CF6),
+                      ),
+                    );
+                  },
                 ),
                 _buildSettingTile(
                   icon: Icons.notifications_none,
@@ -751,13 +801,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   subtitle: 'Export chat history to email',
                   onTap: _backupChats,
                 ),
+                _buildSettingTile(
+                  icon: Icons.restore_outlined,
+                  iconColor: const Color(0xFF8B5CF6),
+                  title: 'Restore Chats',
+                  subtitle: 'Import chat history from backup',
+                  onTap: () => Navigator.pushNamed(context, '/restore_chats'),
+                ),
                 _buildSectionTitle(AppLocalizations.get('help')),
                 _buildSettingTile(
                   icon: Icons.help_outline,
                   iconColor: const Color(0xFF8B5CF6),
                   title: AppLocalizations.get('help'),
                   subtitle: AppLocalizations.get('help_center'),
-                  onTap: () => Navigator.pushNamed(context, '/help'),
+                  onTap: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Help center coming soon'),
+                        backgroundColor: Color(0xFF8B5CF6),
+                      ),
+                    );
+                  },
                 ),
                 const SizedBox(height: 16),
                 _buildSettingTile(
