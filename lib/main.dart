@@ -15,6 +15,7 @@ import 'providers/auth_provider.dart' show AuraAuthProvider;
 import 'providers/chat_provider.dart';
 import 'providers/theme_provider.dart';
 import 'providers/settings_provider.dart';
+import 'screens/settings/restore_chats_screen.dart';
 import 'providers/bot_provider.dart';
 import 'providers/moderation_provider.dart';
 import 'screens/splash_screen.dart';
