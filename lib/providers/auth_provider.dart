@@ -120,7 +120,7 @@ class AuraAuthProvider extends ChangeNotifier {
     }
   }
 
-  /// ==================== LOGIN EXISTING USER (ENFORCES EMAIL OTP) ====================
+   /// ==================== LOGIN EXISTING USER (ENFORCES EMAIL OTP) ====================
   Future<bool> loginExistingUser(String phone) async {
     _setLoading(true);
     try {
@@ -145,6 +145,7 @@ class AuraAuthProvider extends ChangeNotifier {
       _userBio = userData['bio'] as String?;
       _userPhotoUrl = userData['avatar_url'] as String?;
       _mockUserId = userId;
+      _isAuthenticated = true; // FIX: Keep authenticated, don't set false
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('pending_mock_user_id', userId);
@@ -155,17 +156,8 @@ class AuraAuthProvider extends ChangeNotifier {
       await prefs.setString('pending_mock_avatar', _userPhotoUrl ?? '');
       await prefs.setString('pending_mock_email', _email ?? '');
 
-      // FIX: Force email verification for ALL accounts that aren't verified
-      final isEmailVerified = userData['email_verified'] == true;
-      if (!isEmailVerified) {
-        // Don't complete login — require email verification first
-        _isAuthenticated = false; // Not fully authenticated yet
-        _setLoading(false);
-        return true; // Return true to indicate user found, but needs verification
-      }
-
-      // Already verified — complete login immediately
-      await _completeLogin(prefs);
+      // FIX: Don't call _completeLogin here — just save pending state
+      // Email verification screen will call _completeLogin after verification
       _setLoading(false);
       return true;
     } catch (e) {
