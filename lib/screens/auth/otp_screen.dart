@@ -6,7 +6,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../services/app_localizations.dart';
 import 'email_verification_screen.dart';
-import 'setup_profile_screen.dart';
 
 class OtpScreen extends StatefulWidget {
   final String phoneNumber;
@@ -19,6 +18,14 @@ class OtpScreen extends StatefulWidget {
     required this.expectedOtp,
     required this.cleanPhoneNumber,
   });
+
+  /// Public static method to clear pending OTP state from anywhere
+  static Future<void> clearPendingOtpState() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('pending_otp_phone');
+    await prefs.remove('pending_otp_expected');
+    await prefs.remove('pending_otp_timestamp');
+  }
 
   @override
   State<OtpScreen> createState() => _OtpScreenState();
@@ -42,15 +49,6 @@ class _OtpScreenState extends State<OtpScreen> {
     await prefs.setString('pending_otp_phone', widget.cleanPhoneNumber);
     await prefs.setString('pending_otp_expected', widget.expectedOtp);
     await prefs.setInt('pending_otp_timestamp', DateTime.now().millisecondsSinceEpoch);
-  }
-
-  /// FIX: Only clear OTP state after FULL login completion (after email verification)
-  /// This is called by EmailVerificationScreen when verification is complete
-  static Future<void> clearPendingOtpState() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('pending_otp_phone');
-    await prefs.remove('pending_otp_expected');
-    await prefs.remove('pending_otp_timestamp');
   }
 
   void _startResendTimer() {
@@ -95,9 +93,6 @@ class _OtpScreenState extends State<OtpScreen> {
       if (existingUser != null) {
         final success = await authProvider.loginExistingUser(widget.cleanPhoneNumber);
         if (success && mounted) {
-          // FIX: Don't clear OTP state here — keep it until email verification completes
-          // This ensures AuthRouter can redirect back to email verification on restart
-
           final existingEmail = existingUser['email'] as String?;
           if (existingEmail != null && existingEmail.isNotEmpty) {
             await authProvider.sendEmailOtp();
@@ -115,12 +110,10 @@ class _OtpScreenState extends State<OtpScreen> {
               );
             }
           } else {
-            // No email — complete login immediately and clear OTP state
             await _completeLoginAndClear(authProvider);
           }
         }
       } else {
-        // New user — create mock user and go to email verification
         await authProvider.createMockUser();
         if (mounted) {
           Navigator.pushReplacement(
@@ -149,7 +142,6 @@ class _OtpScreenState extends State<OtpScreen> {
     }
   }
 
-  /// For users with no email — complete login and clear pending state
   Future<void> _completeLoginAndClear(AuraAuthProvider authProvider) async {
     final prefs = await SharedPreferences.getInstance();
     final mockUserId = authProvider.mockUserId;
@@ -157,7 +149,7 @@ class _OtpScreenState extends State<OtpScreen> {
       await prefs.setString('mock_user_id', mockUserId);
       await prefs.setString('mock_phone', widget.cleanPhoneNumber);
     }
-    await clearPendingOtpState();
+    await OtpScreen.clearPendingOtpState();
     if (mounted) {
       Navigator.pushReplacementNamed(context, '/setup_profile');
     }
