@@ -145,7 +145,6 @@ class AuraAuthProvider extends ChangeNotifier {
       _userBio = userData['bio'] as String?;
       _userPhotoUrl = userData['avatar_url'] as String?;
       _mockUserId = userId;
-      _isAuthenticated = true;
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('pending_mock_user_id', userId);
@@ -156,11 +155,17 @@ class AuraAuthProvider extends ChangeNotifier {
       await prefs.setString('pending_mock_avatar', _userPhotoUrl ?? '');
       await prefs.setString('pending_mock_email', _email ?? '');
 
+      // FIX: Force email verification for ALL accounts that aren't verified
       final isEmailVerified = userData['email_verified'] == true;
-      if (isEmailVerified) {
-        await _completeLogin(prefs);
+      if (!isEmailVerified) {
+        // Don't complete login — require email verification first
+        _isAuthenticated = false; // Not fully authenticated yet
+        _setLoading(false);
+        return true; // Return true to indicate user found, but needs verification
       }
 
+      // Already verified — complete login immediately
+      await _completeLogin(prefs);
       _setLoading(false);
       return true;
     } catch (e) {
@@ -279,8 +284,6 @@ class AuraAuthProvider extends ChangeNotifier {
     }
   }
 
-
-
   /// ==================== COMPLETE EMAIL VERIFICATION (BACKEND) ====================
   Future<bool> completeEmailVerification(String userId) async {
     _setLoading(true);
@@ -345,23 +348,19 @@ class AuraAuthProvider extends ChangeNotifier {
       return false;
     }
   }
-    void listenToAuthChanges() {
+
+  /// ==================== CRITICAL FIX: Don't clear mock users on auth state changes ====================
+  void listenToAuthChanges() {
     _auth.authStateChanges().listen((firebase_auth.User? user) {
       if (user != null) {
         _user = user;
         _isAuthenticated = true;
         _loadUserProfile();
         OnlineStatusService.setOnline();
-      } else {
-        // FIX: Only clear if we have a real Firebase user
-        // Don't clear mock users on auth state changes
-        if (_user != null) {
-          OnlineStatusService.setOffline();
-          _clearAuth();
-        }
-        // If _mockUserId exists, keep mock auth alive
+        notifyListeners();
       }
-      notifyListeners();
+      // FIX: Do NOT clear anything when Firebase user is null.
+      // Mock users stay logged in. Only explicit signOut() clears auth.
     });
   }
 
@@ -733,7 +732,6 @@ class AuraAuthProvider extends ChangeNotifier {
     await prefs.remove('email_otp_expiry');
     await prefs.remove('verification_id');
     await prefs.remove('email_verified_complete');
-
 
     _user = null;
     _isAuthenticated = false;
