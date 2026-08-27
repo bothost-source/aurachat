@@ -335,6 +335,7 @@ class _AuthRouterState extends State<AuthRouter> {
       }
       return;
     }
+  }
 
   @override
   Widget build(BuildContext context) {
