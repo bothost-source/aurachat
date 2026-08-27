@@ -15,7 +15,6 @@ import 'providers/auth_provider.dart' show AuraAuthProvider;
 import 'providers/chat_provider.dart';
 import 'providers/theme_provider.dart';
 import 'providers/settings_provider.dart';
-import 'screens/settings/restore_chats_screen.dart';
 import 'providers/bot_provider.dart';
 import 'providers/moderation_provider.dart';
 import 'screens/splash_screen.dart';
@@ -36,6 +35,7 @@ import 'screens/settings/notifications_settings_screen.dart';
 import 'screens/settings/data_storage_screen.dart';
 import 'screens/settings/account_settings_screen.dart';
 import 'screens/settings/bot_settings_screen.dart';
+import 'screens/settings/restore_chats_screen.dart';
 import 'screens/profile/profile_screen.dart';
 import 'screens/profile/public_profile_screen.dart';
 import 'screens/groups/create_group_screen.dart';
@@ -155,7 +155,7 @@ class ErrorApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       home: Scaffold(
-        backgroundColor: const Color(0xFF0A0A0A),
+        backgroundColor: const Color(0xFF0A0A0F),
         body: SafeArea(
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(24),
@@ -253,16 +253,46 @@ class _AuthRouterState extends State<AuthRouter> {
       }
     }
 
-    final pendingEmailUserId = prefs.getString('pending_email_user_id');
-    final pendingEmailVerification = prefs.getBool('pending_email_verification') ?? false;
-    final pendingEmailTimestamp = prefs.getInt('pending_email_timestamp');
+    final pendingEmailUserId = prefs.getString('pending_mock_user_id');
+    final pendingEmail = prefs.getString('pending_mock_email');
 
-    if (pendingEmailUserId != null && pendingEmailVerification && pendingEmailTimestamp != null) {
-      final emailAge = DateTime.now().millisecondsSinceEpoch - pendingEmailTimestamp;
-      if (emailAge < 30 * 60 * 1000) {
+    // FIX: Check for pending email verification for BOTH new and existing users
+    if (pendingEmailUserId != null && pendingEmail != null) {
+      final pendingEmailTimestamp = prefs.getInt('pending_email_timestamp');
+      final emailAge = pendingEmailTimestamp != null
+          ? DateTime.now().millisecondsSinceEpoch - pendingEmailTimestamp
+          : 0;
+
+      // Allow up to 30 minutes for email verification
+      if (pendingEmailTimestamp == null || emailAge < 30 * 60 * 1000) {
         setState(() {
           _targetScreen = EmailVerificationScreen(
             userId: pendingEmailUserId,
+            backendUrl: 'https://aurachat-backend-5utu.onrender.com',
+            isLoginFlow: true,
+          );
+          _isChecking = false;
+        });
+        return;
+      } else {
+        // Expired — clear pending state
+        await prefs.remove('pending_mock_user_id');
+        await prefs.remove('pending_mock_email');
+        await prefs.remove('pending_email_timestamp');
+      }
+    }
+
+    // FIX: Also check for old-style pending email verification
+    final oldPendingEmailUserId = prefs.getString('pending_email_user_id');
+    final oldPendingEmailVerification = prefs.getBool('pending_email_verification') ?? false;
+    final oldPendingEmailTimestamp = prefs.getInt('pending_email_timestamp');
+
+    if (oldPendingEmailUserId != null && oldPendingEmailVerification && oldPendingEmailTimestamp != null) {
+      final emailAge = DateTime.now().millisecondsSinceEpoch - oldPendingEmailTimestamp;
+      if (emailAge < 30 * 60 * 1000) {
+        setState(() {
+          _targetScreen = EmailVerificationScreen(
+            userId: oldPendingEmailUserId,
             backendUrl: 'https://aurachat-backend-5utu.onrender.com',
             isLoginFlow: true,
           );
@@ -399,19 +429,34 @@ class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
-
+    // FIX: Don't use Provider.of with listen: false here — use a local ref
+    // to avoid triggering rebuilds that cause AuthRouter to re-check
     if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
-      // App going to background — save timestamp
-      settingsProvider.onAppBackground();
+      _handleBackground();
     } else if (state == AppLifecycleState.resumed) {
-      // App coming back — check if timeout passed, then decide to lock
+      _handleResume();
+    }
+  }
+
+  void _handleBackground() async {
+    try {
+      final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+      settingsProvider.onAppBackground();
+    } catch (e) {
+      debugPrint('Background handler error: $e');
+    }
+  }
+
+  void _handleResume() async {
+    try {
       OnlineStatusService.setOnline();
       final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
       authProvider.refreshSession();
 
-      // Check lock on resume (this will trigger rebuild if locked)
+      final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
       settingsProvider.shouldShowLockScreen();
+    } catch (e) {
+      debugPrint('Resume handler error: $e');
     }
   }
 
@@ -437,71 +482,9 @@ class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
             themeMode: themeProvider.themeMode,
             initialRoute: '/',
             builder: (context, child) {
-              final settingsProvider = Provider.of<SettingsProvider>(context);
-              final isLocked = settingsProvider.isLocked;
-              final app = CallListener(child: child!);
-
-              // If locked, show lock screen OVER everything
-              if (isLocked) {
-                return _buildLockScreen(settingsProvider);
-              }
-
-              // Check ban status for authenticated users
-              final currentUser = FirebaseAuth.instance.currentUser;
-              final userId = currentUser?.uid ?? authProvider.currentUserId;
-
-              if (userId != null) {
-                return StreamBuilder<DocumentSnapshot>(
-                  stream: FirebaseFirestore.instance
-                      .collection('users')
-                      .doc(userId)
-                      .snapshots(),
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Scaffold(
-                        backgroundColor: Color(0xFF0A0A0F),
-                        body: Center(child: CircularProgressIndicator(color: Color(0xFF8B5CF6))),
-                      );
-                    }
-
-                    final userData = snapshot.data?.data() as Map<String, dynamic>?;
-                    final isBanned = userData?['is_banned'] == true;
-                    final bannedUntil = userData?['banned_until'] as Timestamp?;
-
-                    if (isBanned && bannedUntil != null) {
-                      final banExpiry = bannedUntil.toDate();
-                      if (DateTime.now().isAfter(banExpiry)) {
-                        FirebaseFirestore.instance
-                            .collection('users')
-                            .doc(userId)
-                            .update({
-                          'is_banned': false,
-                          'banned_until': null,
-                          'ban_reason': null,
-                          'ban_report_id': null,
-                          'ban_level': null,
-                        });
-                        return app;
-                      }
-                    }
-
-                    if (isBanned) {
-                      final banStatus = {
-                        'is_banned': true,
-                        'banned_until': bannedUntil?.toDate(),
-                        'ban_reason': userData?['ban_reason'],
-                        'ban_level': userData?['ban_level'],
-                        'ban_report_id': userData?['ban_report_id'],
-                      };
-                      return BannedScreen(banStatus: banStatus);
-                    }
-
-                    return app;
-                  },
-                );
-              }
-
-              return app;
+              // FIX: Use a separate widget that listens to SettingsProvider
+              // so MaterialApp itself doesn't rebuild on every settings change
+              return _AppLockWrapper(child: child!);
             },
             routes: {
               '/': (context) => const AuthRouter(),
@@ -514,7 +497,6 @@ class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
               '/bot_creator': (context) => const BotCreatorScreen(),
               '/privacy_settings': (context) => const PrivacySettingsScreen(),
               '/security': (context) => const SecurityScreen(),
-              '/restore_chats': (context) => const RestoreChatsScreen(),
               '/blocked_users': (context) => const BlockedUsersScreen(),
               '/appearance': (context) => const AppearanceScreen(),
               '/language': (context) => const LanguageScreen(),
@@ -546,11 +528,96 @@ class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
               '/invite_friends': (context) => const InviteFriendsScreen(),
               '/saved_messages': (context) => const SavedMessagesScreen(),
               '/archived_chats': (context) => const ArchivedChatsScreen(),
+              '/restore_chats': (context) => const RestoreChatsScreen(),
             },
           );
         },
       ),
     );
+  }
+}
+
+// ============================================================================
+// APP LOCK WRAPPER — separated so MaterialApp doesn't rebuild on settings changes
+// ============================================================================
+class _AppLockWrapper extends StatefulWidget {
+  final Widget child;
+  const _AppLockWrapper({required this.child});
+
+  @override
+  State<_AppLockWrapper> createState() => _AppLockWrapperState();
+}
+
+class _AppLockWrapperState extends State<_AppLockWrapper> {
+  @override
+  Widget build(BuildContext context) {
+    final settingsProvider = Provider.of<SettingsProvider>(context);
+    final isLocked = settingsProvider.isLocked;
+
+    final app = CallListener(child: widget.child);
+
+    // If locked, show lock screen OVER everything
+    if (isLocked) {
+      return _buildLockScreen(settingsProvider);
+    }
+
+    // Check ban status for authenticated users
+    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+    final currentUser = FirebaseAuth.instance.currentUser;
+    final userId = currentUser?.uid ?? authProvider.currentUserId;
+
+    if (userId != null) {
+      return StreamBuilder<DocumentSnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('users')
+            .doc(userId)
+            .snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Scaffold(
+              backgroundColor: Color(0xFF0A0A0F),
+              body: Center(child: CircularProgressIndicator(color: Color(0xFF8B5CF6))),
+            );
+          }
+
+          final userData = snapshot.data?.data() as Map<String, dynamic>?;
+          final isBanned = userData?['is_banned'] == true;
+          final bannedUntil = userData?['banned_until'] as Timestamp?;
+
+          if (isBanned && bannedUntil != null) {
+            final banExpiry = bannedUntil.toDate();
+            if (DateTime.now().isAfter(banExpiry)) {
+              FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(userId)
+                  .update({
+                'is_banned': false,
+                'banned_until': null,
+                'ban_reason': null,
+                'ban_report_id': null,
+                'ban_level': null,
+              });
+              return app;
+            }
+          }
+
+          if (isBanned) {
+            final banStatus = {
+              'is_banned': true,
+              'banned_until': bannedUntil?.toDate(),
+              'ban_reason': userData?['ban_reason'],
+              'ban_level': userData?['ban_level'],
+              'ban_report_id': userData?['ban_report_id'],
+            };
+            return BannedScreen(banStatus: banStatus);
+          }
+
+          return app;
+        },
+      );
+    }
+
+    return app;
   }
 
   Widget _buildLockScreen(SettingsProvider settingsProvider) {
@@ -563,7 +630,7 @@ class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
 }
 
 // ============================================================================
-// LOCK SCREEN WIDGET — handles auth automatically on build, with proper context
+// LOCK SCREEN WIDGET — themed with purple gradient + glassmorphism passcode
 // ============================================================================
 class LockScreen extends StatefulWidget {
   final VoidCallback onUnlocked;
@@ -581,7 +648,6 @@ class _LockScreenState extends State<LockScreen> {
   @override
   void initState() {
     super.initState();
-    // Trigger biometric auth automatically when lock screen appears
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _attemptAutoAuth();
     });
@@ -593,7 +659,6 @@ class _LockScreenState extends State<LockScreen> {
 
     final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
 
-    // Try biometric first
     if (settingsProvider.biometricLock) {
       final localAuth = LocalAuthentication();
       try {
@@ -636,7 +701,6 @@ class _LockScreenState extends State<LockScreen> {
       }
     }
 
-    // If biometric not enabled or failed, show passcode if enabled
     if (settingsProvider.appPasscode && mounted) {
       setState(() => _showPasscode = true);
     }
@@ -644,78 +708,154 @@ class _LockScreenState extends State<LockScreen> {
     _isAuthenticating = false;
   }
 
-  Future<void> _showPasscodeDialog() async {
-    final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
-
-    final result = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => _PasscodeDialog(
-        correctPasscode: settingsProvider.passcode,
-      ),
-    );
-
-    if (result == true && mounted) {
-      widget.onUnlocked();
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0A0A0A),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.lock_outline, size: 80, color: Colors.white70),
-            const SizedBox(height: 24),
-            const Text('AURA is Locked',
-              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
-            const SizedBox(height: 12),
-            const Text('Authentication required to continue',
-              style: TextStyle(fontSize: 16, color: Colors.white54)),
-            const SizedBox(height: 32),
-            if (_showPasscode)
-              ElevatedButton(
-                onPressed: _showPasscodeDialog,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white,
-                  foregroundColor: Colors.black,
-                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-                ),
-                child: const Text('Enter Passcode', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-              )
-            else
-              ElevatedButton(
-                onPressed: _attemptAutoAuth,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white,
-                  foregroundColor: Colors.black,
-                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-                ),
-                child: const Text('Unlock', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-              ),
-          ],
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color(0xFF0A0A0F),
+              Color(0xFF1a103c),
+              Color(0xFF0d1b2a),
+              Color(0xFF0A0A0F),
+            ],
+            stops: [0.0, 0.3, 0.7, 1.0],
+          ),
+        ),
+        child: SafeArea(
+          child: Center(
+            child: _showPasscode
+                ? _PasscodeEntry(
+                    correctPasscode: Provider.of<SettingsProvider>(context, listen: false).passcode,
+                    onUnlocked: widget.onUnlocked,
+                    onCancel: () => setState(() => _showPasscode = false),
+                  )
+                : _buildLockPrompt(),
+          ),
         ),
       ),
     );
   }
+
+  Widget _buildLockPrompt() {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        // Glowing lock icon
+        Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: const Color(0xFF8B5CF6).withOpacity(0.15),
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: const Color(0xFF8B5CF6).withOpacity(0.3),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF8B5CF6).withOpacity(0.2),
+                blurRadius: 30,
+                spreadRadius: 5,
+              ),
+            ],
+          ),
+          child: const Icon(
+            Icons.lock_outline,
+            size: 48,
+            color: Color(0xFF8B5CF6),
+          ),
+        ),
+        const SizedBox(height: 32),
+        const Text(
+          'AURA is Locked',
+          style: TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+            letterSpacing: -0.5,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          'Authentication required to continue',
+          style: TextStyle(
+            fontSize: 16,
+            color: Colors.white.withOpacity(0.5),
+          ),
+        ),
+        const SizedBox(height: 48),
+        // Unlock button with glassmorphism
+        GestureDetector(
+          onTap: () {
+            final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+            if (settingsProvider.appPasscode) {
+              setState(() => _showPasscode = true);
+            } else {
+              _attemptAutoAuth();
+            }
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 16),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Colors.white.withOpacity(0.1),
+                  Colors.white.withOpacity(0.05),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(30),
+              border: Border.all(
+                color: const Color(0xFF8B5CF6).withOpacity(0.3),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF8B5CF6).withOpacity(0.1),
+                  blurRadius: 20,
+                  spreadRadius: -5,
+                ),
+              ],
+            ),
+            child: Text(
+              'Enter Passcode',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: Colors.white.withOpacity(0.9),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 }
 
-class _PasscodeDialog extends StatefulWidget {
-  final String? correctPasscode;
-  const _PasscodeDialog({required this.correctPasscode});
+// ============================================================================
+// INLINE PASSCODE ENTRY — glassmorphism themed, no dialog
+// ============================================================================
+class _PasscodeEntry extends StatefulWidget {
+  final String correctPasscode;
+  final VoidCallback onUnlocked;
+  final VoidCallback onCancel;
+
+  const _PasscodeEntry({
+    required this.correctPasscode,
+    required this.onUnlocked,
+    required this.onCancel,
+  });
 
   @override
-  State<_PasscodeDialog> createState() => _PasscodeDialogState();
+  State<_PasscodeEntry> createState() => _PasscodeEntryState();
 }
 
-class _PasscodeDialogState extends State<_PasscodeDialog> {
+class _PasscodeEntryState extends State<_PasscodeEntry> {
   String _enteredPasscode = '';
   String _errorMessage = '';
+  bool _isShaking = false;
 
   void _onDigitPressed(String digit) {
     if (_enteredPasscode.length < 6) {
@@ -738,77 +878,240 @@ class _PasscodeDialogState extends State<_PasscodeDialog> {
 
   void _verifyPasscode() {
     if (_enteredPasscode == widget.correctPasscode) {
-      Navigator.of(context).pop(true);
+      widget.onUnlocked();
     } else {
       setState(() {
-        _errorMessage = 'Incorrect passcode. Try again.';
+        _errorMessage = 'Incorrect passcode';
         _enteredPasscode = '';
+        _isShaking = true;
+      });
+      // Reset shake after animation
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (mounted) setState(() => _isShaking = false);
       });
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Dialog(
-      backgroundColor: const Color(0xFF1C1C1E),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.lock_outline, size: 48, color: Colors.white70),
-            const SizedBox(height: 16),
-            const Text('Enter Passcode',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
-            const SizedBox(height: 24),
-            Row(
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Header icon
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: const Color(0xFF8B5CF6).withOpacity(0.15),
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: const Color(0xFF8B5CF6).withOpacity(0.3),
+              ),
+            ),
+            child: const Icon(
+              Icons.pin_outlined,
+              size: 32,
+              color: Color(0xFF8B5CF6),
+            ),
+          ),
+          const SizedBox(height: 24),
+          const Text(
+            'Enter Passcode',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Enter your 6-digit PIN to unlock',
+            style: TextStyle(
+              fontSize: 14,
+              color: Colors.white.withOpacity(0.4),
+            ),
+          ),
+          const SizedBox(height: 32),
+
+          // Dots with shake animation
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 100),
+            transform: _isShaking
+                ? (Matrix4.identity()..translate(_shakeOffset()))
+                : Matrix4.identity(),
+            child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: List.generate(6, (index) {
+                final isFilled = index < _enteredPasscode.length;
                 return Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 6),
-                  width: 14, height: 14,
+                  margin: const EdgeInsets.symmetric(horizontal: 8),
+                  width: 16,
+                  height: 16,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: index < _enteredPasscode.length ? Colors.white : Colors.white24,
+                    color: isFilled
+                        ? const Color(0xFF8B5CF6)
+                        : Colors.white.withOpacity(0.15),
+                    boxShadow: isFilled
+                        ? [
+                            BoxShadow(
+                              color: const Color(0xFF8B5CF6).withOpacity(0.5),
+                              blurRadius: 12,
+                              spreadRadius: 2,
+                            ),
+                          ]
+                        : null,
                   ),
                 );
               }),
             ),
-            if (_errorMessage.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Text(_errorMessage, style: const TextStyle(color: Colors.redAccent, fontSize: 14)),
-            ],
-            const SizedBox(height: 24),
-            GridView.count(
+          ),
+
+          if (_errorMessage.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Text(
+              _errorMessage,
+              style: const TextStyle(
+                color: Colors.redAccent,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+
+          const SizedBox(height: 40),
+
+          // Number pad with glassmorphism tiles
+          SizedBox(
+            width: 300,
+            child: GridView.count(
               shrinkWrap: true,
               crossAxisCount: 3,
-              childAspectRatio: 1.5,
+              childAspectRatio: 1.2,
               physics: const NeverScrollableScrollPhysics(),
+              mainAxisSpacing: 16,
+              crossAxisSpacing: 16,
               children: [
                 for (var i = 1; i <= 9; i++) _buildDigitButton(i.toString()),
-                const SizedBox.shrink(),
+                _buildActionButton(
+                  icon: Icons.fingerprint,
+                  onTap: () {
+                    // Try biometric again
+                    final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+                    if (settingsProvider.biometricLock) {
+                      _tryBiometric();
+                    }
+                  },
+                ),
                 _buildDigitButton('0'),
-                IconButton(
-                  onPressed: _onBackspace,
-                  icon: const Icon(Icons.backspace_outlined, color: Colors.white70),
+                _buildActionButton(
+                  icon: Icons.backspace_outlined,
+                  onTap: _onBackspace,
                 ),
               ],
             ),
-          ],
+          ),
+
+          const SizedBox(height: 24),
+
+          // Cancel button
+          TextButton(
+            onPressed: widget.onCancel,
+            child: Text(
+              'Cancel',
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.4),
+                fontSize: 16,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  double _shakeOffset() {
+    // Simple shake effect
+    final shakeCount = DateTime.now().millisecond % 4;
+    return shakeCount == 0 ? -8 : shakeCount == 1 ? 8 : shakeCount == 2 ? -4 : 4;
+  }
+
+  Future<void> _tryBiometric() async {
+    final localAuth = LocalAuthentication();
+    try {
+      final didAuth = await localAuth.authenticate(
+        localizedReason: 'Unlock AURA Chat',
+        options: const AuthenticationOptions(
+          biometricOnly: false,
+          stickyAuth: true,
+        ),
+      );
+      if (didAuth && mounted) {
+        widget.onUnlocked();
+      }
+    } catch (e) {
+      debugPrint('Biometric retry failed: $e');
+    }
+  }
+
+  Widget _buildDigitButton(String digit) {
+    return GestureDetector(
+      onTap: () => _onDigitPressed(digit),
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Colors.white.withOpacity(0.08),
+              Colors.white.withOpacity(0.02),
+            ],
+          ),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: Colors.white.withOpacity(0.08),
+          ),
+        ),
+        child: Center(
+          child: Text(
+            digit,
+            style: const TextStyle(
+              fontSize: 28,
+              fontWeight: FontWeight.w500,
+              color: Colors.white,
+            ),
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildDigitButton(String digit) {
-    return InkWell(
-      onTap: () => _onDigitPressed(digit),
-      borderRadius: BorderRadius.circular(40),
+  Widget _buildActionButton({required IconData icon, required VoidCallback onTap}) {
+    return GestureDetector(
+      onTap: onTap,
       child: Container(
-        alignment: Alignment.center,
-        child: Text(digit,
-          style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w500, color: Colors.white)),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Colors.white.withOpacity(0.05),
+              Colors.white.withOpacity(0.02),
+            ],
+          ),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: Colors.white.withOpacity(0.06),
+          ),
+        ),
+        child: Center(
+          child: Icon(
+            icon,
+            color: Colors.white.withOpacity(0.6),
+            size: 24,
+          ),
+        ),
       ),
     );
   }
