@@ -35,7 +35,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
 
   bool _isLoading = false;
   bool _codeSent = false;
-  bool _isAddingEmail = false; // Toggle for adding email manually
+  bool _isAddingEmail = false;
   int _resendTimer = 60;
   String? _error;
   String? _sentEmail;
@@ -103,7 +103,6 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
       return;
     }
 
-    // If user is manually adding email, save it first
     if (!_hasEmail || _isAddingEmail) {
       await _saveEmailToFirestore(email);
     }
@@ -124,7 +123,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
           _codeSent = true;
           _resendTimer = 60;
           _sentEmail = email;
-          _isAddingEmail = false; // Reset after successful send
+          _isAddingEmail = false;
         });
         _startResendTimer();
       } else {
@@ -150,48 +149,72 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
     }
   }
 
+  /// ============================================================================
+  /// FIXED VERIFY CODE — Calls backend first, then completes login
+  /// ============================================================================
   Future<void> _verifyCode() async {
     final code = _codeControllers.map((c) => c.text).join();
+
+    if (code.length != 6) {
+      setState(() => _error = 'Enter all 6 digits');
+      return;
+    }
 
     setState(() { _isLoading = true; _error = null; });
 
     try {
+      // Step 1: Verify with BACKEND (the source of truth)
       final response = await http.post(
         Uri.parse('${widget.backendUrl}/api/auth/verify-email'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'userId': widget.userId, 'code': code}),
       );
 
-      if (response.statusCode == 200) {
-        final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
-        final verified = await authProvider.verifyEmailOtp(code);
-        
-        if (!verified) {
-          setState(() => _error = authProvider.error ?? 'Verification failed');
-          setState(() => _isLoading = false);
-          return;
-        }
+      debugPrint('Backend verify response: ${response.statusCode} - ${response.body}');
 
-        await _clearPendingEmailState();
-        await OtpScreen.clearPendingOtpState();
-
-        final prefs = await SharedPreferences.getInstance();
-        final mockUserId = authProvider.mockUserId;
-        if (mockUserId != null) {
-          await prefs.setString('mock_user_id', mockUserId);
-        }
-
-        if (mounted) {
-          Navigator.pushReplacementNamed(context, '/main');
-        }
-      } else {
+      if (response.statusCode != 200) {
         final data = jsonDecode(response.body);
-        setState(() => _error = data['error'] ?? 'Invalid code');
+        setState(() {
+          _error = data['error'] ?? 'Invalid code';
+          _isLoading = false;
+        });
+        // Clear the code fields so user can retry
+        for (final c in _codeControllers) {
+          c.clear();
+        }
+        _focusNodes[0].requestFocus();
+        return;
       }
+
+      // Step 2: Backend confirmed code is valid — now complete login locally
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+
+      // Use completeEmailVerification which properly sets up the mock user
+      // and saves everything to SharedPreferences
+      final verified = await authProvider.completeEmailVerification(widget.userId);
+
+      if (!verified) {
+        setState(() {
+          _error = authProvider.error ?? 'Verification failed';
+          _isLoading = false;
+        });
+        return;
+      }
+
+      // Step 3: Clean up pending states
+      await _clearPendingEmailState();
+      await OtpScreen.clearPendingOtpState();
+
+      // Step 4: Navigate to main app
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/main');
+      }
+
     } catch (e) {
-      setState(() => _error = 'Network error: $e');
-    } finally {
-      setState(() => _isLoading = false);
+      setState(() {
+        _error = 'Network error: $e';
+        _isLoading = false;
+      });
     }
   }
 
@@ -243,7 +266,6 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
                   ),
                   const SizedBox(height: 12),
 
-                  // Show detected email for old users who have one
                   if (_hasEmail && !_isAddingEmail) ...[
                     Text(
                       'We detected your email. Sending verification code to:',
@@ -278,7 +300,6 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    // Option to change email
                     Center(
                       child: TextButton(
                         onPressed: () => setState(() => _isAddingEmail = true),
@@ -288,9 +309,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
                         ),
                       ),
                     ),
-                  ] 
-                  // Show email input for new users or old users without email
-                  else ...[
+                  ] else ...[
                     Text(
                       _hasEmail 
                           ? 'Enter the email you want to use'
@@ -341,7 +360,6 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
 
                   const SizedBox(height: 40),
 
-                  // Code entry field (shown after code is sent)
                   if (_codeSent) ...[
                     Text(
                       'Enter the 6-digit code sent to ${_sentEmail ?? 'your email'}',
@@ -393,15 +411,30 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
 
                   if (_error != null) ...[
                     const SizedBox(height: 16),
-                    Text(
-                      _error!,
-                      style: const TextStyle(color: Colors.red, fontSize: 14),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.red.withOpacity(0.3)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.error_outline, color: Colors.red, size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _error!,
+                              style: const TextStyle(color: Colors.red, fontSize: 13),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
 
                   const Spacer(),
 
-                  // Main action button
                   SizedBox(
                     width: double.infinity,
                     height: 56,
@@ -442,7 +475,6 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
                     ),
                   ),
 
-                  // Resend timer
                   if (_codeSent && _resendTimer > 0) ...[
                     const SizedBox(height: 16),
                     Center(
