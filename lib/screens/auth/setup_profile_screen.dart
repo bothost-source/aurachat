@@ -30,6 +30,8 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
 
   String? _existingUsername;
   bool _isExistingUser = false;
+  bool _hasCompleteProfile = false;
+  String? _existingAvatarUrl;
 
   @override
   void initState() {
@@ -59,17 +61,31 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
 
       if (doc.exists && mounted) {
         final data = doc.data()!;
+        final username = data['username'] as String?;
+        final displayName = data['display_name'] as String?;
+        final bio = data['bio'] as String?;
+        final avatarUrl = data['avatar_url'] as String?;
+
         setState(() {
           _isExistingUser = true;
-          _existingUsername = data['username'] as String?;
-          _nameController.text = data['display_name'] as String? ?? '';
-          _usernameController.text = _existingUsername ?? '';
-          _bioController.text = data['bio'] as String? ?? '';
-          // Note: avatar_url can't be loaded into File, user can re-pick if they want to change
+          _hasCompleteProfile = username != null && username.isNotEmpty &&
+                               displayName != null && displayName.isNotEmpty;
+          _existingUsername = username;
+          _existingAvatarUrl = avatarUrl;
+          _nameController.text = displayName ?? '';
+          _usernameController.text = username ?? '';
+          _bioController.text = bio ?? '';
         });
       }
     } catch (e) {
       debugPrint('Load existing profile error: $e');
+    }
+  }
+
+  /// Skip setup and go to main app (for existing users who don't want to change anything)
+  void _proceedToApp() {
+    if (mounted) {
+      Navigator.pushReplacementNamed(context, '/main');
     }
   }
 
@@ -198,7 +214,7 @@ class _SetupProfileScreenState extends State<SetupProfileScreen>
     );
   }
 
-  
+
 
 Future<String?> _uploadProfileImage(String userId) async {
   if (_profileImage == null) return null;
@@ -211,7 +227,7 @@ Future<String?> _uploadProfileImage(String userId) async {
         .doc(userId)
         .get();
     final currentAvatarUrl = userDoc.data()?['avatar_url'] as String?;
-    
+
     if (currentAvatarUrl != null && currentAvatarUrl.isNotEmpty) {
       await CloudinaryService.deleteFile(currentAvatarUrl);
     }
@@ -222,12 +238,12 @@ Future<String?> _uploadProfileImage(String userId) async {
       _profileImage!,
       'aurachat/profiles/$userId'
     );
-    
+
     if (imageUrl == null) {
       throw Exception('Failed to upload image');
     }
-    
-    // ✅ FIX: Use .set() with merge instead of .update()
+
+    // Use .set() with merge instead of .update()
     // This creates the document if it doesn't exist
     await FirebaseFirestore.instance
         .collection('users')
@@ -236,7 +252,7 @@ Future<String?> _uploadProfileImage(String userId) async {
           'avatar_url': imageUrl,
           'updated_at': FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
-    
+
     return imageUrl;
   } catch (e) {
     debugPrint('Error uploading profile image: $e');
@@ -379,28 +395,110 @@ Future<String?> _uploadProfileImage(String userId) async {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const SizedBox(height: 20),
-                  ShaderMask(
-                    shaderCallback: (bounds) => const LinearGradient(
-                      colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
-                    ).createShader(bounds),
-                    child: Text(
-                      AppLocalizations.get('setup_profile'),
-                      style: const TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.w900,
-                        color: Colors.white,
+
+                  // Header with skip button for existing users
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ShaderMask(
+                          shaderCallback: (bounds) => const LinearGradient(
+                            colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
+                          ).createShader(bounds),
+                          child: Text(
+                            _hasCompleteProfile 
+                                ? 'Your Profile'
+                                : AppLocalizations.get('setup_profile'),
+                            style: const TextStyle(
+                              fontSize: 32,
+                              fontWeight: FontWeight.w900,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
                       ),
-                    ),
+                      if (_hasCompleteProfile) ...[
+                        TextButton(
+                          onPressed: _proceedToApp,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF8B5CF6).withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: const Color(0xFF8B5CF6).withOpacity(0.3),
+                              ),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  'Proceed',
+                                  style: TextStyle(
+                                    color: Color(0xFF8B5CF6),
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                                SizedBox(width: 4),
+                                Icon(
+                                  Icons.arrow_forward,
+                                  color: Color(0xFF8B5CF6),
+                                  size: 16,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
+
                   const SizedBox(height: 8),
                   Text(
-                    AppLocalizations.get('setup_description'),
+                    _hasCompleteProfile
+                        ? 'Review or update your profile info'
+                        : AppLocalizations.get('setup_description'),
                     style: TextStyle(
                       fontSize: 15,
                       color: Colors.white.withOpacity(0.5),
                       height: 1.5,
                     ),
                   ),
+
+                  // Show banner for existing users
+                  if (_hasCompleteProfile) ...[
+                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF10B981).withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: const Color(0xFF10B981).withOpacity(0.3),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.check_circle,
+                            color: Color(0xFF10B981),
+                            size: 20,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'Your profile is complete! You can proceed to the app or make changes below.',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: Colors.white.withOpacity(0.7),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+
                   const SizedBox(height: 40),
 
                   // Profile photo
@@ -412,7 +510,7 @@ Future<String?> _uploadProfileImage(String userId) async {
                         height: 120,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          gradient: _profileImage == null
+                          gradient: _profileImage == null && _existingAvatarUrl == null
                               ? const LinearGradient(
                                   colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
                                 )
@@ -422,7 +520,12 @@ Future<String?> _uploadProfileImage(String userId) async {
                                   image: FileImage(_profileImage!),
                                   fit: BoxFit.cover,
                                 )
-                              : null,
+                              : _existingAvatarUrl != null
+                                  ? DecorationImage(
+                                      image: NetworkImage(_existingAvatarUrl!),
+                                      fit: BoxFit.cover,
+                                    )
+                                  : null,
                           boxShadow: [
                             BoxShadow(
                               color: const Color(0xFF8B5CF6).withOpacity(0.3),
@@ -431,7 +534,7 @@ Future<String?> _uploadProfileImage(String userId) async {
                             ),
                           ],
                         ),
-                        child: _profileImage == null
+                        child: _profileImage == null && _existingAvatarUrl == null
                             ? const Center(
                                 child: Icon(
                                   Icons.person,
@@ -541,55 +644,129 @@ Future<String?> _uploadProfileImage(String userId) async {
                   ),
 
                   const SizedBox(height: 32),
-                  // Complete button
-                  SizedBox(
-                    width: double.infinity,
-                    height: 56,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
-                        ),
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(
-                            color: const Color(0xFF8B5CF6).withOpacity(0.3),
-                            blurRadius: 20,
-                            offset: const Offset(0, 8),
-                          ),
-                        ],
-                      ),
-                      child: ElevatedButton(
-                        onPressed: _isLoading ? null : _completeSetup,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.transparent,
-                          shadowColor: Colors.transparent,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                        ),
-                        child: _isLoading
-                            ? const SizedBox(
-                                width: 24,
-                                height: 24,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : Text(
-                                _isExistingUser 
-                                    ? 'Update Profile'
-                                    : AppLocalizations.get('complete_setup'),
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w700,
-                                  color: Colors.white,
+
+                  // Action buttons
+                  if (_hasCompleteProfile) ...[
+                    // Two buttons for existing users
+                    Row(
+                      children: [
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: _isLoading ? null : _proceedToApp,
+                            child: Container(
+                              height: 56,
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.05),
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                  color: Colors.white.withOpacity(0.1),
                                 ),
                               ),
+                              child: const Center(
+                                child: Text(
+                                  'Proceed to App',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.white70,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: _isLoading ? null : _completeSetup,
+                            child: Container(
+                              height: 56,
+                              decoration: BoxDecoration(
+                                gradient: const LinearGradient(
+                                  colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
+                                ),
+                                borderRadius: BorderRadius.circular(16),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: const Color(0xFF8B5CF6).withOpacity(0.3),
+                                    blurRadius: 20,
+                                    offset: const Offset(0, 8),
+                                  ),
+                                ],
+                              ),
+                              child: Center(
+                                child: _isLoading
+                                    ? const SizedBox(
+                                        width: 24,
+                                        height: 24,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Colors.white,
+                                        ),
+                                      )
+                                    : const Text(
+                                        'Update Profile',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w700,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ] else ...[
+                    // Single button for new users
+                    SizedBox(
+                      width: double.infinity,
+                      height: 56,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
+                          ),
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFF8B5CF6).withOpacity(0.3),
+                              blurRadius: 20,
+                              offset: const Offset(0, 8),
+                            ),
+                          ],
+                        ),
+                        child: ElevatedButton(
+                          onPressed: _isLoading ? null : _completeSetup,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.transparent,
+                            shadowColor: Colors.transparent,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                          ),
+                          child: _isLoading
+                              ? const SizedBox(
+                                  width: 24,
+                                  height: 24,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : Text(
+                                  AppLocalizations.get('complete_setup'),
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                        ),
                       ),
                     ),
-                  ),
+                  ],
                 ],
               ),
             ),
