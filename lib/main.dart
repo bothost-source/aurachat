@@ -253,36 +253,24 @@ class _AuthRouterState extends State<AuthRouter> {
       }
     }
 
-    final pendingEmailUserId = prefs.getString('pending_mock_user_id');
-    final pendingEmail = prefs.getString('pending_mock_email');
+    // Check for pending email verification (new style from loginExistingUser)
+    final pendingMockUserId = prefs.getString('pending_mock_user_id');
+    final pendingMockEmail = prefs.getString('pending_mock_email');
 
-    // FIX: Check for pending email verification for BOTH new and existing users
-    if (pendingEmailUserId != null && pendingEmail != null) {
-      final pendingEmailTimestamp = prefs.getInt('pending_email_timestamp');
-      final emailAge = pendingEmailTimestamp != null
-          ? DateTime.now().millisecondsSinceEpoch - pendingEmailTimestamp
-          : 0;
-
-      // Allow up to 30 minutes for email verification
-      if (pendingEmailTimestamp == null || emailAge < 30 * 60 * 1000) {
-        setState(() {
-          _targetScreen = EmailVerificationScreen(
-            userId: pendingEmailUserId,
-            backendUrl: 'https://aurachat-backend-5utu.onrender.com',
-            isLoginFlow: true,
-          );
-          _isChecking = false;
-        });
-        return;
-      } else {
-        // Expired — clear pending state
-        await prefs.remove('pending_mock_user_id');
-        await prefs.remove('pending_mock_email');
-        await prefs.remove('pending_email_timestamp');
-      }
+    if (pendingMockUserId != null && pendingMockEmail != null) {
+      setState(() {
+        _targetScreen = EmailVerificationScreen(
+          userId: pendingMockUserId,
+          backendUrl: 'https://aurachat-backend-5utu.onrender.com',
+          autoDetectedEmail: pendingMockEmail,
+          isLoginFlow: true,
+        );
+        _isChecking = false;
+      });
+      return;
     }
 
-    // FIX: Also check for old-style pending email verification
+    // Check for old-style pending email verification
     final oldPendingEmailUserId = prefs.getString('pending_email_user_id');
     final oldPendingEmailVerification = prefs.getBool('pending_email_verification') ?? false;
     final oldPendingEmailTimestamp = prefs.getInt('pending_email_timestamp');
@@ -306,7 +294,7 @@ class _AuthRouterState extends State<AuthRouter> {
       }
     }
 
-    // MOCK USER SUPPORT PRESERVED
+    // Check for authenticated user (Firebase or mock)
     final currentUser = FirebaseAuth.instance.currentUser;
     final mockUserId = prefs.getString('mock_user_id');
 
@@ -429,8 +417,6 @@ class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // FIX: Don't use Provider.of with listen: false here — use a local ref
-    // to avoid triggering rebuilds that cause AuthRouter to re-check
     if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
       _handleBackground();
     } else if (state == AppLifecycleState.resumed) {
@@ -482,8 +468,6 @@ class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
             themeMode: themeProvider.themeMode,
             initialRoute: '/',
             builder: (context, child) {
-              // FIX: Use a separate widget that listens to SettingsProvider
-              // so MaterialApp itself doesn't rebuild on every settings change
               return _AppLockWrapper(child: child!);
             },
             routes: {
@@ -556,12 +540,10 @@ class _AppLockWrapperState extends State<_AppLockWrapper> {
 
     final app = CallListener(child: widget.child);
 
-    // If locked, show lock screen OVER everything
     if (isLocked) {
       return _buildLockScreen(settingsProvider);
     }
 
-    // Check ban status for authenticated users
     final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
     final currentUser = FirebaseAuth.instance.currentUser;
     final userId = currentUser?.uid ?? authProvider.currentUserId;
@@ -744,7 +726,6 @@ class _LockScreenState extends State<LockScreen> {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        // Glowing lock icon
         Container(
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
@@ -786,7 +767,6 @@ class _LockScreenState extends State<LockScreen> {
           ),
         ),
         const SizedBox(height: 48),
-        // Unlock button with glassmorphism
         GestureDetector(
           onTap: () {
             final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
@@ -885,7 +865,6 @@ class _PasscodeEntryState extends State<_PasscodeEntry> {
         _enteredPasscode = '';
         _isShaking = true;
       });
-      // Reset shake after animation
       Future.delayed(const Duration(milliseconds: 300), () {
         if (mounted) setState(() => _isShaking = false);
       });
@@ -899,7 +878,6 @@ class _PasscodeEntryState extends State<_PasscodeEntry> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Header icon
           Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
@@ -934,7 +912,6 @@ class _PasscodeEntryState extends State<_PasscodeEntry> {
           ),
           const SizedBox(height: 32),
 
-          // Dots with shake animation
           AnimatedContainer(
             duration: const Duration(milliseconds: 100),
             transform: _isShaking
@@ -982,7 +959,6 @@ class _PasscodeEntryState extends State<_PasscodeEntry> {
 
           const SizedBox(height: 40),
 
-          // Number pad with glassmorphism tiles
           SizedBox(
             width: 300,
             child: GridView.count(
@@ -997,7 +973,6 @@ class _PasscodeEntryState extends State<_PasscodeEntry> {
                 _buildActionButton(
                   icon: Icons.fingerprint,
                   onTap: () {
-                    // Try biometric again
                     final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
                     if (settingsProvider.biometricLock) {
                       _tryBiometric();
@@ -1015,7 +990,6 @@ class _PasscodeEntryState extends State<_PasscodeEntry> {
 
           const SizedBox(height: 24),
 
-          // Cancel button
           TextButton(
             onPressed: widget.onCancel,
             child: Text(
@@ -1032,7 +1006,6 @@ class _PasscodeEntryState extends State<_PasscodeEntry> {
   }
 
   double _shakeOffset() {
-    // Simple shake effect
     final shakeCount = DateTime.now().millisecond % 4;
     return shakeCount == 0 ? -8 : shakeCount == 1 ? 8 : shakeCount == 2 ? -4 : 4;
   }
