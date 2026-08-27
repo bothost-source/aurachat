@@ -294,23 +294,47 @@ class _AuthRouterState extends State<AuthRouter> {
       }
     }
 
-    // Check for authenticated user (Firebase or mock)
+     // Check for authenticated user (Firebase or mock)
     final currentUser = FirebaseAuth.instance.currentUser;
     final mockUserId = prefs.getString('mock_user_id');
 
     if (currentUser != null || mockUserId != null) {
-      setState(() {
-        _targetScreen = const MainAppScreen();
-        _isChecking = false;
-      });
+      final userId = currentUser?.uid ?? mockUserId!;
+
+      // Check if user has a complete profile in Firestore
+      try {
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(userId)
+            .get();
+
+        final hasProfile = userDoc.exists &&
+            userDoc.data()?['username'] != null &&
+            userDoc.data()?['display_name'] != null &&
+            (userDoc.data()?['username'] as String).isNotEmpty;
+
+        if (hasProfile) {
+          // Existing user with complete profile → go to main
+          setState(() {
+            _targetScreen = const MainAppScreen();
+            _isChecking = false;
+          });
+        } else {
+          // New user or incomplete profile → go to setup
+          setState(() {
+            _targetScreen = const SetupProfileScreen();
+            _isChecking = false;
+          });
+        }
+      } catch (e) {
+        // If Firestore check fails, default to setup (safer)
+        setState(() {
+          _targetScreen = const SetupProfileScreen();
+          _isChecking = false;
+        });
+      }
       return;
     }
-
-    setState(() {
-      _targetScreen = const SplashScreen();
-      _isChecking = false;
-    });
-  }
 
   @override
   Widget build(BuildContext context) {
