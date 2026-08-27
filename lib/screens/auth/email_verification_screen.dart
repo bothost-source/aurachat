@@ -7,7 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../services/app_localizations.dart';
-import 'setup_profile_screen.dart';
+import 'otp_screen.dart';
 
 class EmailVerificationScreen extends StatefulWidget {
   final String userId;
@@ -145,14 +145,22 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
           return;
         }
 
+        // FIX: Clear ALL pending states so AuthRouter doesn't loop back
         await _clearPendingEmailState();
+        await OtpScreen.clearPendingOtpState();
+
+        // FIX: Ensure mock user is persisted for app restarts
+        final prefs = await SharedPreferences.getInstance();
+        final mockUserId = authProvider.mockUserId;
+        if (mockUserId != null) {
+          await prefs.setString('mock_user_id', mockUserId);
+        }
 
         if (mounted) {
-          if (widget.isLoginFlow) {
-            Navigator.pushReplacementNamed(context, '/main');
-          } else {
-            Navigator.pushReplacementNamed(context, '/setup_profile');
-          }
+          // FIX: Always go to main app after verification
+          // Setup profile should have been done before OTP for new users
+          // Existing users already have profiles
+          Navigator.pushReplacementNamed(context, '/main');
         }
       } else {
         final data = jsonDecode(response.body);
