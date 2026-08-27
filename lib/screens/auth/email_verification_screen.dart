@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../services/app_localizations.dart';
 import 'otp_screen.dart';
@@ -34,17 +35,22 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
 
   bool _isLoading = false;
   bool _codeSent = false;
+  bool _isAddingEmail = false; // Toggle for adding email manually
   int _resendTimer = 60;
   String? _error;
   String? _sentEmail;
 
+  bool get _hasEmail => widget.autoDetectedEmail != null && widget.autoDetectedEmail!.isNotEmpty;
+
   @override
   void initState() {
     super.initState();
-    if (widget.autoDetectedEmail != null) {
+    if (_hasEmail) {
       _emailController.text = widget.autoDetectedEmail!;
       if (widget.isLoginFlow) {
-        WidgetsBinding.instance.addPostFrameCallback((_) => _sendCode());
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _sendCode();
+        });
       }
     }
     _savePendingEmailState();
@@ -73,11 +79,33 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
     });
   }
 
+  Future<void> _saveEmailToFirestore(String email) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.userId)
+          .update({
+        'email': email,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      debugPrint('Save email error: $e');
+    }
+  }
+
   Future<void> _sendCode() async {
-    final email = _emailController.text.trim();
+    final email = _hasEmail && !_isAddingEmail
+        ? widget.autoDetectedEmail!
+        : _emailController.text.trim();
+
     if (email.isEmpty || !email.contains('@')) {
       setState(() => _error = 'Enter a valid email');
       return;
+    }
+
+    // If user is manually adding email, save it first
+    if (!_hasEmail || _isAddingEmail) {
+      await _saveEmailToFirestore(email);
     }
 
     setState(() { _isLoading = true; _error = null; });
@@ -96,6 +124,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
           _codeSent = true;
           _resendTimer = 60;
           _sentEmail = email;
+          _isAddingEmail = false; // Reset after successful send
         });
         _startResendTimer();
       } else {
@@ -127,7 +156,6 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
     setState(() { _isLoading = true; _error = null; });
 
     try {
-      // 1. Verify via backend API
       final response = await http.post(
         Uri.parse('${widget.backendUrl}/api/auth/verify-email'),
         headers: {'Content-Type': 'application/json'},
@@ -135,7 +163,6 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
       );
 
       if (response.statusCode == 200) {
-        // 2. Backend verified — now complete local auth
         final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
         final verified = await authProvider.verifyEmailOtp(code);
         
@@ -145,11 +172,9 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
           return;
         }
 
-        // FIX: Clear ALL pending states so AuthRouter doesn't loop back
         await _clearPendingEmailState();
         await OtpScreen.clearPendingOtpState();
 
-        // FIX: Ensure mock user is persisted for app restarts
         final prefs = await SharedPreferences.getInstance();
         final mockUserId = authProvider.mockUserId;
         if (mockUserId != null) {
@@ -157,9 +182,6 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
         }
 
         if (mounted) {
-          // FIX: Always go to main app after verification
-          // Setup profile should have been done before OTP for new users
-          // Existing users already have profiles
           Navigator.pushReplacementNamed(context, '/main');
         }
       } else {
@@ -221,7 +243,8 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
                   ),
                   const SizedBox(height: 12),
 
-                  if (widget.isLoginFlow && widget.autoDetectedEmail != null) ...[
+                  // Show detected email for old users who have one
+                  if (_hasEmail && !_isAddingEmail) ...[
                     Text(
                       'We detected your email. Sending verification code to:',
                       style: TextStyle(
@@ -241,32 +264,43 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
                         children: [
                           const Icon(Icons.email, color: Color(0xFF8B5CF6), size: 20),
                           const SizedBox(width: 12),
-                          Text(
-                            widget.autoDetectedEmail!,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600,
+                          Expanded(
+                            child: Text(
+                              widget.autoDetectedEmail!,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                         ],
                       ),
                     ),
-                    const SizedBox(height: 24),
-                  ] else ...[
+                    const SizedBox(height: 16),
+                    // Option to change email
+                    Center(
+                      child: TextButton(
+                        onPressed: () => setState(() => _isAddingEmail = true),
+                        child: const Text(
+                          'Use different email',
+                          style: TextStyle(color: Color(0xFF8B5CF6)),
+                        ),
+                      ),
+                    ),
+                  ] 
+                  // Show email input for new users or old users without email
+                  else ...[
                     Text(
-                      _codeSent
-                        ? 'Enter the 6-digit code sent to your email'
-                        : 'Enter your email to receive a verification code',
+                      _hasEmail 
+                          ? 'Enter the email you want to use'
+                          : 'Add your email to secure your account',
                       style: TextStyle(
                         fontSize: 15,
                         color: Colors.white.withOpacity(0.5),
                       ),
                     ),
-                  ],
-
-                  const SizedBox(height: 40),
-
-                  if (!_codeSent && !widget.isLoginFlow) ...[
+                    const SizedBox(height: 16),
                     TextField(
                       controller: _emailController,
                       keyboardType: TextInputType.emailAddress,
@@ -288,9 +322,35 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
                           borderRadius: BorderRadius.circular(16),
                           borderSide: const BorderSide(color: Color(0xFF8B5CF6)),
                         ),
+                        prefixIcon: const Icon(Icons.email, color: Color(0xFF8B5CF6)),
                       ),
                     ),
-                  ] else if (_codeSent) ...[
+                    if (_hasEmail) ...[
+                      const SizedBox(height: 8),
+                      Center(
+                        child: TextButton(
+                          onPressed: () => setState(() => _isAddingEmail = false),
+                          child: const Text(
+                            'Back to detected email',
+                            style: TextStyle(color: Color(0xFF8B5CF6)),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+
+                  const SizedBox(height: 40),
+
+                  // Code entry field (shown after code is sent)
+                  if (_codeSent) ...[
+                    Text(
+                      'Enter the 6-digit code sent to ${_sentEmail ?? 'your email'}',
+                      style: TextStyle(
+                        fontSize: 15,
+                        color: Colors.white.withOpacity(0.5),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: List.generate(6, (index) {
@@ -341,6 +401,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
 
                   const Spacer(),
 
+                  // Main action button
                   SizedBox(
                     width: double.infinity,
                     height: 56,
@@ -370,7 +431,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
                                 ),
                               )
                             : Text(
-                                _codeSent ? 'Verify Code' : 'Send Code',
+                                _codeSent ? 'Verify Code' : (_hasEmail && !_isAddingEmail ? 'Send Code' : 'Add Email & Send Code'),
                                 style: const TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.w700,
@@ -381,6 +442,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
                     ),
                   ),
 
+                  // Resend timer
                   if (_codeSent && _resendTimer > 0) ...[
                     const SizedBox(height: 16),
                     Center(
