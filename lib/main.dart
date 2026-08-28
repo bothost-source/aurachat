@@ -332,10 +332,16 @@ class _AuthRouterState extends State<AuthRouter> {
           _targetScreen = const SetupProfileScreen();
           _isChecking = false;
         });
-      }
+        }
       return;
     }
+    // No user logged in → show login screen
+    setState(() {
+      _targetScreen = const LoginScreen();
+      _isChecking = false;
+    });
   }
+
 
   @override
   Widget build(BuildContext context) {
