@@ -19,8 +19,7 @@ import 'providers/bot_provider.dart';
 import 'providers/moderation_provider.dart';
 import 'screens/splash_screen.dart';
 import 'screens/onboarding/terms_screen.dart';
-import 'screens/auth/login_screen.dart';
-import 'screens/auth/otp_screen.dart';
+import 'screens/auth/email_verification_screen.dart';
 import 'screens/auth/setup_profile_screen.dart';
 import 'screens/main_app_screen.dart';
 import 'screens/chat/chat_screen.dart';
@@ -64,7 +63,6 @@ import 'services/online_status_service.dart';
 import 'services/call_service.dart';
 import 'services/call_signaling_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'screens/auth/email_verification_screen.dart';
 
 // Global navigator key for navigation from background/notification handlers
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -230,41 +228,13 @@ class _AuthRouterState extends State<AuthRouter> {
   Future<void> _checkAuthState() async {
     final prefs = await SharedPreferences.getInstance();
 
-    final pendingOtpPhone = prefs.getString('pending_otp_phone');
-    final pendingOtpExpected = prefs.getString('pending_otp_expected');
-    final pendingOtpTimestamp = prefs.getInt('pending_otp_timestamp');
-
-    if (pendingOtpPhone != null && pendingOtpExpected != null && pendingOtpTimestamp != null) {
-      final otpAge = DateTime.now().millisecondsSinceEpoch - pendingOtpTimestamp;
-      if (otpAge < 10 * 60 * 1000) {
-        setState(() {
-          _targetScreen = OtpScreen(
-            phoneNumber: pendingOtpPhone,
-            expectedOtp: pendingOtpExpected,
-            cleanPhoneNumber: pendingOtpPhone,
-          );
-          _isChecking = false;
-        });
-        return;
-      } else {
-        await prefs.remove('pending_otp_phone');
-        await prefs.remove('pending_otp_expected');
-        await prefs.remove('pending_otp_timestamp');
-      }
-    }
-
-    // Check for pending email verification (new style from loginExistingUser)
+    // Check for pending email verification (from email-first login)
     final pendingMockUserId = prefs.getString('pending_mock_user_id');
     final pendingMockEmail = prefs.getString('pending_mock_email');
 
     if (pendingMockUserId != null && pendingMockEmail != null) {
       setState(() {
-        _targetScreen = EmailVerificationScreen(
-          userId: pendingMockUserId,
-          backendUrl: 'https://aurachat-backend-5utu.onrender.com',
-          autoDetectedEmail: pendingMockEmail,
-          isLoginFlow: true,
-        );
+        _targetScreen = const EmailVerificationScreen();
         _isChecking = false;
       });
       return;
@@ -279,11 +249,7 @@ class _AuthRouterState extends State<AuthRouter> {
       final emailAge = DateTime.now().millisecondsSinceEpoch - oldPendingEmailTimestamp;
       if (emailAge < 30 * 60 * 1000) {
         setState(() {
-          _targetScreen = EmailVerificationScreen(
-            userId: oldPendingEmailUserId,
-            backendUrl: 'https://aurachat-backend-5utu.onrender.com',
-            isLoginFlow: true,
-          );
+          _targetScreen = const EmailVerificationScreen();
           _isChecking = false;
         });
         return;
@@ -294,7 +260,7 @@ class _AuthRouterState extends State<AuthRouter> {
       }
     }
 
-     // Check for authenticated user (Firebase or mock)
+    // Check for authenticated user (Firebase or mock)
     final currentUser = FirebaseAuth.instance.currentUser;
     final mockUserId = prefs.getString('mock_user_id');
 
@@ -314,13 +280,13 @@ class _AuthRouterState extends State<AuthRouter> {
             (userDoc.data()?['username'] as String).isNotEmpty;
 
         if (hasProfile) {
-          // Existing user with complete profile → go to main
+          // Existing user with complete profile -> go to main
           setState(() {
             _targetScreen = const MainAppScreen();
             _isChecking = false;
           });
         } else {
-          // New user or incomplete profile → go to setup
+          // New user or incomplete profile -> go to setup
           setState(() {
             _targetScreen = const SetupProfileScreen();
             _isChecking = false;
@@ -332,16 +298,16 @@ class _AuthRouterState extends State<AuthRouter> {
           _targetScreen = const SetupProfileScreen();
           _isChecking = false;
         });
-        }
+      }
       return;
     }
-    // No user logged in → show login screen
+
+    // No user logged in -> show email verification screen (new entry point)
     setState(() {
-      _targetScreen = const LoginScreen();
+      _targetScreen = const EmailVerificationScreen();
       _isChecking = false;
     });
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -504,7 +470,6 @@ class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
             routes: {
               '/': (context) => const AuthRouter(),
               '/terms': (context) => const TermsScreen(),
-              '/login': (context) => const LoginScreen(),
               '/setup_profile': (context) => const SetupProfileScreen(),
               '/main': (context) => const MainAppScreen(),
               '/chat': (context) => const ChatScreen(),
