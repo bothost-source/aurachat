@@ -79,7 +79,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
 
                 final userUsername = liveData?['username'] as String?;
                 final avatarUrl = liveData?['avatar_url'] as String? ?? passedAvatarUrl;
-                final phone = liveData?['phone'] as String?;
+                final email = liveData?['email'] as String?;
                 final bio = liveData?['bio'] as String? ?? args?['bio'] as String?;
 
                 return StreamBuilder<DocumentSnapshot>(
@@ -107,7 +107,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                           // FIX: Display Name with verified badge (uses phone number check)
                           VerifiedUsername(
                             username: displayName,
-                            phoneNumber: phone,
+                            email: email,
                             style: const TextStyle(
                               fontSize: 24,
                               fontWeight: FontWeight.bold,
