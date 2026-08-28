@@ -500,7 +500,7 @@ class _CreateChannelScreenState extends State<CreateChannelScreen> {
                             child: ListTile(
                               leading: _buildMemberAvatar(user['avatar_url'], user['username']),
                               title: Text(user['username'] ?? 'Unknown', style: const TextStyle(color: Colors.white)),
-                              subtitle: Text(user['phone'] ?? '', style: TextStyle(color: Colors.white.withOpacity(0.4))),
+                              subtitle: Text(user['email'] ?? '', style: TextStyle(color: Colors.white.withOpacity(0.4))),
                               trailing: isSelected
                                   ? const Icon(Icons.check_circle, color: _purple)
                                   : const Icon(Icons.add_circle_outline, color: Colors.white54),
