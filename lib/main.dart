@@ -423,6 +423,9 @@ class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
 
   void _handleBackground() async {
     try {
+      // FIXED: Set offline when app goes to background
+      OnlineStatusService.setOffline();
+      
       final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
       settingsProvider.onAppBackground();
     } catch (e) {
@@ -432,7 +435,8 @@ class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
 
   void _handleResume() async {
     try {
-      OnlineStatusService.setOnline();
+      await OnlineStatusService.setOnline(); // FIXED: Added await
+      
       final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
       authProvider.refreshSession();
 
