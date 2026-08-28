@@ -77,45 +77,104 @@ class _OtpScreenState extends State<OtpScreen> {
     }
   }
 
+  // ==========================================================================
+  // FIXED: _verifyOTP() — Proper error handling, no fake delay, no silent failures
+  // ==========================================================================
   void _verifyOTP() async {
     final enteredOtp = _controllers.map((c) => c.text).join();
 
     setState(() => _isLoading = true);
-    await Future.delayed(const Duration(seconds: 1));
-    setState(() => _isLoading = false);
 
-    if (enteredOtp == widget.expectedOtp) {
+    try {
+      // Wrong OTP
+      if (enteredOtp != widget.expectedOtp) {
+        setState(() => _isLoading = false);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(AppLocalizations.get('invalid_otp')),
+              backgroundColor: Colors.red.withOpacity(0.9),
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          );
+        }
+        return;
+      }
+
       final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
       authProvider.setMockPhone(widget.cleanPhoneNumber);
 
       final existingUser = await authProvider.checkPhoneExists(widget.cleanPhoneNumber);
 
       if (existingUser != null) {
-        final success = await authProvider.loginExistingUser(widget.cleanPhoneNumber);
-        if (success && mounted) {
-          final existingEmail = existingUser['email'] as String?;
-          if (existingEmail != null && existingEmail.isNotEmpty) {
-            await authProvider.sendEmailOtp();
+        // ========== EXISTING USER ==========
+        final success = await authProvider.loginExistingUser(
+          widget.cleanPhoneNumber,
+          userData: existingUser,
+        );
+
+        if (!success) {
+          setState(() => _isLoading = false);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(authProvider.error ?? 'Login failed. Please try again.'),
+                backgroundColor: Colors.red.withOpacity(0.9),
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            );
+          }
+          return;
+        }
+
+        final existingEmail = existingUser['email'] as String?;
+
+        if (existingEmail != null && existingEmail.isNotEmpty) {
+          // User has email — send OTP and navigate
+          final otpSent = await authProvider.sendEmailOtp();
+
+          if (!otpSent) {
+            setState(() => _isLoading = false);
             if (mounted) {
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => EmailVerificationScreen(
-                    userId: existingUser['id'] as String,
-                    backendUrl: 'https://aurachat-backend-5utu.onrender.com',
-                    autoDetectedEmail: existingEmail,
-                    isLoginFlow: true,
-                  ),
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(authProvider.error ?? 'Failed to send email OTP'),
+                  backgroundColor: Colors.red.withOpacity(0.9),
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
               );
             }
-          } else {
-            await _completeLoginAndClear(authProvider);
+            return;
           }
+
+          setState(() => _isLoading = false);
+          if (mounted) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(
+                builder: (context) => EmailVerificationScreen(
+                  userId: existingUser['id'] as String,
+                  backendUrl: 'https://aurachat-backend-5utu.onrender.com',
+                  autoDetectedEmail: existingEmail,
+                  isLoginFlow: true,
+                ),
+              ),
+            );
+          }
+        } else {
+          // Existing user but no email — go to profile setup
+          await _completeLoginAndClear(authProvider);
         }
+
       } else {
+        // ========== NEW USER ==========
         await authProvider.createMockUser();
+        setState(() => _isLoading = false);
         if (mounted) {
+          // New users: go to email verification to collect email
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(
@@ -128,11 +187,15 @@ class _OtpScreenState extends State<OtpScreen> {
           );
         }
       }
-    } else {
+
+    } catch (e, stackTrace) {
+      setState(() => _isLoading = false);
+      debugPrint('OTP verification error: $e');
+      debugPrint('Stack trace: $stackTrace');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(AppLocalizations.get('invalid_otp')),
+            content: Text('Error: $e'),
             backgroundColor: Colors.red.withOpacity(0.9),
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -150,6 +213,7 @@ class _OtpScreenState extends State<OtpScreen> {
       await prefs.setString('mock_phone', widget.cleanPhoneNumber);
     }
     await OtpScreen.clearPendingOtpState();
+    setState(() => _isLoading = false);
     if (mounted) {
       Navigator.pushReplacementNamed(context, '/setup_profile');
     }
