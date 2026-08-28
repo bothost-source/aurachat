@@ -1,20 +1,13 @@
+import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
-import '../../services/app_localizations.dart';
 
-/// ============================================================================
-/// EMAIL VERIFICATION SCREEN — Main Login Entry Point
-/// 
-/// This is the FIRST screen users see. They enter their email, we send an OTP
-/// via the backend, they verify it, and we route them accordingly.
-/// ============================================================================
 class EmailVerificationScreen extends StatefulWidget {
   const EmailVerificationScreen({super.key});
 
@@ -23,21 +16,21 @@ class EmailVerificationScreen extends StatefulWidget {
 }
 
 class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
-  // Step 1: Email input
   final _emailController = TextEditingController();
-
-  // Step 2: OTP input
   final List<TextEditingController> _codeControllers = List.generate(6, (_) => TextEditingController());
   final List<FocusNode> _focusNodes = List.generate(6, (_) => FocusNode());
 
-  // State
   bool _isLoading = false;
   String? _error;
   String? _sentEmail;
   String? _userId;
   bool _codeSent = false;
   bool _isExistingUser = false;
-  int _resendTimer = 60;
+  int _resendTimer = 0;
+  bool _resendLoading = false;
+
+  // Store user data locally — don't touch provider until verified
+  Map<String, dynamic>? _existingUserData;
 
   final String _backendUrl = 'https://aurachat-backend-5utu.onrender.com';
 
@@ -50,17 +43,21 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
   }
 
   void _startResendTimer() {
+    if (_resendTimer > 0) return;
+    setState(() => _resendTimer = 60);
+    _tickResendTimer();
+  }
+
+  void _tickResendTimer() {
     Future.delayed(const Duration(seconds: 1), () {
       if (mounted && _resendTimer > 0) {
         setState(() => _resendTimer--);
-        _startResendTimer();
+        _tickResendTimer();
       }
     });
   }
 
-  /// ==========================================================================
-  /// STEP 1: Send OTP to email (via backend)
-  /// ==========================================================================
+  /// STEP 1: Send OTP — Check Firestore, call backend
   Future<void> _sendCode() async {
     final email = _emailController.text.trim().toLowerCase();
 
@@ -75,60 +72,58 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
     });
 
     try {
-      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
-
-      // Check if this email already has an account
-      final existingUser = await authProvider.checkEmailExists(email);
+      // Check Firestore for existing email
+      final firestore = FirebaseFirestore.instance;
+      final snapshot = await firestore
+          .collection('users')
+          .where('email', isEqualTo: email)
+          .limit(1)
+          .get();
 
       String userId;
-      bool isExisting;
+      bool isExisting = false;
+      Map<String, dynamic>? existingData;
 
-      if (existingUser != null) {
-        // Existing user
-        userId = existingUser['id'] as String;
+      if (snapshot.docs.isNotEmpty) {
+        // EXISTING USER
         isExisting = true;
-
-        // Save their data to provider
-        authProvider.setMockEmail(email);
-        authProvider.setMockUserId(userId);
-        await authProvider.savePendingUserData(
-          userId: userId,
-          email: email,
-          phone: existingUser['phone'] as String?,
-          username: existingUser['username'] as String?,
-          displayName: existingUser['display_name'] as String?,
-          bio: existingUser['bio'] as String?,
-          avatarUrl: existingUser['avatar_url'] as String?,
-        );
+        existingData = snapshot.docs.first.data();
+        existingData['id'] = snapshot.docs.first.id;
+        userId = snapshot.docs.first.id;
       } else {
-        // New user - create a temp ID
+        // NEW USER
         userId = 'mock_${DateTime.now().millisecondsSinceEpoch}';
-        isExisting = false;
-
-        authProvider.setMockEmail(email);
-        authProvider.setMockUserId(userId);
-        await authProvider.savePendingUserData(
-          userId: userId,
-          email: email,
-        );
       }
 
-      // Call backend to send email OTP
+      // Save to SharedPreferences directly (NOT through provider)
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('pending_email_user_id', userId);
+      await prefs.setString('pending_email', email);
+      if (existingData != null) {
+        await prefs.setString('pending_phone', existingData['phone'] ?? '');
+        await prefs.setString('pending_username', existingData['username'] ?? '');
+        await prefs.setString('pending_display_name', existingData['display_name'] ?? '');
+        await prefs.setString('pending_bio', existingData['bio'] ?? '');
+        await prefs.setString('pending_avatar', existingData['avatar_url'] ?? '');
+      }
+
+      // Call backend to send OTP
       final response = await http.post(
         Uri.parse('$_backendUrl/api/auth/send-email-verification'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'email': email, 'userId': userId}),
-      );
+      ).timeout(const Duration(seconds: 15));
 
+      if (!mounted) return;
       final data = jsonDecode(response.body);
 
       if (response.statusCode == 200) {
         setState(() {
           _codeSent = true;
-          _resendTimer = 60;
           _sentEmail = email;
           _userId = userId;
           _isExistingUser = isExisting;
+          _existingUserData = existingData;
           _isLoading = false;
         });
         _startResendTimer();
@@ -138,10 +133,69 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
           _error = data['details'] ?? data['error'] ?? 'Failed to send OTP';
         });
       }
-    } catch (e) {
+    } on TimeoutException catch (_) {
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
-        _error = 'Network error: $e';
+        _error = 'Request timed out. Try again.';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _error = 'Error: $e';
+      });
+    }
+  }
+
+  /// RESEND OTP — Same as send but without Firestore check (we already have userId)
+  Future<void> _resendCode() async {
+    if (_resendTimer > 0 || _sentEmail == null || _userId == null) return;
+
+    setState(() {
+      _resendLoading = true;
+      _error = null;
+    });
+
+    try {
+      final response = await http.post(
+        Uri.parse('$_backendUrl/api/auth/send-email-verification'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'email': _sentEmail, 'userId': _userId}),
+      ).timeout(const Duration(seconds: 15));
+
+      if (!mounted) return;
+      final data = jsonDecode(response.body);
+
+      if (response.statusCode == 200) {
+        setState(() {
+          _resendLoading = false;
+        });
+        _startResendTimer();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('New code sent!'),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      } else {
+        setState(() {
+          _resendLoading = false;
+          _error = data['details'] ?? data['error'] ?? 'Failed to resend OTP';
+        });
+      }
+    } on TimeoutException catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _resendLoading = false;
+        _error = 'Request timed out. Try again.';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _resendLoading = false;
+        _error = 'Error: $e';
       });
     }
   }
@@ -158,9 +212,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
     }
   }
 
-  /// ==========================================================================
-  /// STEP 2: Verify OTP with backend
-  /// ==========================================================================
+  /// STEP 2: Verify OTP — Call backend, then set up provider
   Future<void> _verifyCode() async {
     final code = _codeControllers.map((c) => c.text).join();
 
@@ -175,14 +227,13 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
     });
 
     try {
-      // Verify with BACKEND (source of truth)
       final response = await http.post(
         Uri.parse('$_backendUrl/api/auth/verify-email'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'userId': _userId, 'code': code}),
-      );
+      ).timeout(const Duration(seconds: 15));
 
-      debugPrint('Backend verify response: ${response.statusCode} - ${response.body}');
+      if (!mounted) return;
 
       if (response.statusCode != 200) {
         final data = jsonDecode(response.body);
@@ -190,56 +241,77 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
           _error = data['error'] ?? 'Invalid code';
           _isLoading = false;
         });
-        // Clear code fields for retry
-        for (final c in _codeControllers) {
-          c.clear();
-        }
+        for (final c in _codeControllers) c.clear();
         _focusNodes[0].requestFocus();
         return;
       }
 
-      // Backend confirmed — complete login locally
+      // Backend confirmed — NOW set up provider
       final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
-      final verified = await authProvider.completeEmailVerification(_userId!);
-
-      if (!verified) {
-        setState(() {
-          _error = authProvider.error ?? 'Verification failed';
-          _isLoading = false;
-        });
-        return;
-      }
-
-      // Clean up
       final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('pending_email_user_id');
-      await prefs.remove('pending_email_verification');
-      await prefs.remove('pending_email_timestamp');
 
-      // Route based on user type
-      if (mounted) {
-        setState(() => _isLoading = false);
+      final userId = _userId!;
+      final email = _sentEmail!;
 
-        if (_isExistingUser) {
-          // Existing user -> Main app
-          Navigator.pushReplacementNamed(context, '/main');
-        } else {
-          // New user -> Profile setup
-          Navigator.pushReplacementNamed(context, '/setup_profile');
-        }
+      // Set provider state
+      authProvider.mockUserId = userId;
+      authProvider.setMockEmail(email);
+
+      // Save permanent prefs
+      await prefs.setString('mock_user_id', userId);
+      await prefs.setString('mock_email', email);
+
+      if (_isExistingUser && _existingUserData != null) {
+        // Existing user — restore their data
+        final phone = _existingUserData!['phone'] as String?;
+        final username = _existingUserData!['username'] as String?;
+        final displayName = _existingUserData!['display_name'] as String?;
+        final bio = _existingUserData!['bio'] as String?;
+        final avatar = _existingUserData!['avatar_url'] as String?;
+
+        await prefs.setString('mock_phone', phone ?? '');
+        await prefs.setString('mock_username', username ?? '');
+        await prefs.setString('mock_display_name', displayName ?? '');
+        await prefs.setString('mock_bio', bio ?? '');
+        await prefs.setString('mock_avatar', avatar ?? '');
+
+        // Update Firestore
+        await FirebaseFirestore.instance.collection('users').doc(userId).update({
+          'email_verified': true,
+          'updated_at': DateTime.now().toIso8601String(),
+        });
       }
 
-    } catch (e) {
+      // Clean up pending
+      await prefs.remove('pending_email_user_id');
+      await prefs.remove('pending_email');
+      await prefs.remove('pending_phone');
+      await prefs.remove('pending_username');
+      await prefs.remove('pending_display_name');
+      await prefs.remove('pending_bio');
+      await prefs.remove('pending_avatar');
+
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+
+      // BOTH existing and new users go to setup_profile to confirm/change info
+      Navigator.pushReplacementNamed(context, '/setup_profile');
+
+    } on TimeoutException catch (_) {
+      if (!mounted) return;
       setState(() {
-        _error = 'Network error: $e';
         _isLoading = false;
+        _error = 'Request timed out. Try again.';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _error = 'Network error: $e';
       });
     }
   }
 
-  /// ==========================================================================
-  /// UI
-  /// ==========================================================================
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
@@ -253,7 +325,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
               colors: [
                 Color(0xFF0A0A0F),
                 Color(0xFF1a103c),
-                Color(0xFF0d1b2a),
+                Color(0xFF0f172a),
                 Color(0xFF0A0A0F),
               ],
             ),
@@ -265,8 +337,6 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const SizedBox(height: 60),
-
-                  // Title
                   ShaderMask(
                     shaderCallback: (bounds) => const LinearGradient(
                       colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)],
@@ -282,8 +352,6 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-
-                  // Subtitle
                   Text(
                     _codeSent
                         ? 'Enter the 6-digit code sent to $_sentEmail'
@@ -296,7 +364,6 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
                   ),
                   const SizedBox(height: 48),
 
-                  // Email input (Step 1)
                   if (!_codeSent) ...[
                     TextField(
                       controller: _emailController,
@@ -325,7 +392,6 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
                     ),
                   ],
 
-                  // OTP input (Step 2)
                   if (_codeSent) ...[
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -369,7 +435,6 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
 
                   const SizedBox(height: 24),
 
-                  // Error display
                   if (_error != null) ...[
                     Container(
                       padding: const EdgeInsets.all(12),
@@ -451,13 +516,22 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
                                 fontSize: 14,
                               ),
                             )
-                          : TextButton(
-                              onPressed: _sendCode,
-                              child: const Text(
-                                'Resend Code',
-                                style: TextStyle(color: Color(0xFF8B5CF6)),
-                              ),
-                            ),
+                          : _resendLoading
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : TextButton(
+                                  onPressed: _resendCode,
+                                  child: const Text(
+                                    'Resend Code',
+                                    style: TextStyle(color: Color(0xFF8B5CF6)),
+                                  ),
+                                ),
                     ),
                     const SizedBox(height: 8),
                     Center(
@@ -466,6 +540,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
                           setState(() {
                             _codeSent = false;
                             _error = null;
+                            _resendTimer = 0;
                             for (final c in _codeControllers) {
                               c.clear();
                             }
@@ -479,20 +554,26 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
                     ),
                   ],
 
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 16),
 
-                  // Terms
-                  if (!_codeSent)
-                    Center(
+                  // TERMS & PRIVACY LINK
+                  Center(
+                    child: TextButton(
+                      onPressed: () => Navigator.pushNamed(context, '/terms'),
                       child: Text(
-                        'By continuing, you agree to our Terms and Privacy Policy',
+                        'Terms of Service & Privacy Policy',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: 12,
-                          color: Colors.white.withOpacity(0.3),
+                          color: Colors.white.withOpacity(0.4),
+                          decoration: TextDecoration.underline,
+                          decorationColor: Colors.white.withOpacity(0.3),
                         ),
                       ),
                     ),
+                  ),
+
+                  const SizedBox(height: 8),
                 ],
               ),
             ),
