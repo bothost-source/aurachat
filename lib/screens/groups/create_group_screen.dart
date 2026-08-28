@@ -140,7 +140,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
       final chatProvider = Provider.of<ChatProvider>(context, listen: false);
       final firestore = FirebaseFirestore.instance;
       final userId = authProvider.user?.uid ?? authProvider.mockUserId;
-      final phoneNumber = authProvider.phoneNumber ?? '';
+      final email = authProvider.email ?? '';
 
       if (userId == null) {
         throw Exception('Not authenticated');
@@ -168,7 +168,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
         'avatar_url': _groupPhotoUrl,
         'type': 'group',
         'created_by': userId,
-        'created_by_phone': phoneNumber,
+        'created_by_email': email,
         'participants': participants,
         'participants_data': participantsData,
         'member_count': participants.length,
@@ -462,7 +462,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                             child: ListTile(
                               leading: _buildMemberAvatar(user['avatar_url'], user['username']),
                               title: Text(user['username'] ?? 'Unknown', style: const TextStyle(color: Colors.white)),
-                              subtitle: Text(user['phone'] ?? '', style: TextStyle(color: Colors.white.withOpacity(0.4))),
+                              subtitle: Text(user['email'] ?? '', style: TextStyle(color: Colors.white.withOpacity(0.4))),
                               trailing: isSelected
                                   ? const Icon(Icons.check_circle, color: _purple)
                                   : const Icon(Icons.add_circle_outline, color: Colors.white54),
