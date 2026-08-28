@@ -1,16 +1,15 @@
 import 'package:flutter/material.dart';
 
-/// Hardcoded verified phone numbers — add yours here.
-/// Format: digits only, no '+' or spaces.
-const List<String> verifiedNumbers = [
-  '2349135204957', // YOUR NUMBER — add more if needed
+/// Hardcoded verified emails — add yours here.
+const List<String> verifiedEmails = [
+  'destinyjob2007@gmail.com', // YOUR EMAIL — add more if needed
 ];
 
-/// Check if a phone number is verified.
-bool isVerified(String? phoneNumber) {
-  if (phoneNumber == null || phoneNumber.isEmpty) return false;
-  final clean = phoneNumber.replaceAll('+', '').replaceAll(' ', '').trim();
-  return verifiedNumbers.contains(clean);
+/// Check if an email is verified.
+bool isVerified(String? email) {
+  if (email == null || email.isEmpty) return false;
+  final clean = email.trim().toLowerCase();
+  return verifiedEmails.contains(clean);
 }
 
 /// Blue verified tick badge (like Twitter/WhatsApp).
@@ -51,10 +50,10 @@ class VerifiedBadge extends StatelessWidget {
   }
 }
 
-/// Shows a username with a blue verified tick if the phone number is verified.
+/// Shows a username with a blue verified tick if the email is verified.
 class VerifiedUsername extends StatelessWidget {
   final String username;
-  final String? phoneNumber;
+  final String? email;
   final TextStyle? style;
   final double badgeSize;
   final double spacing;
@@ -64,7 +63,7 @@ class VerifiedUsername extends StatelessWidget {
   const VerifiedUsername({
     super.key,
     required this.username,
-    this.phoneNumber,
+    this.email,
     this.style,
     this.badgeSize = 14,
     this.spacing = 4,
@@ -74,7 +73,7 @@ class VerifiedUsername extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isUserVerified = isVerified(phoneNumber);
+    final isUserVerified = isVerified(email);
 
     return Row(
       mainAxisSize: MainAxisSize.min,
