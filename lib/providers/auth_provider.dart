@@ -120,18 +120,20 @@ class AuraAuthProvider extends ChangeNotifier {
     }
   }
 
-   /// ==================== LOGIN EXISTING USER (ENFORCES EMAIL OTP) ====================
-  Future<bool> loginExistingUser(String phone) async {
+  /// ==================== LOGIN EXISTING USER (OPTIMIZED) ====================
+  /// FIXED: Accepts pre-fetched userData to avoid redundant Firestore query
+  Future<bool> loginExistingUser(String phone, {Map<String, dynamic>? userData}) async {
     _setLoading(true);
     try {
-      final userData = await checkPhoneExists(phone);
-      if (userData == null) {
+      final data = userData ?? await checkPhoneExists(phone);
+
+      if (data == null) {
         _error = 'User not found';
         _setLoading(false);
         return false;
       }
 
-      final userId = userData['id'] as String?;
+      final userId = data['id'] as String?;
       if (userId == null) {
         _error = 'Invalid user data';
         _setLoading(false);
@@ -139,13 +141,13 @@ class AuraAuthProvider extends ChangeNotifier {
       }
 
       _phoneNumber = phone;
-      _email = userData['email'] as String?;
-      _userName = userData['username'] as String?;
-      _displayName = userData['display_name'] as String?;
-      _userBio = userData['bio'] as String?;
-      _userPhotoUrl = userData['avatar_url'] as String?;
+      _email = data['email'] as String?;
+      _userName = data['username'] as String?;
+      _displayName = data['display_name'] as String?;
+      _userBio = data['bio'] as String?;
+      _userPhotoUrl = data['avatar_url'] as String?;
       _mockUserId = userId;
-      _isAuthenticated = true; // FIX: Keep authenticated, don't set false
+      _isAuthenticated = true;
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('pending_mock_user_id', userId);
@@ -156,8 +158,6 @@ class AuraAuthProvider extends ChangeNotifier {
       await prefs.setString('pending_mock_avatar', _userPhotoUrl ?? '');
       await prefs.setString('pending_mock_email', _email ?? '');
 
-      // FIX: Don't call _completeLogin here — just save pending state
-      // Email verification screen will call _completeLogin after verification
       _setLoading(false);
       return true;
     } catch (e) {
