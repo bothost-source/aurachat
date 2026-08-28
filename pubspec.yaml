@@ -34,6 +34,7 @@ dependencies:
   share_plus: ^10.0.0
   uni_links: ^0.5.1
   crypto: ^3.0.3
+  app_links: ^6.1.0
 
   # Auth & Security
   local_auth: ^2.2.0
@@ -45,7 +46,7 @@ dependencies:
 
   # http request
   http: ^1.2.0
-
+ 
   # Chat & Media
   uuid: ^4.5.0
   emoji_picker_flutter: ^3.1.0
