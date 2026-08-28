@@ -160,8 +160,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget build(BuildContext context) {
     return Consumer<AuraAuthProvider>(
       builder: (context, authProvider, child) {
-        final phone = authProvider.phoneNumber ?? '';
-        final userVerified = isVerified(phone);
+        final email = authProvider.email ?? '';
+        final userVerified = isVerified(email);
 
         return Scaffold(
           backgroundColor: const Color(0xFF0A0A0F),
@@ -261,7 +261,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               username: authProvider.userName?.isNotEmpty == true
                                   ? authProvider.userName!
                                   : 'Your Name',
-                              phoneNumber: phone,
+                              email: email,
                               style: const TextStyle(
                                 fontSize: 24,
                                 fontWeight: FontWeight.w700,
@@ -272,13 +272,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             ),
                           ),
                           const SizedBox(height: 4),
-                          Text(
-                            phone,
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.white.withOpacity(0.5),
+                         Text(
+                           email,
+                           style: TextStyle(
+                             fontSize: 14,
+                             color: Colors.white.withOpacity(0.5),
                             ),
-                          ),
+                           ),
                           if (userVerified)
                             Padding(
                               padding: const EdgeInsets.only(top: 8),
@@ -437,32 +437,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                       const SizedBox(height: 12),
 
-                      _buildGlassCard(
-                        child: ListTile(
-                          leading: Icon(
-                            Icons.phone,
-                            color: const Color(0xFF8B5CF6).withOpacity(0.8),
-                          ),
-                          title: Text(
-                            'Phone',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.white.withOpacity(0.5),
+                    _buildGlassCard(
+                       child: ListTile(
+                         leading: Icon(
+                           Icons.email,
+                           color: const Color(0xFF8B5CF6).withOpacity(0.8),
+                         ),
+                         title: Text(
+                           'Email',
+                           style: TextStyle(
+                             fontSize: 12,
+                             color: Colors.white.withOpacity(0.5),
                             ),
                           ),
                           subtitle: Text(
-                            authProvider.phoneNumber?.isNotEmpty == true
-                                ? authProvider.phoneNumber!
-                                : 'Not set',
+                            authProvider.email?.isNotEmpty == true
+                                 ? authProvider.email!
+                                 : 'Not set',
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 16,
-                            ),
-                          ),
+                              ),
+                           ),
                         ),
-                      ),
-
-                      const SizedBox(height: 32),
+                     ),
+                     const SizedBox(height: 32),
 
                       // Settings section
                       Text(
