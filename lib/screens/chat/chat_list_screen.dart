@@ -1,790 +1,537 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:flutter_slidable/flutter_slidable.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter_slidable/flutter_slidable.dart';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../providers/chat_provider.dart';
+import '../../services/notification_service.dart';
 import '../../utils/verified_badge.dart';
-import '../../services/call_service.dart';
-import '../call/call_screen.dart';
-import 'chat_screen.dart';
-import '../channel/channel_screen.dart';
-import '../channel/channel_info_screen.dart';
-import '../groups/group_info_screen.dart';
 
-class ChatListScreen extends StatefulWidget {
+class ChatListScreen extends StatelessWidget {
   const ChatListScreen({super.key});
 
   @override
-  State<ChatListScreen> createState() => _ChatListScreenState();
-}
-
-class _ChatListScreenState extends State<ChatListScreen> {
-  @override
   Widget build(BuildContext context) {
-    final chatProvider = Provider.of<ChatProvider>(context);
     final authProvider = Provider.of<AuraAuthProvider>(context);
+    final chatProvider = Provider.of<ChatProvider>(context);
+    final userId = authProvider.user?.uid ?? authProvider.mockUserId;
 
-    if (chatProvider.isLoading) {
+    if (userId == null) {
       return const Center(child: CircularProgressIndicator());
     }
 
-    final chats = chatProvider.chats.where((chat) => 
-      !(chat['is_archived'] ?? false)
-    ).toList();
-
-    if (chats.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.chat_bubble_outline,
-              size: 80,
-              color: Theme.of(context).primaryColor.withOpacity(0.3),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'No chats yet',
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Start a new conversation!',
-              style: TextStyle(color: Colors.grey.withOpacity(0.7)),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return ListView.builder(
-      itemCount: chats.length,
-      itemBuilder: (context, index) {
-        final chat = chats[index];
-        final chatType = chat['type'] as String? ?? 'direct';
-        final unreadCount = chat['unread_count'] ?? 0;
-        final lastMessage = chat['last_message'];
-
-        // FIX: Properly handle Firestore Timestamp, DateTime, and String
-        final lastMessageAt = chat['last_message_at'] != null
-            ? (chat['last_message_at'] is DateTime 
-                ? chat['last_message_at'] as DateTime
-                : chat['last_message_at'] is Timestamp
-                    ? (chat['last_message_at'] as Timestamp).toDate()
-                    : DateTime.tryParse(chat['last_message_at'].toString()))
-            : null;
-
-        final memberCount = chat['participants_count'] ?? 0;
-        final createdByPhone = chat['created_by_phone'] as String?;
-        final role = chat['role'] as String? ?? 'member';
-        final isGroup = chatType == 'group';
-        final isChannel = chatType == 'channel';
-        final isGroupOrChannel = isGroup || isChannel;
-
-        // FIX: For direct chats, fetch the other user's data from Firestore
-        if (!isGroupOrChannel) {
-          final currentUserId = authProvider.user?.uid ?? authProvider.mockUserId;
-          final participants = List<String>.from(chat['participants'] ?? []);
-          final otherUserId = participants.firstWhere(
-            (id) => id != currentUserId,
-            orElse: () => '',
-          );
-
-          if (otherUserId.isNotEmpty) {
-            return _DirectChatTile(
-              chat: chat,
-              otherUserId: otherUserId,
-              currentUserId: currentUserId!,
-              unreadCount: unreadCount,
-              lastMessage: lastMessage,
-              lastMessageAt: lastMessageAt,
-              onTap: () {
-                chatProvider.markMessagesAsRead(chat['id']);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => ChatScreen(
-                      chatId: chat['id'],
-                      chatName: chat['name'],
-                      chatAvatar: chat['avatar_url'],
-                      isGroup: false,
-                    ),
-                  ),
-                );
-              },
-              onArchive: () => chatProvider.archiveChat(chat['id']),
-              onDelete: () => _showDeleteDialog(context, chat['id']),
+    return Scaffold(
+      backgroundColor: const Color(0xFF0A0A0F),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('chats')
+            .where('participants', arrayContains: userId)
+            .orderBy('last_message_at', descending: true)
+            .snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return Center(
+              child: Text(
+                'Error: ${snapshot.error}',
+                style: const TextStyle(color: Colors.white70),
+              ),
             );
           }
-        }
 
-        // Group/Channel tile (unchanged logic)
-        return Slidable(
-          key: ValueKey(chat['id']),
-          endActionPane: ActionPane(
-            motion: const ScrollMotion(),
-            children: [
-              SlidableAction(
-                onPressed: (_) => chatProvider.archiveChat(chat['id']),
-                backgroundColor: Colors.blue,
-                foregroundColor: Colors.white,
-                icon: Icons.archive,
-                label: 'Archive',
-              ),
-              SlidableAction(
-                onPressed: (_) => _showDeleteDialog(context, chat['id']),
-                backgroundColor: Colors.red,
-                foregroundColor: Colors.white,
-                icon: Icons.delete,
-                label: 'Delete',
-              ),
-            ],
-          ),
-          child: ListTile(
-            leading: Stack(
-              children: [
-                _buildAvatar(chat),
-                if (isGroupOrChannel)
-                  Positioned(
-                    bottom: 0,
-                    right: 0,
-                    child: Container(
-                      padding: const EdgeInsets.all(2),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).primaryColor,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: const Color(0xFF0A0A0F), width: 1.5),
-                      ),
-                      child: Icon(
-                        isChannel ? Icons.campaign : Icons.group,
-                        size: 10,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            title: Row(
-              children: [
-                Expanded(
-                  child: isGroupOrChannel
-                    ? VerifiedUsername(
-                        username: chat['name'] ?? 'Unknown',
-                        phoneNumber: createdByPhone,
-                        style: TextStyle(
-                          fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.w600,
-                          fontSize: 15,
-                        ),
-                        badgeSize: 14,
-                        spacing: 6,
-                        overflow: TextOverflow.ellipsis,
-                      )
-                    : Text(
-                        chat['name'] ?? 'Unknown',
-                        style: TextStyle(
-                          fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.normal,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                ),
-                if (lastMessageAt != null)
-                  Text(
-                    _formatChatListTime(lastMessageAt),
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: unreadCount > 0
-                          ? Theme.of(context).primaryColor
-                          : Colors.grey,
-                    ),
-                  ),
-              ],
-            ),
-            subtitle: Row(
-              children: [
-                if (isGroupOrChannel) ...[
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                    margin: const EdgeInsets.only(right: 6),
-                    decoration: BoxDecoration(
-                      color: isChannel 
-                          ? Colors.orange.withOpacity(0.2) 
-                          : Theme.of(context).primaryColor.withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      isChannel ? 'CHANNEL' : 'GROUP',
-                      style: TextStyle(
-                        fontSize: 9,
-                        fontWeight: FontWeight.w700,
-                        color: isChannel ? Colors.orange : Theme.of(context).primaryColor,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                  ),
-                  Text(
-                    '$memberCount',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey.withOpacity(0.7),
-                    ),
-                  ),
-                  const SizedBox(width: 4),
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          final chats = snapshot.data!.docs;
+
+          if (chats.isEmpty) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
                   Icon(
-                    Icons.people,
-                    size: 12,
-                    color: Colors.grey.withOpacity(0.5),
+                    Icons.chat_bubble_outline,
+                    size: 64,
+                    color: Colors.white.withOpacity(0.2),
                   ),
-                  const SizedBox(width: 6),
-                ],
-                Expanded(
-                  // FIX: Format last message text properly
-                  child: Text(
-                    _formatLastMessage(lastMessage, chat['last_message_type'] as String?),
+                  const SizedBox(height: 16),
+                  Text(
+                    'No messages yet',
                     style: TextStyle(
-                      fontWeight: unreadCount > 0 ? FontWeight.w600 : FontWeight.normal,
-                      color: unreadCount > 0 ? null : Colors.grey,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                if (unreadCount > 0)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).primaryColor,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Text(
-                      unreadCount.toString(),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                      ),
+                      color: Colors.white.withOpacity(0.4),
+                      fontSize: 16,
                     ),
                   ),
-              ],
-            ),
-            onTap: () {
-              chatProvider.markMessagesAsRead(chat['id']);
-              if (isChannel) {
-                Navigator.push(
+                  const SizedBox(height: 8),
+                  Text(
+                    'Start a conversation!',
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.3),
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          return ListView.builder(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            itemCount: chats.length,
+            itemBuilder: (context, index) {
+              final chat = chats[index].data() as Map<String, dynamic>;
+              chat['id'] = chats[index].id;
+
+              final isGroupOrChannel = ['group', 'channel'].contains(chat['type']);
+              final lastMessage = chat['last_message'] ?? '';
+              final lastMessageType = chat['last_message_type'] ?? 'text';
+              
+              // FIXED: Robust timestamp parsing
+              DateTime? lastMessageAt;
+              if (chat['last_message_at'] != null) {
+                final val = chat['last_message_at'];
+                if (val is DateTime) {
+                  lastMessageAt = val;
+                } else if (val is Timestamp) {
+                  lastMessageAt = val.toDate();
+                } else if (val is String) {
+                  lastMessageAt = DateTime.tryParse(val)?.toLocal();
+                } else {
+                  lastMessageAt = DateTime.tryParse(val.toString())?.toLocal();
+                }
+              }
+
+              final unreadCount = chat['unread_count'] ?? 0;
+              final isPinned = chat['is_pinned'] ?? false;
+
+              if (isGroupOrChannel) {
+                return _buildGroupOrChannelTile(
                   context,
-                  MaterialPageRoute(
-                    builder: (context) => ChannelChatScreen(
-                      channelId: chat['id'],
-                      channelName: chat['name'] ?? 'Channel',
-                    ),
-                  ),
+                  chat,
+                  lastMessage,
+                  lastMessageType,
+                  lastMessageAt,
+                  unreadCount,
+                  isPinned,
                 );
               } else {
-                Navigator.push(
+                return _buildDirectChatTile(
                   context,
-                  MaterialPageRoute(
-                    builder: (context) => ChatScreen(
-                      chatId: chat['id'],
-                      chatName: chat['name'],
-                      chatAvatar: chat['avatar_url'],
-                      isGroup: isGroup,
-                    ),
-                  ),
+                  chat,
+                  lastMessage,
+                  lastMessageType,
+                  lastMessageAt,
+                  unreadCount,
+                  isPinned,
                 );
               }
             },
-            onLongPress: () => _showChatOptions(context, chat, isGroupOrChannel),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildGroupOrChannelTile(
+    BuildContext context,
+    Map<String, dynamic> chat,
+    String lastMessage,
+    String lastMessageType,
+    DateTime? lastMessageAt,
+    int unreadCount,
+    bool isPinned,
+  ) {
+    final chatProvider = Provider.of<ChatProvider>(context, listen: false);
+    final name = chat['name'] ?? 'Unknown';
+    final avatarUrl = chat['avatar_url'] as String?;
+    final type = chat['type'] as String? ?? 'group';
+    final createdByEmail = chat['created_by_email'] as String?; // FIXED: phone → email
+
+    return GestureDetector(
+      onLongPress: () => _showChatOptions(context, chat, true),
+      child: Slidable(
+        key: ValueKey(chat['id']),
+        endActionPane: ActionPane(
+          motion: const ScrollMotion(),
+          children: [
+            SlidableAction(
+              onPressed: (_) => chatProvider.archiveChat(chat['id']),
+              backgroundColor: Colors.blue,
+              foregroundColor: Colors.white,
+              icon: Icons.archive,
+              label: 'Archive',
+            ),
+            SlidableAction(
+              onPressed: (_) => _showDeleteDialog(context, chat['id']),
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+              icon: Icons.delete,
+              label: 'Delete',
+            ),
+          ],
+        ),
+        child: ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          leading: Stack(
+            children: [
+              _buildAvatar(avatarUrl, name, type == 'channel'),
+              if (isPinned)
+                Positioned(
+                  right: 0,
+                  bottom: 0,
+                  child: Container(
+                    padding: const EdgeInsets.all(2),
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF8B5CF6),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.push_pin,
+                      size: 10,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          title: Row(
+            children: [
+              Expanded(
+                child: VerifiedUsername(
+                  username: name,
+                  email: createdByEmail, // FIXED: phoneNumber → email
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 15,
+                  ),
+                  badgeSize: 14,
+                  spacing: 4,
+                ),
+              ),
+              if (lastMessageAt != null)
+                Text(
+                  _formatChatListTime(lastMessageAt),
+                  style: TextStyle(
+                    color: unreadCount > 0
+                        ? const Color(0xFF8B5CF6)
+                        : Colors.white.withOpacity(0.4),
+                    fontSize: 12,
+                  ),
+                ),
+            ],
+          ),
+          subtitle: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  _getMessagePreview(lastMessage, lastMessageType),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: unreadCount > 0
+                        ? Colors.white.withOpacity(0.8)
+                        : Colors.white.withOpacity(0.5),
+                    fontSize: 13,
+                    fontWeight: unreadCount > 0
+                        ? FontWeight.w500
+                        : FontWeight.normal,
+                  ),
+                ),
+              ),
+              if (unreadCount > 0)
+                Container(
+                  margin: const EdgeInsets.only(left: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF8B5CF6),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    unreadCount > 99 ? '99+' : '$unreadCount',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          onTap: () {
+            if (type == 'channel') {
+              Navigator.pushNamed(
+                context,
+                '/channel',
+                arguments: {
+                  'channelId': chat['id'],
+                  'channelName': name,
+                },
+              );
+            } else {
+              Navigator.pushNamed(
+                context,
+                '/chat',
+                arguments: {
+                  'chatId': chat['id'],
+                  'chatName': name,
+                  'isGroup': true,
+                },
+              );
+            }
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDirectChatTile(
+    BuildContext context,
+    Map<String, dynamic> chat,
+    String lastMessage,
+    String lastMessageType,
+    DateTime? lastMessageAt,
+    int unreadCount,
+    bool isPinned,
+  ) {
+    final chatProvider = Provider.of<ChatProvider>(context, listen: false);
+    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+    final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+
+    // Get the other participant
+    final participants = List<String>.from(chat['participants'] ?? []);
+    final otherUserId = participants.firstWhere(
+      (id) => id != userId,
+      orElse: () => '',
+    );
+
+    if (otherUserId.isEmpty) return const SizedBox.shrink();
+
+    return FutureBuilder<DocumentSnapshot>(
+      future: FirebaseFirestore.instance.collection('users').doc(otherUserId).get(),
+      builder: (context, userSnapshot) {
+        if (!userSnapshot.hasData) {
+          return const SizedBox.shrink();
+        }
+
+        final userData = userSnapshot.data!.data() as Map<String, dynamic>? ?? {};
+        final displayName = userData['display_name'] ?? userData['username'] ?? 'Unknown';
+        final avatarUrl = userData['avatar_url'] as String?;
+        final email = userData['email'] as String?; // FIXED: phone → email
+        final isOnline = userData['is_online'] as bool? ?? false;
+
+        return GestureDetector(
+          onLongPress: () => _showDirectChatOptions(context, chat['id'], displayName),
+          child: Slidable(
+            key: ValueKey(chat['id']),
+            endActionPane: ActionPane(
+              motion: const ScrollMotion(),
+              children: [
+                SlidableAction(
+                  onPressed: (_) => chatProvider.archiveChat(chat['id']),
+                  backgroundColor: Colors.blue,
+                  foregroundColor: Colors.white,
+                  icon: Icons.archive,
+                  label: 'Archive',
+                ),
+                SlidableAction(
+                  onPressed: (_) => _showDeleteDialog(context, chat['id']),
+                  backgroundColor: Colors.red,
+                  foregroundColor: Colors.white,
+                  icon: Icons.delete,
+                  label: 'Delete',
+                ),
+              ],
+            ),
+            child: ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              leading: Stack(
+                children: [
+                  _buildAvatar(avatarUrl, displayName, false),
+                  if (isOnline)
+                    Positioned(
+                      right: 0,
+                      bottom: 0,
+                      child: Container(
+                        width: 12,
+                        height: 12,
+                        decoration: BoxDecoration(
+                          color: Colors.green,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: const Color(0xFF0A0A0F),
+                            width: 2,
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (isPinned)
+                    Positioned(
+                      right: 0,
+                      top: 0,
+                      child: Container(
+                        padding: const EdgeInsets.all(2),
+                        decoration: const BoxDecoration(
+                          color: Color(0xFF8B5CF6),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.push_pin,
+                          size: 10,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              title: Row(
+                children: [
+                  Expanded(
+                    child: VerifiedUsername(
+                      username: displayName,
+                      email: email, // FIXED: phoneNumber → email
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 15,
+                      ),
+                      badgeSize: 14,
+                      spacing: 4,
+                    ),
+                  ),
+                  if (lastMessageAt != null)
+                    Text(
+                      _formatChatListTime(lastMessageAt),
+                      style: TextStyle(
+                        color: unreadCount > 0
+                            ? const Color(0xFF8B5CF6)
+                            : Colors.white.withOpacity(0.4),
+                        fontSize: 12,
+                      ),
+                    ),
+                ],
+              ),
+              subtitle: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      _getMessagePreview(lastMessage, lastMessageType),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: unreadCount > 0
+                            ? Colors.white.withOpacity(0.8)
+                            : Colors.white.withOpacity(0.5),
+                        fontSize: 13,
+                        fontWeight: unreadCount > 0
+                            ? FontWeight.w500
+                            : FontWeight.normal,
+                      ),
+                    ),
+                  ),
+                  if (unreadCount > 0)
+                    Container(
+                      margin: const EdgeInsets.only(left: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF8B5CF6),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        unreadCount > 99 ? '99+' : '$unreadCount',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              onTap: () {
+                Navigator.pushNamed(
+                  context,
+                  '/chat',
+                  arguments: {
+                    'chatId': chat['id'],
+                    'chatName': displayName,
+                    'isGroup': false,
+                    'otherUserId': otherUserId,
+                  },
+                );
+              },
+            ),
           ),
         );
       },
     );
   }
 
-  // FIX: Format last message text for display
-  String _formatLastMessage(String? lastMessage, String? type) {
-    if (lastMessage == null || lastMessage.isEmpty) return 'No messages yet';
-    
-    // If it's a media file name, show friendly label
-    if (type == 'image' || lastMessage.endsWith('.jpg') || lastMessage.endsWith('.jpeg') || lastMessage.endsWith('.png')) {
-      return '📷 Photo';
+  Widget _buildAvatar(String? url, String name, bool isChannel) {
+    if (url != null && url.isNotEmpty) {
+      return CircleAvatar(
+        radius: 26,
+        backgroundImage: NetworkImage(url),
+        onBackgroundImageError: (_, __) {},
+      );
     }
-    if (type == 'video' || lastMessage.endsWith('.mp4') || lastMessage.endsWith('.mov')) {
-      return '🎥 Video';
-    }
-    if (type == 'audio' || lastMessage.endsWith('.m4a') || lastMessage.endsWith('.mp3')) {
-      return '🎤 Voice Message';
-    }
-    if (type == 'file') {
-      return '📎 ${lastMessage.split('/').last}';
-    }
-    
-    return lastMessage;
+
+    return CircleAvatar(
+      radius: 26,
+      backgroundColor: const Color(0xFF1a103c),
+      child: Icon(
+        isChannel ? Icons.campaign : Icons.person,
+        color: const Color(0xFF8B5CF6),
+        size: 24,
+      ),
+    );
   }
 
-  String _formatChatListTime(DateTime dateTime) {
+  String _getMessagePreview(String message, String type) {
+    switch (type) {
+      case 'image':
+        return '📷 Photo';
+      case 'video':
+        return '🎥 Video';
+      case 'audio':
+        return '🎤 Voice message';
+      case 'file':
+        return '📎 File';
+      case 'location':
+        return '📍 Location';
+      default:
+        return message;
+    }
+  }
+
+  // FIXED: Improved time formatting
+  String _formatChatListTime(DateTime? dateTime) {
+    if (dateTime == null) return '';
+    
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final messageDate = DateTime(dateTime.year, dateTime.month, dateTime.day);
     final diffDays = today.difference(messageDate).inDays;
 
-    // FIX: Today — show time for older messages, "Now" only for very recent
+    // Today
     if (diffDays == 0) {
       final diffMinutes = now.difference(dateTime).inMinutes;
       if (diffMinutes < 1) {
         return 'Now';
       } else if (diffMinutes < 60) {
-        return '${diffMinutes}m ago';
+        return '${diffMinutes}m';
       } else {
-        // Show actual time instead of "Xh ago"
-        return _formatTimeOnly(dateTime);
+        // Show time for anything older than 1 hour today
+        final hour = dateTime.hour.toString().padLeft(2, '0');
+        final minute = dateTime.minute.toString().padLeft(2, '0');
+        return '$hour:$minute';
       }
     } 
-    // FIX: Yesterday
+    // Yesterday
     else if (diffDays == 1) {
       return 'Yesterday';
     } 
-    // This week
-    else if (diffDays < 7) {
-      return _getDayName(dateTime.weekday);
-    } 
-    // This year
-    else if (dateTime.year == now.year) {
-      return '${_getMonthName(dateTime.month)} ${dateTime.day}';
-    } 
-    // Different year
-    else {
-      return '${_getMonthName(dateTime.month)} ${dateTime.day}, ${dateTime.year}';
-    }
-  }
-  
-  String _formatTimeOnly(DateTime dateTime) {
-    final hour = dateTime.hour.toString().padLeft(2, '0');
-    final minute = dateTime.minute.toString().padLeft(2, '0');
-    return '$hour:$minute';
-  }
-
-  String _getDayName(int weekday) {
-    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    return days[weekday - 1];
-  }
-
-  String _getMonthName(int month) {
-    const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
-    ];
-    return months[month - 1];
-  }
-
-  Widget _buildAvatar(Map<String, dynamic> chat) {
-    final avatarUrl = chat['avatar_url'] as String?;
-    final chatType = chat['type'] as String? ?? 'direct';
-    final isGroupOrChannel = chatType == 'group' || chatType == 'channel';
-
-    if (avatarUrl != null && avatarUrl.isNotEmpty) {
-      return CircleAvatar(
-        radius: 28,
-        backgroundImage: NetworkImage(avatarUrl),
-        onBackgroundImageError: (_, __) {},
-      );
-    }
-
-    return CircleAvatar(
-      radius: 28,
-      backgroundColor: Theme.of(context).primaryColor.withOpacity(0.2),
-      child: Icon(
-        isGroupOrChannel ? Icons.group : Icons.person,
-        color: Theme.of(context).primaryColor,
-      ),
-    );
-  }
-
-  // NEW: Show options menu on long-press for any chat type
-  void _showChatOptions(BuildContext context, Map<String, dynamic> chat, bool isGroupOrChannel) {
-    final chatId = chat['id'] as String;
-    final chatName = chat['name'] as String? ?? 'Unknown';
-    final chatType = chat['type'] as String? ?? 'direct';
-    final isArchived = chat['is_archived'] == true;
-    final role = chat['role'] as String? ?? 'member';
-    final isOwner = role == 'owner';
-
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF1a103c),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (context) => Container(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Drag handle
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(height: 16),
-            
-            // Chat name header
-            Text(
-              chatName,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              isGroupOrChannel
-                ? (chatType == 'channel' ? 'Channel' : 'Group')
-                : 'Direct Message',
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.4),
-                fontSize: 12,
-              ),
-            ),
-            const Divider(color: Colors.white10, height: 24),
-            
-            // Mark as read / unread
-            ListTile(
-              leading: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF06B6D4).withOpacity(0.2),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.done_all, color: Color(0xFF06B6D4)),
-              ),
-              title: const Text('Mark as Read', style: TextStyle(color: Colors.white)),
-              onTap: () {
-                Navigator.pop(context);
-                Provider.of<ChatProvider>(context, listen: false).markMessagesAsRead(chatId);
-              },
-            ),
-            
-            // Archive / Unarchive
-            ListTile(
-              leading: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.blue.withOpacity(0.2),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  isArchived ? Icons.unarchive : Icons.archive,
-                  color: Colors.blue,
-                ),
-              ),
-              title: Text(
-                isArchived ? 'Unarchive' : 'Archive',
-                style: const TextStyle(color: Colors.white),
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                if (isArchived) {
-                  Provider.of<ChatProvider>(context, listen: false).unarchiveChat(chatId);
-                } else {
-                  Provider.of<ChatProvider>(context, listen: false).archiveChat(chatId);
-                }
-              },
-            ),
-            
-            // Mute / Unmute notifications
-            ListTile(
-              leading: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.orange.withOpacity(0.2),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.notifications_off, color: Colors.orange),
-              ),
-              title: const Text('Mute Notifications', style: TextStyle(color: Colors.white)),
-              onTap: () {
-                Navigator.pop(context);
-                // TODO: Implement mute logic
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Notifications muted')),
-                );
-              },
-            ),
-            
-            // Info (for groups/channels)
-            if (isGroupOrChannel) ...[
-              const Divider(color: Colors.white10),
-              ListTile(
-                leading: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF8B5CF6).withOpacity(0.2),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.info_outline, color: Color(0xFF8B5CF6)),
-                ),
-                title: const Text('Info', style: TextStyle(color: Colors.white)),
-                onTap: () {
-                  Navigator.pop(context);
-                  if (chatType == 'channel') {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => ChannelInfoScreen(
-                          chatId: chatId,
-                          chatName: chatName,
-                          chatAvatar: chat['avatar_url'],
-                        ),
-                      ),
-                    );
-                  } else {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => GroupInfoScreen(
-                          chatId: chatId,
-                          chatName: chatName,
-                          chatAvatar: chat['avatar_url'],
-                          isChannel: false,
-                        ),
-                      ),
-                    );
-                  }
-                },
-              ),
-            ],
-            
-            // Delete (owner-only for groups/channels)
-            if (!isGroupOrChannel || isOwner) ...[
-              const Divider(color: Colors.white10),
-              ListTile(
-                leading: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.red.withOpacity(0.2),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.delete_outline, color: Colors.red),
-                ),
-                title: const Text('Delete Chat', style: TextStyle(color: Colors.red)),
-                onTap: () {
-                  Navigator.pop(context);
-                  _showDeleteDialog(context, chatId);
-                },
-              ),
-            ],
-            
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showDeleteDialog(BuildContext context, String chatId) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Chat?'),
-        content: const Text('This chat will be removed from your list.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              Provider.of<ChatProvider>(context, listen: false).deleteChat(chatId);
-            },
-            child: const Text('Delete', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ============================================================================
-// NEW: Direct chat tile that fetches other user's data from Firestore
-// ============================================================================
-class _DirectChatTile extends StatelessWidget {
-  final Map<String, dynamic> chat;
-  final String otherUserId;
-  final String currentUserId;
-  final int unreadCount;
-  final String? lastMessage;
-  final DateTime? lastMessageAt;
-  final VoidCallback onTap;
-  final VoidCallback onArchive;
-  final VoidCallback onDelete;
-
-  const _DirectChatTile({
-    required this.chat,
-    required this.otherUserId,
-    required this.currentUserId,
-    required this.unreadCount,
-    required this.lastMessage,
-    required this.lastMessageAt,
-    required this.onTap,
-    required this.onArchive,
-    required this.onDelete,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<DocumentSnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('users')
-          .doc(otherUserId)
-          .snapshots(),
-      builder: (context, userSnapshot) {
-        final userData = userSnapshot.data?.data() as Map<String, dynamic>?;
-
-        // FIX: Get name from user document, not chat document
-        final displayName = userData?['display_name'] as String? ??
-                           userData?['name'] as String? ??
-                           userData?['username'] as String? ??
-                           'Unknown';
-
-        final avatarUrl = userData?['avatar_url'] as String?;
-        final phone = userData?['phone'] as String?;
-
-        return Slidable(
-          key: ValueKey(chat['id']),
-          endActionPane: ActionPane(
-            motion: const ScrollMotion(),
-            children: [
-              SlidableAction(
-                onPressed: (_) => onArchive(),
-                backgroundColor: Colors.blue,
-                foregroundColor: Colors.white,
-                icon: Icons.archive,
-                label: 'Archive',
-              ),
-              SlidableAction(
-                onPressed: (_) => onDelete(),
-                backgroundColor: Colors.red,
-                foregroundColor: Colors.white,
-                icon: Icons.delete,
-                label: 'Delete',
-              ),
-            ],
-          ),
-          child: ListTile(
-            leading: _buildUserAvatar(avatarUrl),
-            title: Row(
-              children: [
-                Expanded(
-                  child: VerifiedUsername(
-                    username: displayName,
-                    phoneNumber: phone,
-                    style: TextStyle(
-                      fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.w600,
-                      fontSize: 15,
-                    ),
-                    badgeSize: 14,
-                    spacing: 6,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                if (lastMessageAt != null)
-                  Text(
-                    _formatTime(lastMessageAt!),
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: unreadCount > 0
-                          ? Theme.of(context).primaryColor
-                          : Colors.grey,
-                    ),
-                  ),
-              ],
-            ),
-            subtitle: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    _formatLastMessage(lastMessage, chat['last_message_type'] as String?),
-                    style: TextStyle(
-                      fontWeight: unreadCount > 0 ? FontWeight.w600 : FontWeight.normal,
-                      color: unreadCount > 0 ? null : Colors.grey,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                if (unreadCount > 0)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).primaryColor,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Text(
-                      unreadCount.toString(),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            onTap: onTap,
-            onLongPress: () => _showDirectChatOptions(context),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildUserAvatar(String? avatarUrl) {
-    if (avatarUrl != null && avatarUrl.isNotEmpty) {
-      return CircleAvatar(
-        radius: 28,
-        backgroundImage: NetworkImage(avatarUrl),
-        onBackgroundImageError: (_, __) {},
-      );
-    }
-
-    return CircleAvatar(
-      radius: 28,
-      backgroundColor: const Color(0xFF8B5CF6).withOpacity(0.2),
-      child: const Icon(
-        Icons.person,
-        color: Color(0xFF8B5CF6),
-      ),
-    );
-  }
-
-  String _formatTime(DateTime dateTime) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final messageDate = DateTime(dateTime.year, dateTime.month, dateTime.day);
-    final diffDays = today.difference(messageDate).inDays;
-
-    // FIX: Today
-    if (diffDays == 0) {
-      final diffMinutes = now.difference(dateTime).inMinutes;
-      if (diffMinutes < 1) return 'Now';
-      if (diffMinutes < 60) return '${diffMinutes}m ago';
-      // Show actual time instead of "Xh ago"
-      final hour = dateTime.hour.toString().padLeft(2, '0');
-      final minute = dateTime.minute.toString().padLeft(2, '0');
-      return '$hour:$minute';
-    } 
-    // FIX: Yesterday
-    else if (diffDays == 1) {
-      return 'Yesterday';
-    } 
-    // This week
+    // Within last 7 days
     else if (diffDays < 7) {
       const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
       return days[dateTime.weekday - 1];
@@ -801,29 +548,7 @@ class _DirectChatTile extends StatelessWidget {
     }
   }
 
-  String _formatLastMessage(String? lastMessage, String? type) {
-    if (lastMessage == null || lastMessage.isEmpty) return 'No messages yet';
-    
-    if (type == 'image' || lastMessage.endsWith('.jpg') || lastMessage.endsWith('.jpeg') || lastMessage.endsWith('.png')) {
-      return '📷 Photo';
-    }
-    if (type == 'video' || lastMessage.endsWith('.mp4') || lastMessage.endsWith('.mov')) {
-      return '🎥 Video';
-    }
-    if (type == 'audio' || lastMessage.endsWith('.m4a') || lastMessage.endsWith('.mp3')) {
-      return '🎤 Voice Message';
-    }
-    if (type == 'file') {
-      return '📎 ${lastMessage.split('/').last}';
-    }
-    
-    return lastMessage;
-  }
-
-  void _showDirectChatOptions(BuildContext context) {
-    final chatId = chat['id'] as String;
-    final isArchived = chat['is_archived'] == true;
-
+  void _showChatOptions(BuildContext context, Map<String, dynamic> chat, bool isGroup) {
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF1a103c),
@@ -839,112 +564,196 @@ class _DirectChatTile extends StatelessWidget {
               width: 40,
               height: 4,
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.2),
+                color: Colors.white.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
             const SizedBox(height: 16),
-            
-            Text(
-              chat['name'] ?? 'Unknown',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Direct Message',
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.4),
-                fontSize: 12,
-              ),
-            ),
-            const Divider(color: Colors.white10, height: 24),
-            
             ListTile(
-              leading: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF06B6D4).withOpacity(0.2),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.done_all, color: Color(0xFF06B6D4)),
-              ),
-              title: const Text('Mark as Read', style: TextStyle(color: Colors.white)),
+              leading: const Icon(Icons.push_pin, color: Color(0xFF8B5CF6)),
+              title: const Text('Pin Chat', style: TextStyle(color: Colors.white)),
               onTap: () {
                 Navigator.pop(context);
-                Provider.of<ChatProvider>(context, listen: false).markMessagesAsRead(chatId);
+                Provider.of<ChatProvider>(context, listen: false)
+                    .togglePinChat(chat['id']);
               },
             ),
-            
             ListTile(
-              leading: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.blue.withOpacity(0.2),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  isArchived ? Icons.unarchive : Icons.archive,
-                  color: Colors.blue,
-                ),
-              ),
-              title: Text(
-                isArchived ? 'Unarchive' : 'Archive',
-                style: const TextStyle(color: Colors.white),
-              ),
+              leading: const Icon(Icons.archive, color: Colors.blue),
+              title: const Text('Archive', style: TextStyle(color: Colors.white)),
               onTap: () {
                 Navigator.pop(context);
-                if (isArchived) {
-                  Provider.of<ChatProvider>(context, listen: false).unarchiveChat(chatId);
-                } else {
-                  Provider.of<ChatProvider>(context, listen: false).archiveChat(chatId);
-                }
+                Provider.of<ChatProvider>(context, listen: false)
+                    .archiveChat(chat['id']);
               },
             ),
-            
             ListTile(
-              leading: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.orange.withOpacity(0.2),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.notifications_off, color: Colors.orange),
-              ),
-              title: const Text('Mute Notifications', style: TextStyle(color: Colors.white)),
-              onTap: () {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Notifications muted')),
-                );
-              },
-            ),
-            
-            const Divider(color: Colors.white10),
-            ListTile(
-              leading: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.red.withOpacity(0.2),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.delete_outline, color: Colors.red),
-              ),
+              leading: const Icon(Icons.delete, color: Colors.red),
               title: const Text('Delete Chat', style: TextStyle(color: Colors.red)),
               onTap: () {
                 Navigator.pop(context);
-                onDelete();
+                _showDeleteDialog(context, chat['id']);
               },
             ),
-            
-            const SizedBox(height: 8),
+            if (isGroup)
+              ListTile(
+                leading: const Icon(Icons.exit_to_app, color: Colors.orange),
+                title: const Text('Leave Group', style: TextStyle(color: Colors.orange)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showLeaveDialog(context, chat['id']);
+                },
+              ),
           ],
         ),
       ),
     );
   }
+
+  void _showDirectChatOptions(BuildContext context, String chatId, String userName) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1a103c),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 16),
+            ListTile(
+              leading: const Icon(Icons.push_pin, color: Color(0xFF8B5CF6)),
+              title: const Text('Pin Chat', style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(context);
+                Provider.of<ChatProvider>(context, listen: false)
+                    .togglePinChat(chatId);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.archive, color: Colors.blue),
+              title: const Text('Archive', style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(context);
+                Provider.of<ChatProvider>(context, listen: false)
+                    .archiveChat(chatId);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete, color: Colors.red),
+              title: const Text('Delete Chat', style: TextStyle(color: Colors.red)),
+              onTap: () {
+                Navigator.pop(context);
+                _showDeleteDialog(context, chatId);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.block, color: Colors.orange),
+              title: const Text('Block User', style: TextStyle(color: Colors.orange)),
+              onTap: () {
+                Navigator.pop(context);
+                _showBlockDialog(context, chatId, userName);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showDeleteDialog(BuildContext context, String chatId) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1a103c),
+        title: const Text('Delete Chat?', style: TextStyle(color: Colors.white)),
+        content: const Text(
+          'This will delete the chat from your list. Messages will still be visible to other participants.',
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: TextStyle(color: Colors.white.withOpacity(0.5))),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              Provider.of<ChatProvider>(context, listen: false)
+                  .deleteChat(chatId);
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showLeaveDialog(BuildContext context, String chatId) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1a103c),
+        title: const Text('Leave Group?', style: TextStyle(color: Colors.white)),
+        content: const Text(
+          'You will no longer receive messages from this group.',
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: TextStyle(color: Colors.white.withOpacity(0.5))),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              Provider.of<ChatProvider>(context, listen: false)
+                  .leaveChat(chatId);
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+            child: const Text('Leave'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showBlockDialog(BuildContext context, String chatId, String userName) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1a103c),
+        title: Text('Block $userName?', style: const TextStyle(color: Colors.white)),
+        content: Text(
+          'You will no longer receive messages from $userName.',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: TextStyle(color: Colors.white.withOpacity(0.5))),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              // Implement block functionality
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+            child: const Text('Block'),
+          ),
+        ],
+      ),
+    );
+  }
 }
-   
