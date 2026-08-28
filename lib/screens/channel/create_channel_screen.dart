@@ -140,7 +140,7 @@ class _CreateChannelScreenState extends State<CreateChannelScreen> {
       final chatProvider = Provider.of<ChatProvider>(context, listen: false);
       final firestore = FirebaseFirestore.instance;
       final userId = authProvider.user?.uid ?? authProvider.mockUserId;
-      final phoneNumber = authProvider.phoneNumber ?? '';
+      final email = authProvider.email ?? '';
 
       if (userId == null) {
         throw Exception('Not authenticated');
@@ -168,7 +168,7 @@ class _CreateChannelScreenState extends State<CreateChannelScreen> {
         'avatar_url': _channelPhotoUrl,
         'type': 'channel',
         'created_by': userId,
-        'created_by_phone': phoneNumber,
+        'created_by_email': email,
         'participants': participants,
         'participants_data': participantsData,
         'member_count': participants.length,
