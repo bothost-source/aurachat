@@ -99,6 +99,27 @@ class AuraAuthProvider extends ChangeNotifier {
     }
   }
 
+  /// ==================== CHECK IF EMAIL EXISTS (NEW) ====================
+  Future<Map<String, dynamic>?> checkEmailExists(String email) async {
+    try {
+      final snapshot = await _firestore
+          .collection('users')
+          .where('email', isEqualTo: email)
+          .limit(1)
+          .get();
+
+      if (snapshot.docs.isNotEmpty) {
+        final data = snapshot.docs.first.data();
+        data['id'] = snapshot.docs.first.id;
+        return data;
+      }
+      return null;
+    } catch (e) {
+      debugPrint('Check email error: $e');
+      return null;
+    }
+  }
+
   /// ==================== CHECK IF PHONE EXISTS ====================
   Future<Map<String, dynamic>?> checkPhoneExists(String phone) async {
     try {
@@ -120,8 +141,50 @@ class AuraAuthProvider extends ChangeNotifier {
     }
   }
 
-  /// ==================== LOGIN EXISTING USER (OPTIMIZED) ====================
-  /// FIXED: Accepts pre-fetched userData to avoid redundant Firestore query
+  /// ==================== SAVE PENDING USER DATA (NEW - EMAIL FIRST) ====================
+  Future<void> savePendingUserData({
+    required String userId,
+    required String email,
+    String? phone,
+    String? username,
+    String? displayName,
+    String? bio,
+    String? avatarUrl,
+  }) async {
+    _mockUserId = userId;
+    _email = email;
+    _phoneNumber = phone;
+    _userName = username;
+    _displayName = displayName;
+    _userBio = bio;
+    _userPhotoUrl = avatarUrl;
+    _isAuthenticated = true;
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('pending_mock_user_id', userId);
+    await prefs.setString('pending_mock_email', email);
+    await prefs.setString('pending_mock_phone', phone ?? '');
+    await prefs.setString('pending_mock_username', username ?? '');
+    await prefs.setString('pending_mock_display_name', displayName ?? '');
+    await prefs.setString('pending_mock_bio', bio ?? '');
+    await prefs.setString('pending_mock_avatar', avatarUrl ?? '');
+
+    notifyListeners();
+  }
+
+  /// ==================== SET MOCK EMAIL (NEW) ====================
+  void setMockEmail(String email) {
+    _email = email;
+    notifyListeners();
+  }
+
+  /// ==================== SET MOCK USER ID (NEW) ====================
+  void setMockUserId(String userId) {
+    _mockUserId = userId;
+    notifyListeners();
+  }
+
+  /// ==================== LOGIN EXISTING USER ====================
   Future<bool> loginExistingUser(String phone, {Map<String, dynamic>? userData}) async {
     _setLoading(true);
     try {
@@ -341,7 +404,7 @@ class AuraAuthProvider extends ChangeNotifier {
     }
   }
 
-  /// ==================== CRITICAL FIX: Don't clear mock users on auth state changes ====================
+  /// ==================== LISTEN TO AUTH CHANGES ====================
   void listenToAuthChanges() {
     _auth.authStateChanges().listen((firebase_auth.User? user) {
       if (user != null) {
@@ -351,8 +414,6 @@ class AuraAuthProvider extends ChangeNotifier {
         OnlineStatusService.setOnline();
         notifyListeners();
       }
-      // FIX: Do NOT clear anything when Firebase user is null.
-      // Mock users stay logged in. Only explicit signOut() clears auth.
     });
   }
 
@@ -518,13 +579,14 @@ class AuraAuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// ==================== SETUP PROFILE (FIXED) ====================
+  /// ==================== SETUP PROFILE ====================
   Future<bool> setupProfile({
     required String username,
     String? displayName,
     String? bio,
     String? photoUrl,
     String? email,
+    String? phone,
   }) async {
     _setLoading(true);
     try {
@@ -537,7 +599,7 @@ class AuraAuthProvider extends ChangeNotifier {
       final now = DateTime.now().toIso8601String();
       await _firestore.collection('users').doc(userId).set({
         'id': userId,
-        'phone': _phoneNumber,
+        'phone': phone ?? _phoneNumber,
         'email': email ?? _email,
         'username': username,
         'display_name': displayName ?? username,
@@ -555,7 +617,7 @@ class AuraAuthProvider extends ChangeNotifier {
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('mock_user_id', userId);
-      await prefs.setString('mock_phone', _phoneNumber ?? '');
+      await prefs.setString('mock_phone', phone ?? _phoneNumber ?? '');
       await prefs.setString('mock_username', username);
       await prefs.setString('mock_display_name', displayName ?? username);
       await prefs.setString('mock_bio', bio ?? '');
