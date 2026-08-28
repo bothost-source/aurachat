@@ -102,7 +102,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
   String? _chatAvatar;
   bool _isGroup = false;
   bool _isChannel = false;
-  String? _creatorPhone;
+  String? _creatorEmail; 
   String? _myRole;
   Map<String, dynamic>? _chatSettings;
   bool _canSend = true;
@@ -461,7 +461,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
 
         if (mounted) {
           setState(() {
-            _creatorPhone = data['created_by_phone'] as String?;
+            _creatorEmail = data['created_by_email'] as String?; 
             _chatSettings = data['settings'] as Map<String, dynamic>?;
             _myRole = (data['participants_data']?[userId]?['role'] ?? 'member') as String;
 
@@ -550,7 +550,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
               'username': u['username'] ?? u['display_name'] ?? 'Unknown',
               'avatar_url': u['avatar_url'],
               'bio': u['bio'],
-              'phone_number': u['phone'],
+              'email': u['email'], 
               'is_verified': u['is_verified'] == true,
             };
           }
@@ -566,7 +566,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
             'username': 'Unknown',
             'avatar_url': null,
             'bio': null,
-            'phone_number': null,
+            'email': null, 
             'is_verified': false,
           };
         }
@@ -644,7 +644,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
                   'username': u['username'] ?? u['display_name'] ?? 'Unknown',
                   'avatar_url': u['avatar_url'],
                   'bio': u['bio'],
-                  'phone_number': u['phone'],
+                  'email': u['email'], 
                   'is_verified': u['is_verified'] == true,
                 };
               }
@@ -661,7 +661,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
                 'username': 'Unknown',
                 'avatar_url': null,
                 'bio': null,
-                'phone_number': null,
+                'email': null, 
                 'is_verified': false,
               };
             }
@@ -838,7 +838,7 @@ Future<void> _openLink(String url) async {
           'username': authProvider.displayName ?? authProvider.userName ?? 'You',
           'avatar_url': authProvider.userPhotoUrl,
           'bio': authProvider.userBio,
-          'phone_number': authProvider.phoneNumber,
+          'email': authProvider.email, 
           'is_verified': false,
         },
       };
@@ -2337,7 +2337,7 @@ Future<void> _openLink(String url) async {
                         children: [
                           VerifiedUsername(
                             username: _chatName ?? 'Chat',
-                            phoneNumber: _isGroup ? _creatorPhone : null,
+                            email: _isGroup ? _creatorEmail : null, 
                             style: const TextStyle(fontSize: 16, color: Colors.white, fontWeight: FontWeight.w600),
                             badgeSize: 14,
                             spacing: 6,
@@ -3008,7 +3008,7 @@ Future<void> _openLink(String url) async {
     final Map<String, dynamic>? user = rawUser is Map<String, dynamic> ? rawUser : null;
     final isEdited = message['is_edited'] == true;
     final senderId = message['sender_id'] as String?;
-    final senderPhone = user?['phone_number'] as String?;
+    final senderEmail = user?['email'] as String?; 
     final reactions = Map<String, dynamic>.from(message['reactions'] ?? {});
 
     // FIX: More space between messages
@@ -3079,7 +3079,7 @@ Future<void> _openLink(String url) async {
                                 padding: const EdgeInsets.only(bottom: 4),
                                 child: VerifiedUsername(
                                   username: user?['username'] ?? (senderId != null ? 'Loading...' : 'Unknown'),
-                                  phoneNumber: senderPhone,
+                                  email: senderEmail, 
                                   style: TextStyle(
                                     fontSize: 12, 
                                     fontWeight: FontWeight.w600, 
