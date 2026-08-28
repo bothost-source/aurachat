@@ -208,7 +208,7 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
                   controller: searchController,
                   style: const TextStyle(color: Colors.white),
                   decoration: InputDecoration(
-                    hintText: 'Search by username or phone...',
+                    hintText: 'Search by username or email...', // FIXED: phone → email
                     hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
                     prefixIcon: const Icon(Icons.search, color: Colors.white54),
                     filled: true,
@@ -299,7 +299,7 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
                               style: const TextStyle(color: Colors.white),
                             ),
                             subtitle: Text(
-                              user['phone'] ?? '',
+                              user['email'] ?? '', // FIXED: phone → email
                               style: TextStyle(color: Colors.white.withOpacity(0.4)),
                             ),
                             trailing: isSelected
@@ -515,19 +515,6 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
               ListTile(
                 leading: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: const Color(0xFF8B5CF6).withOpacity(0.2), shape: BoxShape.circle), child: const Icon(Icons.admin_panel_settings, color: Color(0xFF8B5CF6))),
                 title: const Text('Promote to Admin', style: TextStyle(color: Colors.white)),
-                onTap: () Container(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(2))),
-            const SizedBox(height: 16),
-            Text(memberName, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 16),
-            if (myRole == 'owner' && memberRole == 'member')
-              ListTile(
-                leading: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: const Color(0xFF8B5CF6).withOpacity(0.2), shape: BoxShape.circle), child: const Icon(Icons.admin_panel_settings, color: Color(0xFF8B5CF6))),
-                title: const Text('Promote to Admin', style: TextStyle(color: Colors.white)),
                 onTap: () { Navigator.pop(context); chatProvider.promoteToAdmin(widget.chatId, memberId); },
               ),
             ListTile(
@@ -608,11 +595,7 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
     );
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // LEAVE CHANNEL (NON-OWNER ONLY)
-  // ═══════════════════════════════════════════════════════════════════════════
   Future<void> _leaveChannel() async {
-    // SECURITY FIX: Owner cannot leave, must delete instead
     final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
     final userId = authProvider.user?.uid ?? authProvider.mockUserId;
     
@@ -660,11 +643,7 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // DELETE CHANNEL (OWNER ONLY)
-  // ═══════════════════════════════════════════════════════════════════════════
   Future<void> _deleteChannel() async {
-    // SECURITY FIX: Verify owner before showing dialog
     final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
     final userId = authProvider.user?.uid ?? authProvider.mockUserId;
     
@@ -806,7 +785,7 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
           final participants = List<String>.from(data['participants'] ?? []);
           final memberCount = data['member_count'] ?? participants.length;
           final description = data['description'] ?? '';
-          final createdByPhone = data['created_by_phone'] as String?;
+          final createdByEmail = data['created_by_email'] as String?; // FIXED: phone → email
           final myRole = (data['participants_data']?[userId]?['role'] ?? 'member') as String;
           final canManage = myRole == 'owner' || myRole == 'admin';
           final isOwner = myRole == 'owner';
@@ -823,7 +802,7 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
                       const SizedBox(height: 12),
                       VerifiedUsername(
                         username: data['name'] ?? 'Unknown',
-                        phoneNumber: createdByPhone,
+                        email: createdByEmail, // FIXED: phoneNumber → email
                         style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
                         badgeSize: 16,
                         spacing: 6,
@@ -839,7 +818,7 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
                 ),
                 const SizedBox(height: 24),
 
-                // Actions — FIX: Owner sees Delete, non-owner sees Leave
+                // Actions
                 Row(
                   children: [
                     Expanded(child: _buildActionButton(icon: Icons.share, label: 'Invite', onTap: _shareInvitationLink)),
@@ -918,7 +897,6 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
                           ],
                         ),
                         const SizedBox(height: 12),
-                        // Code display
                         if (_invitationCode != null && _invitationCode!.isNotEmpty) ...[
                           GestureDetector(
                             onTap: _copyCodeToClipboard,
@@ -968,7 +946,6 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
                           ),
                           const SizedBox(height: 8),
                         ],
-                        // Link display
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                           decoration: BoxDecoration(
