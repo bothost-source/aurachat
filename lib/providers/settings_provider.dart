@@ -49,7 +49,7 @@ class SettingsProvider extends ChangeNotifier {
   bool _saveToGallery = true;
 
   // =========================================================================
-  // APP LOCK TRACKING
+  // APP LOCK TRACKING — FIXED: Persistent lock state
   // =========================================================================
   DateTime? _lastBackgroundTime;
   bool _isLocked = false;
@@ -66,6 +66,11 @@ class SettingsProvider extends ChangeNotifier {
     final prefs = await _prefs;
     await prefs.setInt('last_background_time', now.millisecondsSinceEpoch);
     await prefs.setBool('has_ever_backgrounded', true);
+
+    // FIXED: If app is already locked, persist that state
+    if (_isLocked) {
+      await prefs.setBool('app_is_locked', true);
+    }
   }
 
   /// Call this when app resumes — returns true if lock screen should show
@@ -73,10 +78,19 @@ class SettingsProvider extends ChangeNotifier {
     // No lock configured
     if (!_appPasscode && !_biometricLock) return false;
 
-    // Already locked (e.g. manually locked)
+    // Already locked (e.g. manually locked or persisted from previous session)
     if (_isLocked) return true;
 
     final prefs = await _prefs;
+
+    // FIXED: Check if app was locked before being killed
+    final wasLocked = prefs.getBool('app_is_locked') ?? false;
+    if (wasLocked) {
+      _isLocked = true;
+      notifyListeners();
+      return true;
+    }
+
     final lastBg = prefs.getInt('last_background_time');
 
     // No background time recorded — app was killed or first launch
@@ -86,18 +100,20 @@ class SettingsProvider extends ChangeNotifier {
       if (!hasEverBeenBackgrounded) {
         return false; // First time user, don't lock
       }
-      
+
       _isLocked = true;
+      await prefs.setBool('app_is_locked', true);
       notifyListeners();
       return true;
     }
 
     final lastBgTime = DateTime.fromMillisecondsSinceEpoch(lastBg);
     final now = DateTime.now();
-    final diff = now.difference(lastBgTime).inMinutes;
+    final diffMinutes = now.difference(lastBgTime).inMinutes;
 
-    if (diff >= _autoLockTimeout) {
+    if (diffMinutes >= _autoLockTimeout) {
       _isLocked = true;
+      await prefs.setBool('app_is_locked', true);
       notifyListeners();
       return true;
     }
@@ -113,12 +129,15 @@ class SettingsProvider extends ChangeNotifier {
     _isLocked = false;
     final prefs = await _prefs;
     await prefs.remove('last_background_time');
+    await prefs.setBool('app_is_locked', false); // FIXED: Clear persisted lock state
     notifyListeners();
   }
 
   /// For manual lock trigger
   Future<void> lock() async {
     _isLocked = true;
+    final prefs = await _prefs;
+    await prefs.setBool('app_is_locked', true); // FIXED: Persist lock state
     notifyListeners();
   }
   // =========================================================================
@@ -175,6 +194,9 @@ class SettingsProvider extends ChangeNotifier {
     _biometricLock = prefs.getBool('biometric_lock') ?? false;
     _passcode = prefs.getString('passcode') ?? '';
     _autoLockTimeout = prefs.getInt('auto_lock_timeout') ?? 5;
+
+    // FIXED: Load persisted lock state on app start
+    _isLocked = prefs.getBool('app_is_locked') ?? false;
 
     // Notifications
     _messageTones = prefs.getBool('message_tones') ?? true;
