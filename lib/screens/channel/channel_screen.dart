@@ -79,6 +79,12 @@ class _ChannelChatScreenState extends State<ChannelChatScreen> {
     super.initState();
     _initAudioPlayer();
     _loadChannelInfo();
+    _messageController.addListener(_onTextChanged); // FIXED: Add listener for send button
+  }
+
+  /// FIXED: Rebuild when text changes to toggle send/mic button
+  void _onTextChanged() {
+    setState(() {});
   }
 
   void _initAudioPlayer() {
@@ -665,7 +671,7 @@ class _ChannelChatScreenState extends State<ChannelChatScreen> {
                       icon: const Icon(Icons.arrow_back, color: Colors.white),
                       onPressed: () => Navigator.pop(context),
                     ),
-                    // FIX: Channel avatar from Firestore
+                    // Channel avatar from Firestore
                     _channelAvatarUrl != null && _channelAvatarUrl!.isNotEmpty
                       ? CircleAvatar(
                           radius: 20,
@@ -1123,6 +1129,7 @@ class _ChannelChatScreenState extends State<ChannelChatScreen> {
 
   @override
   void dispose() {
+    _messageController.removeListener(_onTextChanged); // FIXED: Remove listener
     _messageController.dispose();
     _editController.dispose();
     _scrollController.dispose();
