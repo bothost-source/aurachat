@@ -675,7 +675,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
           final participants = List<String>.from(data['participants'] ?? []);
           final memberCount = data['member_count'] ?? participants.length;
           final description = data['description'] ?? '';
-          final createdByPhone = data['created_by_phone'] as String?;
+          final createdByEmail = data['created_by_email'] as String?;
           final myRole = (data['participants_data']?[userId]?['role'] ?? 'member') as String;
           final canManage = myRole == 'owner' || myRole == 'admin';
           final isOwner = myRole == 'owner';
@@ -737,7 +737,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                       else
                         VerifiedUsername(
                           username: data['name'] ?? 'Unknown',
-                          phoneNumber: createdByPhone,
+                          email: createdByEmail,
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 20,
