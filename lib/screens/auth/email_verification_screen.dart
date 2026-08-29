@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
 
 class EmailVerificationScreen extends StatefulWidget {
