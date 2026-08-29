@@ -546,7 +546,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final authProvider = Provider.of<AuraAuthProvider>(context);
     final username = authProvider.userName ?? 'Unknown';
     final displayName = authProvider.displayName ?? username;
-    final phone = authProvider.phoneNumber ?? '';
+    final email = authProvider.email ?? '';
     final avatar = authProvider.userPhotoUrl;
     final userVerified = isVerified(phone);
 
@@ -651,7 +651,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 children: [
                                   VerifiedUsername(
                                     username: displayName,
-                                    phoneNumber: phone,
+                                    email: email,
                                     style: const TextStyle(
                                       color: Colors.white,
                                       fontSize: 20,
