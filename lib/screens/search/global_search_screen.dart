@@ -7,6 +7,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../utils/verified_badge.dart';
+import '../../services/online_status_service.dart';
 
 class GlobalSearchScreen extends StatefulWidget {
   const GlobalSearchScreen({super.key});
@@ -93,7 +94,9 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
             setState(() {
               for (final doc in snapshot.docs) {
                 final data = doc.data();
-                _onlineStatus[doc.id] = data['is_online'] ?? false;
+                final lastSeen = data['last_seen'] as Timestamp?;
+                // Use helper to check if online (within 2 minutes)
+                _onlineStatus[doc.id] = OnlineStatusService.isUserOnline(lastSeen);
               }
             });
           }
@@ -838,7 +841,7 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
     final displayName = user['display_name'] as String? ?? username;
     final avatarUrl = user['avatar_url'] as String?;
     final bio = user['bio'] as String?;
-    final phone = user['phone'] as String?;
+    final email = user['email'] as String?;
     final isOnline = _isUserOnline(userId);
 
     return Container(
@@ -953,7 +956,7 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
                       // FIX: Use VerifiedUsername instead of plain Text
                       VerifiedUsername(
                         username: displayName,
-                        phoneNumber: phone,
+                        email: email, 
                         style: const TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.w600,
