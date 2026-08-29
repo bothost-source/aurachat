@@ -548,7 +548,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final displayName = authProvider.displayName ?? username;
     final email = authProvider.email ?? '';
     final avatar = authProvider.userPhotoUrl;
-    final userVerified = isVerified(phone);
+    final userVerified = isVerified(email);
 
     final currentLang = AppLocalizations.supportedLanguages.firstWhere(
       (l) => l['code'] == AppLocalizations.currentLanguage,
@@ -670,7 +670,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   ),
                                   const SizedBox(height: 2),
                                   Text(
-                                    phone,
+                                    email,
                                     style: TextStyle(
                                       color: Colors.white.withOpacity(0.4),
                                       fontSize: 13,
