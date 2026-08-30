@@ -421,6 +421,10 @@ class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
       final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
       authProvider.listenToAuthChanges();
 
+      // FIXED: Start foreground timer for app lock
+      final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+      settingsProvider.startForegroundTimer();
+
       PushNotificationService().onChatOpen = (chatId) {
         if (navigatorKey.currentState != null) {
           navigatorKey.currentState!.pushNamed('/chat', arguments: {'chatId': chatId});
@@ -450,6 +454,7 @@ class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
       OnlineStatusService.setOffline();
 
       final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+      settingsProvider.stopForegroundTimer(); // FIXED: Stop periodic timer
       settingsProvider.onAppBackground();
     } catch (e) {
       debugPrint('Background handler error: $e');
@@ -464,7 +469,9 @@ class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
       authProvider.refreshSession();
 
       final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
-      settingsProvider.shouldShowLockScreen();
+      // FIXED: Start foreground timer and check if lock should show
+      settingsProvider.startForegroundTimer();
+      await settingsProvider.shouldShowLockScreen();
     } catch (e) {
       debugPrint('Resume handler error: $e');
     }
