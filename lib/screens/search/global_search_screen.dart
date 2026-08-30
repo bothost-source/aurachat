@@ -95,7 +95,6 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
               for (final doc in snapshot.docs) {
                 final data = doc.data();
                 final lastSeen = data['last_seen'] as Timestamp?;
-                // Use helper to check if online (within 2 minutes)
                 _onlineStatus[doc.id] = OnlineStatusService.isUserOnline(lastSeen);
               }
             });
@@ -129,25 +128,88 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
       final searchTerm = query.trim().toLowerCase();
       debugPrint('Searching for: $searchTerm');
 
-      // Firestore doesn't support full text search natively
-      // Using range query for prefix matching
-      final snapshot = await firestore
+      // FIXED: Search by username AND display_name separately, then merge results
+      // Firestore only supports one range query per composite index, so we do two queries
+      final usernameSnapshot = await firestore
           .collection('users')
           .where('username', isGreaterThanOrEqualTo: searchTerm)
           .where('username', isLessThanOrEqualTo: '$searchTerm\uf8ff')
           .limit(20)
           .get();
 
-      debugPrint('Search response: ${snapshot.docs.length} users found');
+      final displayNameSnapshot = await firestore
+          .collection('users')
+          .where('display_name', isGreaterThanOrEqualTo: searchTerm)
+          .where('display_name', isLessThanOrEqualTo: '$searchTerm\uf8ff')
+          .limit(20)
+          .get();
 
-      final users = snapshot.docs
-          .map((doc) => {'id': doc.id, ...doc.data(), 'search_type': 'user'})
-          .toList();
+      // Also search by exact username match (case-insensitive via toLowerCase in app)
+      // And search by email prefix for email-based accounts
+      final emailSnapshot = await firestore
+          .collection('users')
+          .where('email', isGreaterThanOrEqualTo: searchTerm)
+          .where('email', isLessThanOrEqualTo: '$searchTerm\uf8ff')
+          .limit(10)
+          .get();
+
+      debugPrint('Username results: ${usernameSnapshot.docs.length}');
+      debugPrint('Display name results: ${displayNameSnapshot.docs.length}');
+      debugPrint('Email results: ${emailSnapshot.docs.length}');
+
+      // Merge all results, deduplicate by ID
+      final allResults = <String, Map<String, dynamic>>{};
+
+      for (final doc in usernameSnapshot.docs) {
+        final data = doc.data();
+        data['id'] = doc.id;
+        data['search_type'] = 'user';
+        allResults[doc.id] = data;
+      }
+
+      for (final doc in displayNameSnapshot.docs) {
+        final data = doc.data();
+        data['id'] = doc.id;
+        data['search_type'] = 'user';
+        allResults[doc.id] = data;
+      }
+
+      for (final doc in emailSnapshot.docs) {
+        final data = doc.data();
+        data['id'] = doc.id;
+        data['search_type'] = 'user';
+        allResults[doc.id] = data;
+      }
+
+      // Also do a simple contains check for usernames that might not match prefix
+      // This catches cases where username has the search term in the middle
+      final allUsersSnapshot = await firestore
+          .collection('users')
+          .limit(100)
+          .get();
+
+      for (final doc in allUsersSnapshot.docs) {
+        final data = doc.data();
+        final username = (data['username'] as String? ?? '').toLowerCase();
+        final displayName = (data['display_name'] as String? ?? '').toLowerCase();
+        final email = (data['email'] as String? ?? '').toLowerCase();
+
+        if (username.contains(searchTerm) ||
+            displayName.contains(searchTerm) ||
+            email.contains(searchTerm)) {
+          data['id'] = doc.id;
+          data['search_type'] = 'user';
+          allResults[doc.id] = data;
+        }
+      }
+
+      final users = allResults.values.toList();
 
       final filtered = users
           .where((u) => u['id'] != currentUserId)
           .toList();
 
+      debugPrint('Total unique users found: ${filtered.length}');
 
       // Search groups
       final groupsSnapshot = await firestore
