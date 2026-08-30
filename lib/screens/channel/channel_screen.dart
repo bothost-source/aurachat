@@ -62,6 +62,10 @@ class _ChannelChatScreenState extends State<ChannelChatScreen> {
   String? _replyingToContent;
   String? _replyingToSender;
 
+  // FIXED: Track pinned message to display at top
+  Map<String, dynamic>? _pinnedMessage;
+  StreamSubscription<DocumentSnapshot>? _pinnedMessageSub;
+
   static const Color _bgDark = Color(0xFF0A0A0F);
   static const Color _bgCard = Color(0xFF1a103c);
   static const Color _purple = Color(0xFF8B5CF6);
@@ -79,7 +83,44 @@ class _ChannelChatScreenState extends State<ChannelChatScreen> {
     super.initState();
     _initAudioPlayer();
     _loadChannelInfo();
-    _messageController.addListener(_onTextChanged); // FIXED: Add listener for send button
+    _messageController.addListener(_onTextChanged);
+    _listenToPinnedMessage(); // FIXED: Start listening to pinned messages
+  }
+
+  /// FIXED: Listen to pinned message in real-time
+  void _listenToPinnedMessage() {
+    _pinnedMessageSub = FirebaseFirestore.instance
+        .collection('chats')
+        .doc(widget.channelId)
+        .collection('pinned_messages')
+        .orderBy('pinned_at', descending: true)
+        .limit(1)
+        .snapshots()
+        .listen((snapshot) async {
+      if (!mounted) return;
+      if (snapshot.docs.isEmpty) {
+        setState(() => _pinnedMessage = null);
+        return;
+      }
+      final pinnedDoc = snapshot.docs.first;
+      final messageId = pinnedDoc.data()['message_id'] as String?;
+      if (messageId == null) {
+        setState(() => _pinnedMessage = null);
+        return;
+      }
+      // Fetch the actual message
+      final msgDoc = await FirebaseFirestore.instance
+          .collection('chats')
+          .doc(widget.channelId)
+          .collection('messages')
+          .doc(messageId)
+          .get();
+      if (msgDoc.exists && mounted) {
+        final data = msgDoc.data()!;
+        data['id'] = msgDoc.id;
+        setState(() => _pinnedMessage = data);
+      }
+    });
   }
 
   /// FIXED: Rebuild when text changes to toggle send/mic button
@@ -120,6 +161,15 @@ class _ChannelChatScreenState extends State<ChannelChatScreen> {
         _channelLink = data['invitation_link'] as String?;
       });
     }
+  }
+
+  // FIXED: Navigate to channel info when tapping avatar or name
+  void _goToChannelInfo() {
+    Navigator.pushNamed(context, '/channel_info', arguments: {
+      'chatId': widget.channelId,
+      'chatName': widget.channelName,
+      'chatAvatar': _channelAvatarUrl,
+    });
   }
 
   Future<void> _sendMessage({String? text, String? mediaUrl, String? mediaType, String? fileName, String? fileSize, int? duration}) async {
@@ -260,6 +310,9 @@ class _ChannelChatScreenState extends State<ChannelChatScreen> {
 
   Future<void> _pinMessage(String messageId) async {
     try {
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+      final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+
       await FirebaseFirestore.instance
           .collection('chats')
           .doc(widget.channelId)
@@ -268,7 +321,7 @@ class _ChannelChatScreenState extends State<ChannelChatScreen> {
           .set({
         'message_id': messageId,
         'pinned_at': FieldValue.serverTimestamp(),
-        'pinned_by': Provider.of<AuraAuthProvider>(context, listen: false).user?.uid,
+        'pinned_by': userId,
       });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -277,6 +330,24 @@ class _ChannelChatScreenState extends State<ChannelChatScreen> {
       }
     } catch (e) {
       _showError('Pin failed: $e');
+    }
+  }
+
+  Future<void> _unpinMessage(String messageId) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('chats')
+          .doc(widget.channelId)
+          .collection('pinned_messages')
+          .doc(messageId)
+          .delete();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Message unpinned')),
+        );
+      }
+    } catch (e) {
+      _showError('Unpin failed: $e');
     }
   }
 
@@ -455,6 +526,8 @@ class _ChannelChatScreenState extends State<ChannelChatScreen> {
     final messageId = msg['id'] as String?;
     if (messageId == null) return;
 
+    final bool isPinned = _pinnedMessage != null && _pinnedMessage!['id'] == messageId;
+
     showModalBottomSheet(
       context: context,
       backgroundColor: _bgCard,
@@ -500,11 +573,15 @@ class _ChannelChatScreenState extends State<ChannelChatScreen> {
                 ),
               ],
               ListTile(
-                leading: const Icon(Icons.push_pin, color: Colors.orange),
-                title: const Text('Pin', style: TextStyle(color: Colors.white)),
+                leading: Icon(Icons.push_pin, color: isPinned ? Colors.orange : Colors.orange),
+                title: Text(isPinned ? 'Unpin' : 'Pin', style: const TextStyle(color: Colors.white)),
                 onTap: () {
                   Navigator.pop(context);
-                  _pinMessage(messageId);
+                  if (isPinned) {
+                    _unpinMessage(messageId);
+                  } else {
+                    _pinMessage(messageId);
+                  }
                 },
               ),
               ListTile(
@@ -639,6 +716,65 @@ class _ChannelChatScreenState extends State<ChannelChatScreen> {
     );
   }
 
+  // ==================== PINNED MESSAGE WIDGET ====================
+  Widget _buildPinnedMessageBanner() {
+    if (_pinnedMessage == null) return const SizedBox.shrink();
+
+    final text = _pinnedMessage!['text'] ?? _pinnedMessage!['content'] ?? 'Pinned message';
+    final sender = _pinnedMessage!['sender_name'] ?? 'Unknown';
+
+    return GestureDetector(
+      onTap: () {
+        // Could scroll to the pinned message
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: _bgCard.withOpacity(0.9),
+          border: Border(
+            bottom: BorderSide(color: Colors.orange.withOpacity(0.3)),
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.push_pin, color: Colors.orange.withOpacity(0.8), size: 16),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Pinned by $sender',
+                    style: TextStyle(
+                      color: Colors.orange.withOpacity(0.8),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    text,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.8),
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            GestureDetector(
+              onTap: () => _unpinMessage(_pinnedMessage!['id']),
+              child: Icon(Icons.close, color: Colors.white.withOpacity(0.4), size: 16),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   // ==================== BUILD ====================
 
   @override
@@ -658,7 +794,7 @@ class _ChannelChatScreenState extends State<ChannelChatScreen> {
         child: SafeArea(
           child: Column(
             children: [
-              // Header with channel avatar from Firestore
+              // Header with channel avatar from Firestore - FIXED: Made tappable
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 decoration: BoxDecoration(
@@ -671,47 +807,51 @@ class _ChannelChatScreenState extends State<ChannelChatScreen> {
                       icon: const Icon(Icons.arrow_back, color: Colors.white),
                       onPressed: () => Navigator.pop(context),
                     ),
-                    // Channel avatar from Firestore
-                    _channelAvatarUrl != null && _channelAvatarUrl!.isNotEmpty
-                      ? CircleAvatar(
-                          radius: 20,
-                          backgroundImage: NetworkImage(_channelAvatarUrl!),
-                          onBackgroundImageError: (_, __) {},
-                        )
-                      : CircleAvatar(
-                          radius: 20,
-                          backgroundColor: _purple.withOpacity(0.2),
-                          child: const Icon(Icons.campaign, color: _purple, size: 20),
-                        ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                    // FIXED: Wrap avatar and name in GestureDetector for tap
+                    GestureDetector(
+                      onTap: _goToChannelInfo,
+                      child: Row(
                         children: [
-                          Text(
-                            widget.channelName,
-                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 16),
-                          ),
-                          Text(
-                            'Channel',
-                            style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 12),
+                          // Channel avatar from Firestore
+                          _channelAvatarUrl != null && _channelAvatarUrl!.isNotEmpty
+                            ? CircleAvatar(
+                                radius: 20,
+                                backgroundImage: NetworkImage(_channelAvatarUrl!),
+                                onBackgroundImageError: (_, __) {},
+                              )
+                            : CircleAvatar(
+                                radius: 20,
+                                backgroundColor: _purple.withOpacity(0.2),
+                                child: const Icon(Icons.campaign, color: _purple, size: 20),
+                              ),
+                          const SizedBox(width: 12),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                widget.channelName,
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 16),
+                              ),
+                              Text(
+                                'Channel',
+                                style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 12),
+                              ),
+                            ],
                           ),
                         ],
                       ),
                     ),
+                    const Spacer(),
                     IconButton(
                       icon: const Icon(Icons.more_vert, color: Colors.white70),
-                      onPressed: () {
-                        Navigator.pushNamed(context, '/channel_info', arguments: {
-                          'chatId': widget.channelId,
-                          'chatName': widget.channelName,
-                          'chatAvatar': _channelAvatarUrl,
-                        });
-                      },
+                      onPressed: _goToChannelInfo,
                     ),
                   ],
                 ),
               ),
+
+              // FIXED: Pinned message banner at top
+              _buildPinnedMessageBanner(),
 
               // Messages
               Expanded(
@@ -1129,13 +1269,15 @@ class _ChannelChatScreenState extends State<ChannelChatScreen> {
 
   @override
   void dispose() {
-    _messageController.removeListener(_onTextChanged); // FIXED: Remove listener
+    _messageController.removeListener(_onTextChanged);
     _messageController.dispose();
     _editController.dispose();
     _scrollController.dispose();
     _audioPlayer.dispose();
     _audioRecorder.dispose();
     _recordingTimer?.cancel();
+    _pinnedMessageSub?.cancel(); // FIXED: Cancel pinned message subscription
     super.dispose();
   }
 }
+ 
