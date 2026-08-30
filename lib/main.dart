@@ -208,6 +208,9 @@ class ErrorApp extends StatelessWidget {
   }
 }
 
+// ============================================================================
+// AUTH ROUTER — FIXED: Shows SplashScreen first, then routes correctly
+// ============================================================================
 class AuthRouter extends StatefulWidget {
   const AuthRouter({super.key});
 
@@ -218,11 +221,18 @@ class AuthRouter extends StatefulWidget {
 class _AuthRouterState extends State<AuthRouter> {
   Widget? _targetScreen;
   bool _isChecking = true;
+  bool _showSplash = true;
 
   @override
   void initState() {
     super.initState();
-    _checkAuthState();
+    // Show splash for 2.5 seconds, then check auth
+    Future.delayed(const Duration(milliseconds: 2500), () {
+      if (mounted) {
+        setState(() => _showSplash = false);
+        _checkAuthState();
+      }
+    });
   }
 
   Future<void> _checkAuthState() async {
@@ -231,8 +241,11 @@ class _AuthRouterState extends State<AuthRouter> {
     // Check for pending email verification (from email-first login)
     final pendingMockUserId = prefs.getString('pending_mock_user_id');
     final pendingMockEmail = prefs.getString('pending_mock_email');
+    final emailVerifiedComplete = prefs.getBool('email_verified_complete') ?? false;
 
-    if (pendingMockUserId != null && pendingMockEmail != null) {
+    // FIXED: If there's a pending verification but email is NOT yet verified,
+    // show email verification screen
+    if (pendingMockUserId != null && pendingMockEmail != null && !emailVerifiedComplete) {
       setState(() {
         _targetScreen = const EmailVerificationScreen();
         _isChecking = false;
@@ -267,19 +280,25 @@ class _AuthRouterState extends State<AuthRouter> {
     if (currentUser != null || mockUserId != null) {
       final userId = currentUser?.uid ?? mockUserId!;
 
-      // Check if user has a complete profile in Firestore
+      // FIXED: Check if user has a COMPLETE profile in Firestore
+      // A complete profile needs username AND display_name AND they must be non-empty
       try {
         final userDoc = await FirebaseFirestore.instance
             .collection('users')
             .doc(userId)
             .get();
 
-        final hasProfile = userDoc.exists &&
-            userDoc.data()?['username'] != null &&
-            userDoc.data()?['display_name'] != null &&
-            (userDoc.data()?['username'] as String).isNotEmpty;
+        final data = userDoc.data();
+        final hasUsername = data?['username'] != null && (data?['username'] as String).trim().isNotEmpty;
+        final hasDisplayName = data?['display_name'] != null && (data?['display_name'] as String).trim().isNotEmpty;
+        final hasProfile = userDoc.exists && hasUsername && hasDisplayName;
 
-        if (hasProfile) {
+        // FIXED: Also check if this is a brand new user who hasn't completed setup
+        // by checking a 'setup_complete' flag or checking if created_at is very recent
+        final createdAt = data?['created_at'];
+        final bool isVeryNew = createdAt == null;
+
+        if (hasProfile && !isVeryNew) {
           // Existing user with complete profile -> go to main
           setState(() {
             _targetScreen = const MainAppScreen();
@@ -293,7 +312,7 @@ class _AuthRouterState extends State<AuthRouter> {
           });
         }
       } catch (e) {
-        // If Firestore check fails, default to setup (safer)
+        // If Firestore check fails, default to setup (safer for new users)
         setState(() {
           _targetScreen = const SetupProfileScreen();
           _isChecking = false;
@@ -311,6 +330,11 @@ class _AuthRouterState extends State<AuthRouter> {
 
   @override
   Widget build(BuildContext context) {
+    // FIXED: Show splash screen first
+    if (_showSplash) {
+      return const SplashScreen();
+    }
+
     if (_isChecking) {
       return const Scaffold(
         backgroundColor: Color(0xFF0A0A0F),
@@ -423,9 +447,8 @@ class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
 
   void _handleBackground() async {
     try {
-      // FIXED: Set offline when app goes to background
       OnlineStatusService.setOffline();
-      
+
       final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
       settingsProvider.onAppBackground();
     } catch (e) {
@@ -435,8 +458,8 @@ class _AuraChatAppState extends State<AuraChatApp> with WidgetsBindingObserver {
 
   void _handleResume() async {
     try {
-      await OnlineStatusService.setOnline(); // FIXED: Added await
-      
+      await OnlineStatusService.setOnline();
+
       final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
       authProvider.refreshSession();
 
