@@ -1,5 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
 
 class SplashScreen extends StatefulWidget {
@@ -48,52 +52,45 @@ class _SplashScreenState extends State<SplashScreen>
     );
 
     _controller.forward();
-    _checkAuthAndNavigate();
+
+    // FIXED: If this screen is opened directly (not via AuthRouter),
+    // it will self-navigate after animation. AuthRouter handles the normal flow.
+    _selfNavigateIfNeeded();
   }
 
-  Future<void> _checkAuthAndNavigate() async {
-    // Wait for splash animation (3 seconds)
-    await Future.delayed(const Duration(seconds: 3));
+  /// FIXED: Safe fallback navigation if splash is opened directly.
+  /// Normal flow: AuthRouter shows splash for 2.5s then routes.
+  /// Fallback: If splash is still showing after 4s, navigate based on auth state.
+  Future<void> _selfNavigateIfNeeded() async {
+    await Future.delayed(const Duration(seconds: 4));
+    if (!mounted || _hasNavigated) return;
 
-    if (!mounted) return;
+    final prefs = await SharedPreferences.getInstance();
+    final mockUserId = prefs.getString('mock_user_id');
+    final currentUser = FirebaseAuth.instance.currentUser;
 
-    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+    if (currentUser != null || mockUserId != null) {
+      final userId = currentUser?.uid ?? mockUserId!;
+      try {
+        final userDoc = await FirebaseFirestore.instance.collection('users').doc(userId).get();
+        final data = userDoc.data();
+        final hasUsername = data?['username'] != null && (data?['username'] as String).trim().isNotEmpty;
+        final hasDisplayName = data?['display_name'] != null && (data?['display_name'] as String).trim().isNotEmpty;
+        final createdAt = data?['created_at'];
+        final hasProfile = userDoc.exists && hasUsername && hasDisplayName && createdAt != null;
 
-    // ⏱️ MAX 5 SECOND TIMEOUT — never hang forever!
-    int attempts = 0;
-    while (authProvider.isLoading && attempts < 50) {
-      await Future.delayed(const Duration(milliseconds: 100));
-      if (!mounted) return;
-      attempts++;
-    }
-
-    if (!mounted) return;
-    if (_hasNavigated) return;
-    _hasNavigated = true;
-
-    // If still loading after timeout, force to login
-    if (authProvider.isLoading) {
-      Navigator.pushReplacementNamed(context, '/login');
-      return;
-    }
-
-    if (!mounted) return;
-
-    if (authProvider.isAuthenticated) {
-      if (authProvider.userName == null || authProvider.userName!.isEmpty) {
+        if (hasProfile) {
+          Navigator.pushReplacementNamed(context, '/main');
+        } else {
+          Navigator.pushReplacementNamed(context, '/setup_profile');
+        }
+      } catch (e) {
         Navigator.pushReplacementNamed(context, '/setup_profile');
-      } else {
-        Navigator.pushReplacementNamed(context, '/main');
       }
     } else {
-      Navigator.pushReplacementNamed(context, '/login');
+      Navigator.pushReplacementNamed(context, '/');
     }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
+    _hasNavigated = true;
   }
 
   @override
@@ -201,5 +198,11 @@ class _SplashScreenState extends State<SplashScreen>
         ),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
   }
 }
