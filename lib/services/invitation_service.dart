@@ -7,6 +7,9 @@ class InvitationService {
   static const String _chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
   static final Random _random = Random();
 
+  // FIXED: Use Firebase Hosting URL instead of deprecated Dynamic Links
+  static const String _baseUrl = 'https://aurachat-85f54.web.app';
+
   /// Generate a custom invitation link for a group or channel
   static Future<Map<String, dynamic>> createInvitation({
     required String chatId,
@@ -34,7 +37,8 @@ class InvitationService {
     }
 
     final invitationId = _firestore.collection('invitations').doc().id;
-    final link = 'https://aurachat.page.link/join/$code';
+    // FIXED: Use Firebase Hosting URL with /join path
+    final link = '$_baseUrl/join/$code';
 
     await _firestore.collection('invitations').doc(invitationId).set({
       'id': invitationId,
@@ -284,7 +288,8 @@ class InvitationService {
 
     // Create new invitation
     final newCode = _generateRandomCode(8);
-    final newLink = 'https://aurachat.page.link/join/$newCode';
+    // FIXED: Use Firebase Hosting URL
+    final newLink = '$_baseUrl/join/$newCode';
     final invitationId = _firestore.collection('invitations').doc().id;
 
     await _firestore.collection('invitations').doc(invitationId).set({
