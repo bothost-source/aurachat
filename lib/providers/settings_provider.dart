@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -49,15 +50,37 @@ class SettingsProvider extends ChangeNotifier {
   bool _saveToGallery = true;
 
   // =========================================================================
-  // APP LOCK TRACKING — FIXED: Persistent lock state
+  // APP LOCK TRACKING — FIXED: Robust timer-based locking
   // =========================================================================
   DateTime? _lastBackgroundTime;
   bool _isLocked = false;
+  Timer? _foregroundTimer; // FIXED: Periodic timer to save background time
 
   bool get isLocked => _isLocked;
 
+  /// FIXED: Start a periodic timer that saves the current time every 30 seconds
+  /// while the app is in foreground. This ensures that even if the app is killed
+  /// without onAppBackground() firing, we have a recent timestamp to compare.
+  void startForegroundTimer() {
+    _foregroundTimer?.cancel();
+    _foregroundTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
+      final prefs = await _prefs;
+      await prefs.setInt('last_foreground_time', DateTime.now().millisecondsSinceEpoch);
+    });
+    // Save immediately on start
+    _prefs.then((prefs) => prefs.setInt('last_foreground_time', DateTime.now().millisecondsSinceEpoch));
+  }
+
+  /// FIXED: Stop the foreground timer when app goes to background
+  void stopForegroundTimer() {
+    _foregroundTimer?.cancel();
+    _foregroundTimer = null;
+  }
+
   /// Call this when app goes to background (paused/detached)
   Future<void> onAppBackground() async {
+    stopForegroundTimer();
+
     // Only track if lock is actually configured
     if (!_appPasscode && !_biometricLock) return;
 
@@ -92,28 +115,29 @@ class SettingsProvider extends ChangeNotifier {
     }
 
     final lastBg = prefs.getInt('last_background_time');
+    final lastFg = prefs.getInt('last_foreground_time');
 
-    // No background time recorded — app was killed or first launch
-    if (lastBg == null) {
-      // Only lock if this is a resume from background (not first install)
-      final hasEverBeenBackgrounded = prefs.getBool('has_ever_backgrounded') ?? false;
-      if (!hasEverBeenBackgrounded) {
-        return false; // First time user, don't lock
-      }
+    // Use the most recent timestamp we have (background time preferred, fallback to foreground time)
+    final lastKnownTime = lastBg ?? lastFg;
 
-      _isLocked = true;
-      await prefs.setBool('app_is_locked', true);
-      notifyListeners();
-      return true;
+    if (lastKnownTime == null) {
+      // No time recorded at all — this is first launch or app was never properly backgrounded
+      // Don't lock on first open
+      return false;
     }
 
-    final lastBgTime = DateTime.fromMillisecondsSinceEpoch(lastBg);
+    final lastTime = DateTime.fromMillisecondsSinceEpoch(lastKnownTime);
     final now = DateTime.now();
-    final diffMinutes = now.difference(lastBgTime).inMinutes;
+    final diffMinutes = now.difference(lastTime).inMinutes;
+
+    debugPrint('App lock check: last known time = $lastTime, now = $now, diff = $diffMinutes min, timeout = $_autoLockTimeout min');
 
     if (diffMinutes >= _autoLockTimeout) {
       _isLocked = true;
       await prefs.setBool('app_is_locked', true);
+      // FIXED: Clear the timestamps so next open doesn't re-lock immediately
+      await prefs.remove('last_background_time');
+      await prefs.remove('last_foreground_time');
       notifyListeners();
       return true;
     }
@@ -129,7 +153,8 @@ class SettingsProvider extends ChangeNotifier {
     _isLocked = false;
     final prefs = await _prefs;
     await prefs.remove('last_background_time');
-    await prefs.setBool('app_is_locked', false); // FIXED: Clear persisted lock state
+    await prefs.remove('last_foreground_time');
+    await prefs.setBool('app_is_locked', false);
     notifyListeners();
   }
 
@@ -137,7 +162,7 @@ class SettingsProvider extends ChangeNotifier {
   Future<void> lock() async {
     _isLocked = true;
     final prefs = await _prefs;
-    await prefs.setBool('app_is_locked', true); // FIXED: Persist lock state
+    await prefs.setBool('app_is_locked', true);
     notifyListeners();
   }
   // =========================================================================
@@ -543,5 +568,11 @@ class SettingsProvider extends ChangeNotifier {
     final prefs = await _prefs;
     await prefs.clear();
     await _loadSettings();
+  }
+
+  @override
+  void dispose() {
+    _foregroundTimer?.cancel();
+    super.dispose();
   }
 }
