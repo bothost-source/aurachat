@@ -147,140 +147,145 @@ class ChatListScreen extends StatelessWidget {
     final type = chat['type'] as String? ?? 'group';
     final createdByEmail = chat['created_by_email'] as String?; // FIXED: phone → email
 
-    return GestureDetector(
-      onLongPress: () => _showChatOptions(context, chat, true),
-      child: Slidable(
-        key: ValueKey(chat['id']),
-        endActionPane: ActionPane(
-          motion: const ScrollMotion(),
+    // FIX: Removed the outer GestureDetector(onLongPress: ...) that was wrapping
+    // Slidable. Slidable installs its own horizontal drag-gesture recognizers to
+    // detect swipes, and it competes with a wrapping GestureDetector's long-press
+    // recognizer in the same gesture arena — Slidable tends to win that arena, so
+    // the outer onLongPress was silently never firing. ListTile has a built-in
+    // onLongPress parameter handled by the same InkWell that already handles
+    // onTap (which was working), so it survives being inside Slidable correctly.
+    return Slidable(
+      key: ValueKey(chat['id']),
+      endActionPane: ActionPane(
+        motion: const ScrollMotion(),
+        children: [
+          SlidableAction(
+            onPressed: (_) => chatProvider.archiveChat(chat['id']),
+            backgroundColor: Colors.blue,
+            foregroundColor: Colors.white,
+            icon: Icons.archive,
+            label: 'Archive',
+          ),
+          SlidableAction(
+            onPressed: (_) => _showDeleteDialog(context, chat['id']),
+            backgroundColor: Colors.red,
+            foregroundColor: Colors.white,
+            icon: Icons.delete,
+            label: 'Delete',
+          ),
+        ],
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        onLongPress: () => _showChatOptions(context, chat, true),
+        leading: Stack(
           children: [
-            SlidableAction(
-              onPressed: (_) => chatProvider.archiveChat(chat['id']),
-              backgroundColor: Colors.blue,
-              foregroundColor: Colors.white,
-              icon: Icons.archive,
-              label: 'Archive',
-            ),
-            SlidableAction(
-              onPressed: (_) => _showDeleteDialog(context, chat['id']),
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-              icon: Icons.delete,
-              label: 'Delete',
-            ),
+            _buildAvatar(avatarUrl, name, type == 'channel'),
+            if (isPinned)
+              Positioned(
+                right: 0,
+                bottom: 0,
+                child: Container(
+                  padding: const EdgeInsets.all(2),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF8B5CF6),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.push_pin,
+                    size: 10,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
           ],
         ),
-        child: ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-          leading: Stack(
-            children: [
-              _buildAvatar(avatarUrl, name, type == 'channel'),
-              if (isPinned)
-                Positioned(
-                  right: 0,
-                  bottom: 0,
-                  child: Container(
-                    padding: const EdgeInsets.all(2),
-                    decoration: const BoxDecoration(
-                      color: Color(0xFF8B5CF6),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.push_pin,
-                      size: 10,
-                      color: Colors.white,
-                    ),
-                  ),
+        title: Row(
+          children: [
+            Expanded(
+              child: VerifiedUsername(
+                username: name,
+                email: createdByEmail, // FIXED: phoneNumber → email
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 15,
                 ),
-            ],
-          ),
-          title: Row(
-            children: [
-              Expanded(
-                child: VerifiedUsername(
-                  username: name,
-                  email: createdByEmail, // FIXED: phoneNumber → email
+                badgeSize: 14,
+                spacing: 4,
+              ),
+            ),
+            if (lastMessageAt != null)
+              Text(
+                _formatChatListTime(lastMessageAt),
+                style: TextStyle(
+                  color: unreadCount > 0
+                      ? const Color(0xFF8B5CF6)
+                      : Colors.white.withOpacity(0.4),
+                  fontSize: 12,
+                ),
+              ),
+          ],
+        ),
+        subtitle: Row(
+          children: [
+            Expanded(
+              child: Text(
+                _getMessagePreview(lastMessage, lastMessageType),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: unreadCount > 0
+                      ? Colors.white.withOpacity(0.8)
+                      : Colors.white.withOpacity(0.5),
+                  fontSize: 13,
+                  fontWeight: unreadCount > 0
+                      ? FontWeight.w500
+                      : FontWeight.normal,
+                ),
+              ),
+            ),
+            if (unreadCount > 0)
+              Container(
+                margin: const EdgeInsets.only(left: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF8B5CF6),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  unreadCount > 99 ? '99+' : '$unreadCount',
                   style: const TextStyle(
                     color: Colors.white,
+                    fontSize: 11,
                     fontWeight: FontWeight.w600,
-                    fontSize: 15,
-                  ),
-                  badgeSize: 14,
-                  spacing: 4,
-                ),
-              ),
-              if (lastMessageAt != null)
-                Text(
-                  _formatChatListTime(lastMessageAt),
-                  style: TextStyle(
-                    color: unreadCount > 0
-                        ? const Color(0xFF8B5CF6)
-                        : Colors.white.withOpacity(0.4),
-                    fontSize: 12,
-                  ),
-                ),
-            ],
-          ),
-          subtitle: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  _getMessagePreview(lastMessage, lastMessageType),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: unreadCount > 0
-                        ? Colors.white.withOpacity(0.8)
-                        : Colors.white.withOpacity(0.5),
-                    fontSize: 13,
-                    fontWeight: unreadCount > 0
-                        ? FontWeight.w500
-                        : FontWeight.normal,
                   ),
                 ),
               ),
-              if (unreadCount > 0)
-                Container(
-                  margin: const EdgeInsets.only(left: 8),
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF8B5CF6),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    unreadCount > 99 ? '99+' : '$unreadCount',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          onTap: () {
-            if (type == 'channel') {
-              Navigator.pushNamed(
-                context,
-                '/channel',
-                arguments: {
-                  'channelId': chat['id'],
-                  'channelName': name,
-                },
-              );
-            } else {
-              Navigator.pushNamed(
-                context,
-                '/chat',
-                arguments: {
-                  'chatId': chat['id'],
-                  'chatName': name,
-                  'isGroup': true,
-                },
-              );
-            }
-          },
+          ],
         ),
+        onTap: () {
+          if (type == 'channel') {
+            Navigator.pushNamed(
+              context,
+              '/channel',
+              arguments: {
+                'channelId': chat['id'],
+                'channelName': name,
+              },
+            );
+          } else {
+            Navigator.pushNamed(
+              context,
+              '/chat',
+              arguments: {
+                'chatId': chat['id'],
+                'chatName': name,
+                'isGroup': true,
+              },
+            );
+          }
+        },
       ),
     );
   }
@@ -320,147 +325,149 @@ class ChatListScreen extends StatelessWidget {
         final email = userData['email'] as String?; // FIXED: phone → email
         final isOnline = userData['is_online'] as bool? ?? false;
 
-        return GestureDetector(
-          onLongPress: () => _showDirectChatOptions(context, chat['id'], displayName),
-          child: Slidable(
-            key: ValueKey(chat['id']),
-            endActionPane: ActionPane(
-              motion: const ScrollMotion(),
+        // FIX: Removed the outer GestureDetector(onLongPress: ...) that was
+        // wrapping Slidable — same gesture-arena conflict as in
+        // _buildGroupOrChannelTile above. onLongPress now lives directly on the
+        // ListTile so it's handled by the same InkWell as onTap.
+        return Slidable(
+          key: ValueKey(chat['id']),
+          endActionPane: ActionPane(
+            motion: const ScrollMotion(),
+            children: [
+              SlidableAction(
+                onPressed: (_) => chatProvider.archiveChat(chat['id']),
+                backgroundColor: Colors.blue,
+                foregroundColor: Colors.white,
+                icon: Icons.archive,
+                label: 'Archive',
+              ),
+              SlidableAction(
+                onPressed: (_) => _showDeleteDialog(context, chat['id']),
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+                icon: Icons.delete,
+                label: 'Delete',
+              ),
+            ],
+          ),
+          child: ListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            onLongPress: () => _showDirectChatOptions(context, chat['id'], displayName),
+            leading: Stack(
               children: [
-                SlidableAction(
-                  onPressed: (_) => chatProvider.archiveChat(chat['id']),
-                  backgroundColor: Colors.blue,
-                  foregroundColor: Colors.white,
-                  icon: Icons.archive,
-                  label: 'Archive',
-                ),
-                SlidableAction(
-                  onPressed: (_) => _showDeleteDialog(context, chat['id']),
-                  backgroundColor: Colors.red,
-                  foregroundColor: Colors.white,
-                  icon: Icons.delete,
-                  label: 'Delete',
-                ),
+                _buildAvatar(avatarUrl, displayName, false),
+                if (isOnline)
+                  Positioned(
+                    right: 0,
+                    bottom: 0,
+                    child: Container(
+                      width: 12,
+                      height: 12,
+                      decoration: BoxDecoration(
+                        color: Colors.green,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: const Color(0xFF0A0A0F),
+                          width: 2,
+                        ),
+                      ),
+                    ),
+                  ),
+                if (isPinned)
+                  Positioned(
+                    right: 0,
+                    top: 0,
+                    child: Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF8B5CF6),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.push_pin,
+                        size: 10,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
               ],
             ),
-            child: ListTile(
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-              leading: Stack(
-                children: [
-                  _buildAvatar(avatarUrl, displayName, false),
-                  if (isOnline)
-                    Positioned(
-                      right: 0,
-                      bottom: 0,
-                      child: Container(
-                        width: 12,
-                        height: 12,
-                        decoration: BoxDecoration(
-                          color: Colors.green,
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: const Color(0xFF0A0A0F),
-                            width: 2,
-                          ),
-                        ),
-                      ),
+            title: Row(
+              children: [
+                Expanded(
+                  child: VerifiedUsername(
+                    username: displayName,
+                    email: email, // FIXED: phoneNumber → email
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 15,
                     ),
-                  if (isPinned)
-                    Positioned(
-                      right: 0,
-                      top: 0,
-                      child: Container(
-                        padding: const EdgeInsets.all(2),
-                        decoration: const BoxDecoration(
-                          color: Color(0xFF8B5CF6),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          Icons.push_pin,
-                          size: 10,
-                          color: Colors.white,
-                        ),
-                      ),
+                    badgeSize: 14,
+                    spacing: 4,
+                  ),
+                ),
+                if (lastMessageAt != null)
+                  Text(
+                    _formatChatListTime(lastMessageAt),
+                    style: TextStyle(
+                      color: unreadCount > 0
+                          ? const Color(0xFF8B5CF6)
+                          : Colors.white.withOpacity(0.4),
+                      fontSize: 12,
                     ),
-                ],
-              ),
-              title: Row(
-                children: [
-                  Expanded(
-                    child: VerifiedUsername(
-                      username: displayName,
-                      email: email, // FIXED: phoneNumber → email
+                  ),
+              ],
+            ),
+            subtitle: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    _getMessagePreview(lastMessage, lastMessageType),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: unreadCount > 0
+                          ? Colors.white.withOpacity(0.8)
+                          : Colors.white.withOpacity(0.5),
+                      fontSize: 13,
+                      fontWeight: unreadCount > 0
+                          ? FontWeight.w500
+                          : FontWeight.normal,
+                    ),
+                  ),
+                ),
+                if (unreadCount > 0)
+                  Container(
+                    margin: const EdgeInsets.only(left: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF8B5CF6),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      unreadCount > 99 ? '99+' : '$unreadCount',
                       style: const TextStyle(
                         color: Colors.white,
+                        fontSize: 11,
                         fontWeight: FontWeight.w600,
-                        fontSize: 15,
-                      ),
-                      badgeSize: 14,
-                      spacing: 4,
-                    ),
-                  ),
-                  if (lastMessageAt != null)
-                    Text(
-                      _formatChatListTime(lastMessageAt),
-                      style: TextStyle(
-                        color: unreadCount > 0
-                            ? const Color(0xFF8B5CF6)
-                            : Colors.white.withOpacity(0.4),
-                        fontSize: 12,
-                      ),
-                    ),
-                ],
-              ),
-              subtitle: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      _getMessagePreview(lastMessage, lastMessageType),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: unreadCount > 0
-                            ? Colors.white.withOpacity(0.8)
-                            : Colors.white.withOpacity(0.5),
-                        fontSize: 13,
-                        fontWeight: unreadCount > 0
-                            ? FontWeight.w500
-                            : FontWeight.normal,
                       ),
                     ),
                   ),
-                  if (unreadCount > 0)
-                    Container(
-                      margin: const EdgeInsets.only(left: 8),
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF8B5CF6),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        unreadCount > 99 ? '99+' : '$unreadCount',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-              onTap: () {
-                Navigator.pushNamed(
-                  context,
-                  '/chat',
-                  arguments: {
-                    'chatId': chat['id'],
-                    'chatName': displayName,
-                    'isGroup': false,
-                    'otherUserId': otherUserId,
-                  },
-                );
-              },
+              ],
             ),
+            onTap: () {
+              Navigator.pushNamed(
+                context,
+                '/chat',
+                arguments: {
+                  'chatId': chat['id'],
+                  'chatName': displayName,
+                  'isGroup': false,
+                  'otherUserId': otherUserId,
+                },
+              );
+            },
           ),
         );
       },
