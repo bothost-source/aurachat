@@ -176,13 +176,26 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
       _subscribeToChatInfo();
       _loadPinnedMessages();
       if (!_isGroup) {
-        _checkBlockStatus();
-        _subscribeToBlockStatus();
-        _subscribeToOtherUserStatus();
-        _subscribeToTyping();
+        _initDirectChatFeatures();
       }
       _setOnlineStatus();
     }
+  }
+
+  /// FIX: _checkBlockStatus() is async and sets _otherUserId only after its
+  /// Firestore reads complete. It was previously called without awaiting,
+  /// so _subscribeToOtherUserStatus() and _subscribeToTyping() ran immediately
+  /// afterward with _otherUserId still null, causing them to silently return
+  /// early (see their `if (_otherUserId == null) return;` guards). That meant
+  /// the online-status listener never actually attached, so _otherUserStatus
+  /// stayed null and the UI always fell back to showing "Online".
+  /// Awaiting _checkBlockStatus() first ensures _otherUserId is set before the
+  /// dependent subscriptions are started.
+  Future<void> _initDirectChatFeatures() async {
+    await _checkBlockStatus();
+    _subscribeToBlockStatus();
+    _subscribeToOtherUserStatus();
+    _subscribeToTyping();
   }
 
   @override
