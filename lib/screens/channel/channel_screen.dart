@@ -64,7 +64,17 @@ class _ChannelChatScreenState extends State<ChannelChatScreen> {
 
   // FIXED: Track pinned message to display at top
   Map<String, dynamic>? _pinnedMessage;
-  StreamSubscription<DocumentSnapshot>? _pinnedMessageSub;
+  // FIX: was declared as StreamSubscription<DocumentSnapshot>, but
+  // _listenToPinnedMessage() below listens to a *collection query*
+  // (.collection('pinned_messages').orderBy(...).limit(1).snapshots()),
+  // which always returns a QuerySnapshot stream even when limited to one
+  // result. That mismatch is exactly what the build error reported
+  // ("A value of type 'StreamSubscription<QuerySnapshot<...>>' can't be
+  // assigned to a variable of type 'StreamSubscription<DocumentSnapshot<...>>'").
+  // The .listen() callback below already treats it as a QuerySnapshot
+  // (snapshot.docs.isEmpty, snapshot.docs.first), so only the declared type
+  // needed correcting.
+  StreamSubscription<QuerySnapshot>? _pinnedMessageSub;
 
   static const Color _bgDark = Color(0xFF0A0A0F);
   static const Color _bgCard = Color(0xFF1a103c);
@@ -1280,4 +1290,3 @@ class _ChannelChatScreenState extends State<ChannelChatScreen> {
     super.dispose();
   }
 }
- 
