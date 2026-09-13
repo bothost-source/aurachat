@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -7,8 +8,29 @@ import '../../providers/chat_provider.dart';
 import '../../services/notification_service.dart';
 import '../../utils/verified_badge.dart';
 
-class ChatListScreen extends StatelessWidget {
+class ChatListScreen extends StatefulWidget {
   const ChatListScreen({super.key});
+
+  @override
+  State<ChatListScreen> createState() => _ChatListScreenState();
+}
+
+class _ChatListScreenState extends State<ChatListScreen> {
+  Timer? _refreshTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -85,7 +107,7 @@ class ChatListScreen extends StatelessWidget {
               final isGroupOrChannel = ['group', 'channel'].contains(chat['type']);
               final lastMessage = chat['last_message'] ?? '';
               final lastMessageType = chat['last_message_type'] ?? 'text';
-              
+
               // FIXED: Robust timestamp parsing
               DateTime? lastMessageAt;
               if (chat['last_message_at'] != null) {
@@ -142,7 +164,11 @@ class ChatListScreen extends StatelessWidget {
     bool isPinned,
   ) {
     final chatProvider = Provider.of<ChatProvider>(context, listen: false);
-    final name = chat['name'] ?? 'Unknown';
+    // FIX: some chats store the display name under 'title' instead of 'name'
+    // (this same fallback already exists in chat_screen.dart's forward-message
+    // feature for the same 'chats' collection) — checking both here prevents
+    // this tile from falling back to "Unknown" for those chats.
+    final name = chat['name'] ?? chat['title'] ?? 'Unknown';
     final avatarUrl = chat['avatar_url'] as String?;
     final type = chat['type'] as String? ?? 'group';
     final createdByEmail = chat['created_by_email'] as String?; // FIXED: phone → email
@@ -514,7 +540,7 @@ class ChatListScreen extends StatelessWidget {
   // FIXED: Improved time formatting
   String _formatChatListTime(DateTime? dateTime) {
     if (dateTime == null) return '';
-    
+
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final messageDate = DateTime(dateTime.year, dateTime.month, dateTime.day);
@@ -533,21 +559,21 @@ class ChatListScreen extends StatelessWidget {
         final minute = dateTime.minute.toString().padLeft(2, '0');
         return '$hour:$minute';
       }
-    } 
+    }
     // Yesterday
     else if (diffDays == 1) {
       return 'Yesterday';
-    } 
+    }
     // Within last 7 days
     else if (diffDays < 7) {
       const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
       return days[dateTime.weekday - 1];
-    } 
+    }
     // This year
     else if (dateTime.year == now.year) {
       const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       return '${months[dateTime.month - 1]} ${dateTime.day}';
-    } 
+    }
     // Different year
     else {
       const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
