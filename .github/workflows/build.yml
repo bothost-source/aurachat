@@ -330,34 +330,3 @@ jobs:
           body: "AURA CHAT Release - Works on all Android 5.0+ phones"
           token: ${{ secrets.GITHUB_TOKEN }}
           allowUpdates: true
-
-  build-web:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.22.0'
-          channel: 'stable'
-
-      - name: Create API config with Gemini key
-        run: |
-          cat > lib/services/api_config.dart << 'EOF'
-          class ApiConfig {
-            static const String geminiApiKey = '${{ secrets.GEMINI_API_KEY }}';
-          }
-          EOF
-
-      - name: Build Web
-        run: |
-          flutter config --enable-web
-          flutter build web --release
-
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./build/web
