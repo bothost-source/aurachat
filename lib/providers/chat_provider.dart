@@ -363,6 +363,36 @@ class ChatProvider extends ChangeNotifier {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // NEW (added per user request): toggle a chat's pinned state.
+  // chat_list_screen.dart calls togglePinChat(chatId) from its long-press menus
+  // but this method did not exist in ChatProvider, so tapping "Pin Chat" would
+  // have thrown a runtime "method not found" error. Implemented to match the
+  // field chat_list_screen.dart already reads for pin state — a top-level
+  // boolean `is_pinned` on the chat document (see: `chat['is_pinned'] ?? false`
+  // in that file) — rather than inventing a different structure.
+  // ═══════════════════════════════════════════════════════════════════════════
+  Future<void> togglePinChat(String chatId) async {
+    try {
+      final userId = _currentUserId;
+      if (userId == null) return;
+
+      final chatDoc = await _firestore.collection('chats').doc(chatId).get();
+      if (!chatDoc.exists) return;
+
+      final currentlyPinned = chatDoc.data()?['is_pinned'] == true;
+
+      await _firestore.collection('chats').doc(chatId).update({
+        'is_pinned': !currentlyPinned,
+      });
+
+      await loadChats();
+    } catch (e) {
+      _error = 'Failed to pin/unpin chat: $e';
+      notifyListeners();
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // NEW: Permanently delete a group/channel (owner only)
   // Deletes Firestore doc + all messages subcollection
   // ═══════════════════════════════════════════════════════════════════════════
