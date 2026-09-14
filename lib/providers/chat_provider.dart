@@ -158,6 +158,12 @@ class ChatProvider extends ChangeNotifier {
           lastMessageAt = rawLastMessageAt;
         }
         // If null or in future (unresolved server timestamp), use created_at fallback
+        // FIX: the final else branch used to set lastMessageAt = DateTime.now(),
+        // which fabricates a fresh "now" timestamp every single time loadChats()
+        // runs for any chat missing both a valid last_message_at and created_at.
+        // That produces a timestamp that is permanently "Now" and never reflects
+        // reality. Leaving it null instead means the UI shows no time for that
+        // chat rather than a false one.
         if (lastMessageAt == null || lastMessageAt.isAfter(DateTime.now().add(const Duration(minutes: 1)))) {
           final createdAt = chat['created_at'];
           if (createdAt is Timestamp) {
@@ -165,7 +171,7 @@ class ChatProvider extends ChangeNotifier {
           } else if (createdAt is DateTime) {
             lastMessageAt = createdAt;
           } else {
-            lastMessageAt = DateTime.now();
+            lastMessageAt = null;
           }
         }
 
