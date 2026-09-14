@@ -523,11 +523,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
 
     try {
       final firestore = FirebaseFirestore.instance;
+      // FIX: removed .where('deleted_for_everyone', isEqualTo: false) from the
+      // query. Combining a .where() (equality) on one field with .orderBy() on
+      // a DIFFERENT field (created_at) requires a Firestore composite index. If
+      // that index was never created in the Firebase console, this exact query
+      // fails silently (only a debugPrint, nothing shown to the user), leaving
+      // the message list permanently empty — matching "old messages don't show,
+      // as if I never sent anything". Filtering deleted_for_everyone client-side
+      // instead avoids the composite-index dependency entirely, using the same
+      // pattern already used below for the per-user 'deleted_for' array check.
       final snapshot = await firestore
           .collection('chats')
           .doc(_chatId!)
           .collection('messages')
-          .where('deleted_for_everyone', isEqualTo: false)
           .orderBy('created_at', descending: false)
           .get();
 
@@ -536,6 +544,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
 
       for (final doc in snapshot.docs) {
         final data = doc.data();
+        if (data['deleted_for_everyone'] == true) continue;
         final senderId = data['sender_id'] as String?;
         if (senderId != null) userIds.add(senderId);
         loadedMessages.add({
@@ -603,11 +612,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
     final currentUserId = authProvider.user?.uid ?? authProvider.mockUserId;
 
+    // FIX: same as _loadMessages() above — removed the
+    // .where('deleted_for_everyone', isEqualTo: false) clause since combining
+    // it with .orderBy('created_at') on a different field requires a Firestore
+    // composite index that may not exist, silently failing the whole
+    // subscription. deleted_for_everyone is now filtered client-side below,
+    // right alongside the existing per-user 'deleted_for' check.
     _messageSubscription = firestore
         .collection('chats')
         .doc(_chatId!)
         .collection('messages')
-        .where('deleted_for_everyone', isEqualTo: false)
         .orderBy('created_at', descending: false)
         .snapshots()
         .listen((snapshot) async {
@@ -621,6 +635,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
             final data = doc.data();
             final messageId = doc.id;
             final senderId = data['sender_id'] as String?;
+
+            if (data['deleted_for_everyone'] == true) continue;
 
             final deletedFor = List<String>.from(data['deleted_for'] ?? []);
             if (deletedFor.contains(currentUserId)) continue;
@@ -3216,10 +3232,18 @@ Future<void> _openLink(String url) async {
                               ],
                               if (isMe && !isDeleted) ...[
                                 const SizedBox(width: 4),
+                                // FIX: added blue (#06B6D4) color for the read
+                                // state, matching the website's exact CSS
+                                // (.tick.read { color: #06B6D4; }). Previously
+                                // both states used shades of white/grey only,
+                                // so there was no clear visual distinction
+                                // between "delivered" and "read".
                                 Icon(
                                   message['is_read'] == true ? Icons.done_all : Icons.done, 
                                   size: 14, 
-                                  color: message['is_read'] == true ? Colors.white : Colors.white.withOpacity(0.7),
+                                  color: message['is_read'] == true
+                                      ? const Color(0xFF06B6D4)
+                                      : Colors.white.withOpacity(0.6),
                                 ),
                               ],
                             ],
