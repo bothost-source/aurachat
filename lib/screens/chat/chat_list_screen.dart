@@ -346,7 +346,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
         }
 
         final userData = userSnapshot.data!.data() as Map<String, dynamic>? ?? {};
-        final displayName = userData['display_name'] ?? userData['username'] ?? 'Unknown';
+        // FIX: added the 'name' fallback — chats.html's fetchUserData checks
+        // display_name, username, AND name, but this tile only checked the
+        // first two, so users whose doc stores the name under 'name' showed
+        // as "Unknown" here even though the website resolved them correctly.
+        final displayName = userData['display_name'] ?? userData['username'] ?? userData['name'] ?? 'Unknown';
         final avatarUrl = userData['avatar_url'] as String?;
         final email = userData['email'] as String?; // FIXED: phone → email
         final isOnline = userData['is_online'] as bool? ?? false;
