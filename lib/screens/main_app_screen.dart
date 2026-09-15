@@ -282,10 +282,17 @@ class _MainAppScreenState extends State<MainAppScreen>
   }
 
   Widget _buildChatTile(Map<String, dynamic> chat) {
-    final name = chat['name'] ?? 'Unknown';
+    // FIX: some chats store the display name under 'title' instead of 'name'
+    // (same fallback already confirmed needed in chat_list_screen.dart and
+    // present in the website's own fetchUserData chain) — checking both
+    // prevents this tile from falling back to "Unknown".
+    final name = chat['name'] ?? chat['title'] ?? 'Unknown';
     final avatar = chat['avatar_url'];
     final lastMessage = chat['last_message'] ?? '';
-    final time = chat['updated_at'];
+    // FIX: this was reading chat['updated_at'], but ChatProvider.loadChats()
+    // stores the timestamp under 'last_message_at' — 'updated_at' does not
+    // exist on these chat maps at all, so `time` was always null.
+    final time = chat['last_message_at'];
     final unread = chat['unread_count'] ?? 0;
     final chatType = chat['type'] as String? ?? 'direct';
     final isGroup = chatType == 'group';
@@ -380,13 +387,18 @@ class _MainAppScreenState extends State<MainAppScreen>
               ),
           ],
         ),
+        // FIX: preview text now bolds/brightens when there's an unread
+        // message, matching the website's `.chat-last-message.has-unread`
+        // style (rgba(255,255,255,0.75) + font-weight 500) instead of always
+        // rendering at a flat, low-opacity 0.4 regardless of unread state.
         subtitle: Text(
           lastMessage,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
-            color: Colors.white.withOpacity(0.4),
+            color: unread > 0 ? Colors.white.withOpacity(0.8) : Colors.white.withOpacity(0.4),
             fontSize: 13,
+            fontWeight: unread > 0 ? FontWeight.w500 : FontWeight.normal,
           ),
         ),
         trailing: Column(
@@ -397,8 +409,9 @@ class _MainAppScreenState extends State<MainAppScreen>
               Text(
                 _formatTime(time),
                 style: TextStyle(
-                  color: Colors.white.withOpacity(0.3),
+                  color: unread > 0 ? const Color(0xFF8B5CF6) : Colors.white.withOpacity(0.3),
                   fontSize: 11,
+                  fontWeight: unread > 0 ? FontWeight.w600 : FontWeight.normal,
                 ),
               ),
             if (unread > 0) ...[
@@ -411,8 +424,11 @@ class _MainAppScreenState extends State<MainAppScreen>
                   ),
                   borderRadius: BorderRadius.circular(10),
                 ),
+                // FIX: cap the badge at "99+" like the website does
+                // (unread > 99 ? '99+' : unread), instead of printing
+                // arbitrarily large raw numbers.
                 child: Text(
-                  unread.toString(),
+                  unread > 99 ? '99+' : unread.toString(),
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 11,
@@ -844,7 +860,53 @@ class _MainAppScreenState extends State<MainAppScreen>
     );
   }
 
+  // FIX: this was hardcoded to `return 'Now';` unconditionally — it ignored
+  // the `time` argument entirely, which is why every previous fix to the
+  // timestamp logic elsewhere (chat_list_screen.dart, ChatProvider) never
+  // had any visible effect: this screen is the one actually wired to the
+  // Chats tab, and this function threw away whatever correct value it was
+  // given and always printed "Now". Replaced with real formatting that
+  // mirrors the logic already proven correct on the website (chats.html's
+  // formatTime/_formatChatListTime): today shows minutes-ago or a clock
+  // time, yesterday shows "Yesterday", this year shows "Mon D", older shows
+  // "Mon D, YYYY".
   String _formatTime(dynamic time) {
-    return 'Now';
+    if (time == null) return '';
+    DateTime? date;
+    if (time is DateTime) {
+      date = time;
+    } else {
+      // Firestore Timestamp has a toDate() method
+      try {
+        date = (time as dynamic).toDate() as DateTime;
+      } catch (_) {
+        return '';
+      }
+    }
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final messageDate = DateTime(date.year, date.month, date.day);
+    final diffDays = today.difference(messageDate).inDays;
+
+    if (diffDays == 0) {
+      final diffMinutes = now.difference(date).inMinutes;
+      if (diffMinutes < 1) return 'Now';
+      if (diffMinutes < 60) return '${diffMinutes}m';
+      final hour = date.hour.toString().padLeft(2, '0');
+      final minute = date.minute.toString().padLeft(2, '0');
+      return '$hour:$minute';
+    } else if (diffDays == 1) {
+      return 'Yesterday';
+    } else if (diffDays < 7) {
+      const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      return days[date.weekday - 1];
+    } else if (date.year == now.year) {
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      return '${months[date.month - 1]} ${date.day}';
+    } else {
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      return '${months[date.month - 1]} ${date.day}, ${date.year}';
+    }
   }
 }
