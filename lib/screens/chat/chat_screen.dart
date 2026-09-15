@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -18,6 +19,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:video_player/video_player.dart';
 import 'package:record/record.dart';
 import 'package:http/http.dart' as http;
+import 'package:geolocator/geolocator.dart';
 import '../../providers/auth_provider.dart' show AuraAuthProvider;
 import '../../providers/chat_provider.dart';
 import '../../services/cloudinary_service.dart';
@@ -119,6 +121,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
   final Map<String, Map<String, dynamic>> _userCache = {};
   final Set<String> _pendingUserFetches = {};
   final ValueNotifier<bool> _hasText = ValueNotifier(false);
+
+  // NEW: self-destruct timer (available in both direct and group chats,
+  // matching the website's chat.html and group_chat.html)
+  int _selfDestructSeconds = 0;
+
+  // NEW: slow mode (group only, matches group_chat.html)
+  int _slowModeSeconds = 0;
+  DateTime? _lastSentAt;
+
+  // NEW: group member tracking for mentions (group only)
+  List<String> _groupMemberIds = [];
+  String? _mentionQuery;
+  List<String> _mentionMatches = [];
+  bool _showMentionPicker = false;
 
 
   @override
@@ -226,6 +242,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     _typingTimer?.cancel();
     _statusTimer?.cancel();
     _recordingTimer?.cancel();
+    _liveLocationTimer?.cancel();
+    _liveLocationEndTimer?.cancel();
     for (final controller in _videoControllers.values) {
       controller.dispose();
     }
@@ -482,7 +500,39 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
             _canSend = !(_chatSettings?['chat_disabled'] == true && !isAdmin);
             _canSendFiles = !(_chatSettings?['file_sharing_disabled'] == true && !isAdmin);
             _isAnnouncementsOnly = _chatSettings?['announcements_only'] == true && !isAdmin;
+
+            // NEW: self-destruct timer (both direct & group) and slow mode
+            // (group only) — read straight off the chat document, matching
+            // the fields the website writes (self_destruct_seconds,
+            // slow_mode_seconds).
+            _selfDestructSeconds = (data['self_destruct_seconds'] ?? 0) as int;
+            _slowModeSeconds = _isGroup ? ((data['slow_mode_seconds'] ?? 0) as int) : 0;
+
+            // NEW: group member ids, needed for @mention autocomplete.
+            if (_isGroup) {
+              _groupMemberIds = List<String>.from(data['participants'] ?? []);
+            }
           });
+
+          // NEW: pre-fetch user data for all group members so mention
+          // suggestions have names/avatars ready immediately.
+          if (_isGroup && _groupMemberIds.isNotEmpty) {
+            for (final uid in _groupMemberIds) {
+              if (!_userCache.containsKey(uid)) {
+                final userDoc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+                if (userDoc.exists) {
+                  final u = userDoc.data()!;
+                  _userCache[uid] = {
+                    'username': u['username'] ?? u['display_name'] ?? 'Unknown',
+                    'avatar_url': u['avatar_url'],
+                    'bio': u['bio'],
+                    'email': u['email'],
+                    'is_verified': u['is_verified'] == true,
+                  };
+                }
+              }
+            }
+          }
         }
       }
     } catch (e) {
@@ -510,6 +560,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
           _canSend = !(_chatSettings?['chat_disabled'] == true && !isAdmin);
           _canSendFiles = !(_chatSettings?['file_sharing_disabled'] == true && !isAdmin);
           _isAnnouncementsOnly = _chatSettings?['announcements_only'] == true && !isAdmin;
+
+          // NEW: keep self-destruct/slow mode in sync live (e.g. an admin
+          // changes slow mode while you're already in the chat).
+          _selfDestructSeconds = (data['self_destruct_seconds'] ?? 0) as int;
+          _slowModeSeconds = _isGroup ? ((data['slow_mode_seconds'] ?? 0) as int) : 0;
+          if (_isGroup) {
+            _groupMemberIds = List<String>.from(data['participants'] ?? []);
+          }
         });
       }
     });
@@ -545,6 +603,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
       for (final doc in snapshot.docs) {
         final data = doc.data();
         if (data['deleted_for_everyone'] == true) continue;
+        // NEW: skip messages past their self-destruct expiry (mirrors the
+        // website's identical check in loadMessages/renderMessages).
+        final destructSecs = data['self_destruct_seconds'] as int?;
+        if (destructSecs != null && destructSecs > 0 && data['created_at'] != null) {
+          final createdAt = (data['created_at'] as Timestamp).toDate();
+          if (DateTime.now().difference(createdAt).inSeconds > destructSecs) continue;
+        }
         final senderId = data['sender_id'] as String?;
         if (senderId != null) userIds.add(senderId);
         loadedMessages.add({
@@ -637,6 +702,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
             final senderId = data['sender_id'] as String?;
 
             if (data['deleted_for_everyone'] == true) continue;
+
+            // NEW: same self-destruct expiry skip as _loadMessages() above.
+            final destructSecs = data['self_destruct_seconds'] as int?;
+            if (destructSecs != null && destructSecs > 0 && data['created_at'] != null) {
+              final createdAt = (data['created_at'] as Timestamp).toDate();
+              if (DateTime.now().difference(createdAt).inSeconds > destructSecs) continue;
+            }
 
             final deletedFor = List<String>.from(data['deleted_for'] ?? []);
             if (deletedFor.contains(currentUserId)) continue;
@@ -733,18 +805,26 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
     }
   }
 
+    // FIX: previously this checked `_scrollController.hasClients` immediately
+    // and returned early if false — but on the very first load, setState()
+    // finishes before the ListView has actually attached to the controller,
+    // so hasClients was false and the function bailed out before ever
+    // scheduling the delayed jumpTo. That meant the initial auto-scroll to
+    // the newest message silently never happened, leaving the chat open on
+    // the oldest messages until the user scrolled down manually.
+    // Wrapping the whole check in addPostFrameCallback guarantees it only
+    // runs after the current frame (including the ListView) has been built,
+    // so hasClients is reliably true by the time we check it.
     void _scrollToBottom({bool force = false}) {
-    if (!_scrollController.hasClients) return;
-    final maxScroll = _scrollController.position.maxScrollExtent;
-    final currentScroll = _scrollController.position.pixels;
-    if (force || (maxScroll - currentScroll) < 300) {
-      Future.delayed(const Duration(milliseconds: 50), () {
-        if (_scrollController.hasClients) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!_scrollController.hasClients) return;
+        final maxScroll = _scrollController.position.maxScrollExtent;
+        final currentScroll = _scrollController.position.pixels;
+        if (force || (maxScroll - currentScroll) < 300) {
           _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
         }
       });
     }
-  }
 
   List<TextSpan> _parseTextWithLinks(String text, bool isMe) {
   final urlRegex = RegExp(r'https?://[^\s]+');
@@ -839,6 +919,21 @@ Future<void> _openLink(String url) async {
       final userId = authProvider.user?.uid ?? authProvider.mockUserId;
       if (userId == null || _chatId == null) return;
 
+      // NEW: slow mode (group only) — placed here in the shared _sendMessage
+      // function so it covers text AND media/voice/etc sends, not just typed
+      // text messages.
+      if (_isGroup && _slowModeSeconds > 0 && _lastSentAt != null) {
+        final elapsed = DateTime.now().difference(_lastSentAt!).inSeconds;
+        if (elapsed < _slowModeSeconds) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Slow mode: wait ${_slowModeSeconds - elapsed}s before sending again')),
+            );
+          }
+          return;
+        }
+      }
+
       final messageId = const Uuid().v4();
 
       // Optimistic UI - shows immediately
@@ -857,6 +952,7 @@ Future<void> _openLink(String url) async {
         'reply_to_content': _replyingToContent,
         'reply_to_sender': _replyingToSender,
         'created_at': DateTime.now().toIso8601String(),
+        'self_destruct_seconds': _selfDestructSeconds > 0 ? _selfDestructSeconds : null,
         'is_read': false,
         'is_edited': false,
         'deleted_for_everyone': false,
@@ -895,6 +991,7 @@ Future<void> _openLink(String url) async {
         'reply_to_content': _replyingToContent,
         'reply_to_sender': _replyingToSender,
         'created_at': FieldValue.serverTimestamp(),
+        'self_destruct_seconds': _selfDestructSeconds > 0 ? _selfDestructSeconds : null,
         'is_read': false,
         'is_edited': false,
         'deleted_for_everyone': false,
@@ -911,6 +1008,19 @@ Future<void> _openLink(String url) async {
             'last_message_at': FieldValue.serverTimestamp(),
           }),
         ]);
+        // NEW: track last send time for slow mode, and schedule
+        // auto-delete if a self-destruct timer is set (mirrors the
+        // website's setTimeout-based approach).
+        _lastSentAt = DateTime.now();
+        if (_selfDestructSeconds > 0) {
+          Timer(Duration(seconds: _selfDestructSeconds), () {
+            firestore.collection('chats').doc(_chatId!).collection('messages').doc(messageId).update({
+              'deleted_for_everyone': true,
+              'content': 'This message was deleted',
+              'media_url': null,
+            }).catchError((_) {});
+          });
+        }
       } catch (e) {
         debugPrint('Firestore write error: $e');
         setState(() {
@@ -2310,6 +2420,621 @@ Future<void> _openLink(String url) async {
     return DateFormat('MMMM d, yyyy').format(date);
   }
 
+  // ==================== MENTIONS (group only) ====================
+
+  void _checkForMention(String value) {
+    final cursor = _messageController.selection.baseOffset;
+    if (cursor < 0) { setState(() => _showMentionPicker = false); return; }
+    final before = value.substring(0, cursor);
+    final match = RegExp(r'(^|\s)@([a-zA-Z0-9_]*)$').firstMatch(before);
+    if (match == null) {
+      setState(() => _showMentionPicker = false);
+      return;
+    }
+    final query = (match.group(2) ?? '').toLowerCase();
+    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+    final myId = authProvider.user?.uid ?? authProvider.mockUserId;
+    final matches = _groupMemberIds.where((uid) {
+      if (uid == myId) return false;
+      final u = _userCache[uid];
+      if (u == null) return false;
+      final name = ((u['username'] ?? u['display_name'] ?? '') as String).toLowerCase();
+      if (query.isEmpty) return true;
+      return name.contains(query);
+    }).take(20).toList();
+    setState(() {
+      _mentionQuery = query;
+      _mentionMatches = matches;
+      _showMentionPicker = true;
+    });
+  }
+
+  void _insertMention(String uid) {
+    final u = _userCache[uid];
+    final username = (u?['username'] ?? 'user') as String;
+    final value = _messageController.text;
+    final cursor = _messageController.selection.baseOffset;
+    final safeCursor = cursor >= 0 ? cursor : value.length;
+    final before = value.substring(0, safeCursor);
+    final after = value.substring(safeCursor);
+    final newBefore = before.replaceFirst(RegExp(r'(^|\s)@([a-zA-Z0-9_]*)$'), (m) => '${m.group(1)}@$username ');
+    _messageController.text = newBefore + after;
+    _messageController.selection = TextSelection.collapsed(offset: newBefore.length);
+    setState(() => _showMentionPicker = false);
+  }
+
+  // ==================== ADMIN LOG (group only) ====================
+
+  Future<void> _logAdminAction(String action, String details) async {
+    if (!_isGroup || _chatId == null) return;
+    try {
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+      final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+      final myName = authProvider.displayName ?? authProvider.userName ?? 'Someone';
+      await FirebaseFirestore.instance.collection('chats').doc(_chatId).collection('adminLog').add({
+        'action': action,
+        'details': details,
+        'actor_id': userId,
+        'actor_name': myName,
+        'timestamp': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      debugPrint('Admin log error: $e');
+    }
+  }
+
+  void _openAdminLog() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1a103c),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (context) => Container(
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.7),
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(2))),
+            const SizedBox(height: 16),
+            const Text('Admin Log', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 16)),
+            const SizedBox(height: 12),
+            Flexible(
+              child: FutureBuilder<QuerySnapshot>(
+                future: FirebaseFirestore.instance
+                    .collection('chats')
+                    .doc(_chatId)
+                    .collection('adminLog')
+                    .orderBy('timestamp', descending: true)
+                    .limit(100)
+                    .get(),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) {
+                    return const Padding(padding: EdgeInsets.all(20), child: Center(child: CircularProgressIndicator(color: Color(0xFF8B5CF6))));
+                  }
+                  final docs = snapshot.data!.docs;
+                  if (docs.isEmpty) {
+                    return Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Text('No admin actions yet', style: TextStyle(color: Colors.white.withOpacity(0.3))),
+                    );
+                  }
+                  return ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: docs.length,
+                    itemBuilder: (context, i) {
+                      final d = docs[i].data() as Map<String, dynamic>;
+                      final ts = d['timestamp'] as Timestamp?;
+                      final timeStr = ts != null ? DateFormat('MMM d, HH:mm').format(ts.toDate()) : '';
+                      return ListTile(
+                        dense: true,
+                        leading: const Icon(Icons.info_outline, color: Color(0xFF8B5CF6), size: 20),
+                        title: Text('${d['actor_name'] ?? 'Someone'} ${d['details'] ?? d['action'] ?? ''}', style: const TextStyle(color: Colors.white, fontSize: 13)),
+                        subtitle: Text(timeStr, style: TextStyle(color: Colors.white.withOpacity(0.35), fontSize: 11)),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ==================== SLOW MODE (group only) ====================
+
+  void _openSlowModeDialog() {
+    int selected = _slowModeSeconds;
+    const options = [0, 10, 30, 60, 300, 900];
+    const labels = ['Off', '10 sec', '30 sec', '1 min', '5 min', '15 min'];
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: const Color(0xFF1a103c),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('Slow Mode', style: TextStyle(color: Colors.white)),
+          content: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: List.generate(options.length, (i) {
+              final isSelected = selected == options[i];
+              return ChoiceChip(
+                label: Text(labels[i]),
+                selected: isSelected,
+                selectedColor: const Color(0xFF8B5CF6),
+                backgroundColor: Colors.white.withOpacity(0.05),
+                labelStyle: TextStyle(color: isSelected ? Colors.white : Colors.white70),
+                onSelected: (_) => setDialogState(() => selected = options[i]),
+              );
+            }),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: Text('Cancel', style: TextStyle(color: Colors.white.withOpacity(0.5)))),
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(context);
+                try {
+                  await FirebaseFirestore.instance.collection('chats').doc(_chatId).update({'slow_mode_seconds': selected});
+                  setState(() => _slowModeSeconds = selected);
+                  _logAdminAction('slow_mode', selected > 0 ? 'enabled slow mode (${selected}s)' : 'disabled slow mode');
+                } catch (e) {
+                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to update slow mode')));
+                }
+              },
+              child: const Text('Save', style: TextStyle(color: Color(0xFF8B5CF6))),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ==================== SELF-DESTRUCT TIMER (direct & group) ====================
+
+  void _openSelfDestructDialog() {
+    int selected = _selfDestructSeconds;
+    const options = [0, 30, 60, 300, 3600, 86400];
+    const labels = ['Off', '30 sec', '1 min', '5 min', '1 hour', '24 hours'];
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: const Color(0xFF1a103c),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('Self-Destruct Timer', style: TextStyle(color: Colors.white)),
+          content: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: List.generate(options.length, (i) {
+              final isSelected = selected == options[i];
+              return ChoiceChip(
+                label: Text(labels[i]),
+                selected: isSelected,
+                selectedColor: const Color(0xFF8B5CF6),
+                backgroundColor: Colors.white.withOpacity(0.05),
+                labelStyle: TextStyle(color: isSelected ? Colors.white : Colors.white70),
+                onSelected: (_) => setDialogState(() => selected = options[i]),
+              );
+            }),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: Text('Cancel', style: TextStyle(color: Colors.white.withOpacity(0.5)))),
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(context);
+                try {
+                  await FirebaseFirestore.instance.collection('chats').doc(_chatId).update({'self_destruct_seconds': selected});
+                  setState(() => _selfDestructSeconds = selected);
+                  if (_isGroup) _logAdminAction('self_destruct', selected > 0 ? 'set self-destruct to ${selected}s' : 'disabled self-destruct');
+                } catch (e) {
+                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to update self-destruct')));
+                }
+              },
+              child: const Text('Save', style: TextStyle(color: Color(0xFF8B5CF6))),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ==================== MORE OPTIONS MENU ====================
+
+  void _showMoreOptionsMenu() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1a103c),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(2))),
+            const SizedBox(height: 16),
+            ListTile(
+              leading: const Icon(Icons.bomb_outlined, color: Colors.red),
+              title: const Text('Self-Destruct Timer', style: TextStyle(color: Colors.white)),
+              subtitle: Text(_selfDestructSeconds > 0 ? 'On — ${_selfDestructSeconds}s' : 'Off', style: TextStyle(color: Colors.white.withOpacity(0.4))),
+              onTap: () { Navigator.pop(context); _openSelfDestructDialog(); },
+            ),
+            if (_isGroup) ...[
+              ListTile(
+                leading: const Icon(Icons.timer_outlined, color: Colors.orange),
+                title: const Text('Slow Mode', style: TextStyle(color: Colors.white)),
+                subtitle: Text(_slowModeSeconds > 0 ? '${_slowModeSeconds}s between messages' : 'Off', style: TextStyle(color: Colors.white.withOpacity(0.4))),
+                onTap: () { Navigator.pop(context); _openSlowModeDialog(); },
+              ),
+              ListTile(
+                leading: const Icon(Icons.history, color: Color(0xFF06B6D4)),
+                title: const Text('Admin Log', style: TextStyle(color: Colors.white)),
+                onTap: () { Navigator.pop(context); _openAdminLog(); },
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ==================== POLLS (group only) ====================
+
+  void _openPollDialog() {
+    final questionController = TextEditingController();
+    final optionControllers = <TextEditingController>[TextEditingController(), TextEditingController()];
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: const Color(0xFF1a103c),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('Create Poll', style: TextStyle(color: Colors.white)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: questionController,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(hintText: 'Ask a question...', hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)), filled: true, fillColor: Colors.white.withOpacity(0.05), border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none)),
+                ),
+                const SizedBox(height: 12),
+                ...optionControllers.asMap().entries.map((entry) {
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: TextField(
+                      controller: entry.value,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: InputDecoration(hintText: 'Option ${entry.key + 1}', hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)), filled: true, fillColor: Colors.white.withOpacity(0.05), border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none)),
+                    ),
+                  );
+                }),
+                if (optionControllers.length < 10)
+                  TextButton(
+                    onPressed: () => setDialogState(() => optionControllers.add(TextEditingController())),
+                    child: const Text('+ Add option', style: TextStyle(color: Color(0xFF8B5CF6))),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: Text('Cancel', style: TextStyle(color: Colors.white.withOpacity(0.5)))),
+            TextButton(
+              onPressed: () async {
+                final question = questionController.text.trim();
+                final options = optionControllers.map((c) => c.text.trim()).where((v) => v.isNotEmpty).toList();
+                if (question.isEmpty || options.length < 2) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter a question and at least 2 options')));
+                  return;
+                }
+                Navigator.pop(context);
+                await _sendPoll(question, options);
+              },
+              child: const Text('Create', style: TextStyle(color: Color(0xFF8B5CF6))),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _sendPoll(String question, List<String> options) async {
+    try {
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+      final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+      if (userId == null || _chatId == null) return;
+      final msgRef = FirebaseFirestore.instance.collection('chats').doc(_chatId).collection('messages').doc();
+      await msgRef.set({
+        'id': msgRef.id,
+        'sender_id': userId,
+        'type': 'poll',
+        'media_type': 'poll',
+        'poll': {'question': question, 'options': options, 'votes': {}},
+        'created_at': FieldValue.serverTimestamp(),
+        'is_read': false, 'is_edited': false, 'deleted_for_everyone': false, 'deleted_for': [], 'reactions': {},
+      });
+      await FirebaseFirestore.instance.collection('chats').doc(_chatId).update({
+        'last_message': '📊 Poll', 'last_message_at': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to create poll: $e')));
+    }
+  }
+
+  Future<void> _votePoll(String msgId, int optionIndex) async {
+    try {
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+      final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+      if (userId == null || _chatId == null) return;
+      final msgRef = FirebaseFirestore.instance.collection('chats').doc(_chatId).collection('messages').doc(msgId);
+      final doc = await msgRef.get();
+      if (!doc.exists) return;
+      final poll = Map<String, dynamic>.from(doc.data()?['poll'] ?? {});
+      final votes = Map<String, dynamic>.from(poll['votes'] ?? {});
+      if (votes[userId] == optionIndex) {
+        votes.remove(userId);
+      } else {
+        votes[userId] = optionIndex;
+      }
+      poll['votes'] = votes;
+      await msgRef.update({'poll': poll});
+    } catch (e) {
+      debugPrint('Vote poll error: $e');
+    }
+  }
+
+  // ==================== LOCATION SHARING (group only) ====================
+
+  Future<void> _shareLocation() async {
+    Navigator.pop(context); // close attachment sheet
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enable location services')));
+        return;
+      }
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) return;
+      }
+      if (permission == LocationPermission.deniedForever) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Location permission permanently denied')));
+        return;
+      }
+
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Getting location...')));
+      final pos = await Geolocator.getCurrentPosition();
+      String label = 'Shared location';
+      try {
+        final res = await http.get(Uri.parse('https://nominatim.openstreetmap.org/reverse?format=json&lat=${pos.latitude}&lon=${pos.longitude}&zoom=14'));
+        if (res.statusCode == 200) {
+          final data = jsonDecode(res.body);
+          if (data['display_name'] != null) {
+            label = (data['display_name'] as String).split(',').take(3).join(', ');
+          }
+        }
+      } catch (_) {}
+
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+      final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+      if (userId == null || _chatId == null) return;
+      final msgRef = FirebaseFirestore.instance.collection('chats').doc(_chatId).collection('messages').doc();
+      await msgRef.set({
+        'id': msgRef.id,
+        'sender_id': userId,
+        'type': 'location',
+        'media_type': 'location',
+        'location_lat': pos.latitude,
+        'location_lng': pos.longitude,
+        'location_label': label,
+        'created_at': FieldValue.serverTimestamp(),
+        'is_read': false, 'is_edited': false, 'deleted_for_everyone': false, 'deleted_for': [], 'reactions': {},
+      });
+      await FirebaseFirestore.instance.collection('chats').doc(_chatId).update({
+        'last_message': '📍 Location', 'last_message_at': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to share location: $e')));
+    }
+  }
+
+  // NEW: live location — periodically updates the same message doc with a
+  // fresh position for 15 minutes, then marks it ended. Uses a repeating
+  // Timer + getCurrentPosition rather than a raw position stream, to keep
+  // resource cleanup simple and predictable.
+  Timer? _liveLocationTimer;
+  Timer? _liveLocationEndTimer;
+
+  Future<void> _startLiveLocation() async {
+    Navigator.pop(context);
+    if (_liveLocationTimer != null) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Already sharing live location')));
+      return;
+    }
+    try {
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) return;
+      }
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+      final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+      if (userId == null || _chatId == null) return;
+
+      final pos = await Geolocator.getCurrentPosition();
+      final msgRef = FirebaseFirestore.instance.collection('chats').doc(_chatId).collection('messages').doc();
+      await msgRef.set({
+        'id': msgRef.id,
+        'sender_id': userId,
+        'type': 'location',
+        'media_type': 'location',
+        'location_live': true,
+        'location_lat': pos.latitude,
+        'location_lng': pos.longitude,
+        'location_label': 'Live location',
+        'created_at': FieldValue.serverTimestamp(),
+        'is_read': false, 'is_edited': false, 'deleted_for_everyone': false, 'deleted_for': [], 'reactions': {},
+      });
+      await FirebaseFirestore.instance.collection('chats').doc(_chatId).update({
+        'last_message': '📍 Live location', 'last_message_at': FieldValue.serverTimestamp(),
+      });
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Live location started (15 min)')));
+
+      _liveLocationTimer = Timer.periodic(const Duration(seconds: 8), (_) async {
+        try {
+          final p = await Geolocator.getCurrentPosition();
+          await FirebaseFirestore.instance.collection('chats').doc(_chatId).collection('messages').doc(msgRef.id).update({
+            'location_lat': p.latitude,
+            'location_lng': p.longitude,
+          });
+        } catch (_) {}
+      });
+      _liveLocationEndTimer = Timer(const Duration(minutes: 15), () => _stopLiveLocation(msgRef.id));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to start live location: $e')));
+    }
+  }
+
+  Future<void> _stopLiveLocation(String msgId) async {
+    _liveLocationTimer?.cancel();
+    _liveLocationTimer = null;
+    _liveLocationEndTimer?.cancel();
+    _liveLocationEndTimer = null;
+    try {
+      await FirebaseFirestore.instance.collection('chats').doc(_chatId).collection('messages').doc(msgId).update({
+        'location_live': false,
+        'location_label': 'Live location ended',
+      });
+    } catch (_) {}
+  }
+
+  void _openLocationMap(double lat, double lng) async {
+    final uri = Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lng');
+    if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  // ==================== CONTACT SHARING (group only) ====================
+
+  Future<void> _openShareContactSheet() async {
+    Navigator.pop(context); // close attachment sheet
+    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+    final myId = authProvider.user?.uid ?? authProvider.mockUserId;
+    if (myId == null) return;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1a103c),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (context) => FutureBuilder<QuerySnapshot>(
+        future: FirebaseFirestore.instance.collection('chats').where('participants', arrayContains: myId).get(),
+        builder: (context, snapshot) {
+          return Container(
+            constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.6),
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(2))),
+                const SizedBox(height: 16),
+                const Text('Share a Contact', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 16)),
+                const SizedBox(height: 12),
+                Flexible(
+                  child: !snapshot.hasData
+                    ? const Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator(color: Color(0xFF8B5CF6)))
+                    : FutureBuilder<List<Map<String, dynamic>>>(
+                        future: _collectDirectContacts(snapshot.data!.docs, myId),
+                        builder: (context, contactSnap) {
+                          if (!contactSnap.hasData) return const Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator(color: Color(0xFF8B5CF6)));
+                          final contacts = contactSnap.data!;
+                          if (contacts.isEmpty) return Padding(padding: const EdgeInsets.all(20), child: Text('No contacts found', style: TextStyle(color: Colors.white.withOpacity(0.3))));
+                          return ListView.builder(
+                            shrinkWrap: true,
+                            itemCount: contacts.length,
+                            itemBuilder: (context, i) {
+                              final c = contacts[i];
+                              final name = (c['display_name'] ?? c['username'] ?? 'User') as String;
+                              final avatarUrl = c['avatar_url'] as String?;
+                              return ListTile(
+                                leading: CircleAvatar(
+                                  backgroundColor: const Color(0xFF8B5CF6).withOpacity(0.3),
+                                  backgroundImage: avatarUrl != null ? NetworkImage(avatarUrl) : null,
+                                  child: avatarUrl == null ? Text(name[0].toUpperCase(), style: const TextStyle(color: Colors.white)) : null,
+                                ),
+                                title: Text(name, style: const TextStyle(color: Colors.white)),
+                                onTap: () { Navigator.pop(context); _shareContact(c); },
+                              );
+                            },
+                          );
+                        },
+                      ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> _collectDirectContacts(List<QueryDocumentSnapshot> chatDocs, String myId) async {
+    final contacts = <Map<String, dynamic>>[];
+    for (final doc in chatDocs) {
+      final c = doc.data() as Map<String, dynamic>;
+      if ((c['type'] ?? 'direct') != 'direct') continue;
+      final participants = List<String>.from(c['participants'] ?? []);
+      final otherId = participants.firstWhere((id) => id != myId, orElse: () => '');
+      if (otherId.isEmpty) continue;
+      if (_userCache.containsKey(otherId)) {
+        contacts.add({'uid': otherId, ..._userCache[otherId]!});
+        continue;
+      }
+      final userDoc = await FirebaseFirestore.instance.collection('users').doc(otherId).get();
+      if (userDoc.exists) {
+        final u = userDoc.data()!;
+        final entry = {
+          'uid': otherId,
+          'username': u['username'] ?? 'Unknown',
+          'display_name': u['display_name'] ?? u['username'] ?? 'Unknown',
+          'avatar_url': u['avatar_url'],
+        };
+        _userCache[otherId] = entry;
+        contacts.add(entry);
+      }
+    }
+    return contacts;
+  }
+
+  Future<void> _shareContact(Map<String, dynamic> contact) async {
+    try {
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+      final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+      if (userId == null || _chatId == null) return;
+      final msgRef = FirebaseFirestore.instance.collection('chats').doc(_chatId).collection('messages').doc();
+      await msgRef.set({
+        'id': msgRef.id,
+        'sender_id': userId,
+        'type': 'contact',
+        'media_type': 'contact',
+        'contact': {
+          'uid': contact['uid'],
+          'username': contact['username'],
+          'display_name': contact['display_name'] ?? contact['username'],
+          'avatar_url': contact['avatar_url'],
+        },
+        'created_at': FieldValue.serverTimestamp(),
+        'is_read': false, 'is_edited': false, 'deleted_for_everyone': false, 'deleted_for': [], 'reactions': {},
+      });
+      await FirebaseFirestore.instance.collection('chats').doc(_chatId).update({
+        'last_message': '👤 Contact', 'last_message_at': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to share contact: $e')));
+    }
+  }
+
   // ==================== BUILD ====================
 
   @override
@@ -2432,6 +3157,14 @@ Future<void> _openLink(String url) async {
                         ),
                       ),
                     ),
+                  ),
+                // NEW: self-destruct timer (both) / slow mode + admin log
+                // (group only) live here, kept as an additive icon so
+                // nothing already in the AppBar is disturbed.
+                if (_chatId != null)
+                  IconButton(
+                    icon: const Icon(Icons.more_vert, color: Colors.white70),
+                    onPressed: _showMoreOptionsMenu,
                   ),
               ],
             ),
@@ -2628,43 +3361,22 @@ Future<void> _openLink(String url) async {
               ),
             ),
 
-          if (!_isGroup && !_isBlocked && _otherUserTyping)
+          // NEW: slow mode banner (group only), matching the website's
+          // .slow-mode-banner.
+          if (_isGroup && _slowModeSeconds > 0)
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.only(left: 16, top: 8),
-              alignment: Alignment.centerLeft,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.05),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SizedBox(
-                      width: 32,
-                      height: 20,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          _buildDot(0),
-                          _buildDot(1),
-                          _buildDot(2),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      'typing',
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.5),
-                        fontSize: 12,
-                        fontStyle: FontStyle.italic,
-                      ),
-                    ),
-                  ],
-                ),
+              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 16),
+              color: const Color(0xFFFBBF24).withOpacity(0.1),
+              child: Row(
+                children: [
+                  const Icon(Icons.timer_outlined, size: 14, color: Color(0xFFFBBF24)),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Slow mode — wait ${_slowModeSeconds}s between messages',
+                    style: const TextStyle(color: Color(0xFFFBBF24), fontSize: 11),
+                  ),
+                ],
               ),
             ),
 
@@ -2729,6 +3441,52 @@ Future<void> _openLink(String url) async {
                   ),
           ),
 
+          // FIX: typing indicator moved here, below the message list and
+          // above the reply bar/input — it was previously placed ABOVE the
+          // Expanded(ListView) block, which put it at the top of the screen
+          // instead of near the newest message like WhatsApp/Telegram show
+          // it. Moving the same widget after the list (not duplicating it)
+          // fixes the position without changing its look.
+          if (!_isGroup && !_isBlocked && _otherUserTyping)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.only(left: 16, top: 8, bottom: 4),
+              alignment: Alignment.centerLeft,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: 32,
+                      height: 20,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          _buildDot(0),
+                          _buildDot(1),
+                          _buildDot(2),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'typing',
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.5),
+                        fontSize: 12,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
           if (_replyingTo != null)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -2792,6 +3550,44 @@ Future<void> _openLink(String url) async {
     onClose: () => setState(() => _showEmojiPicker = false),
   ),
 
+          // NEW: @mention picker (group only) — shows above the input when
+          // the user types "@" followed by letters, matching the website's
+          // mention-picker behavior in group_chat.html.
+          if (_isGroup && _showMentionPicker)
+            Container(
+              constraints: const BoxConstraints(maxHeight: 200),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1a103c),
+                border: Border(top: BorderSide(color: Colors.white.withOpacity(0.08))),
+              ),
+              child: _mentionMatches.isEmpty
+                ? Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text('No members found', style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 12)),
+                  )
+                : ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: _mentionMatches.length,
+                    itemBuilder: (context, i) {
+                      final uid = _mentionMatches[i];
+                      final u = _userCache[uid];
+                      final name = (u?['username'] ?? u?['display_name'] ?? 'User') as String;
+                      final avatarUrl = u?['avatar_url'] as String?;
+                      return ListTile(
+                        dense: true,
+                        leading: CircleAvatar(
+                          radius: 16,
+                          backgroundColor: const Color(0xFF8B5CF6).withOpacity(0.3),
+                          backgroundImage: avatarUrl != null ? NetworkImage(avatarUrl) : null,
+                          child: avatarUrl == null ? Text(name[0].toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 12)) : null,
+                        ),
+                        title: Text(name, style: const TextStyle(color: Colors.white, fontSize: 13)),
+                        onTap: () => _insertMention(uid),
+                      );
+                    },
+                  ),
+            ),
+
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
@@ -2838,7 +3634,10 @@ Future<void> _openLink(String url) async {
                         ),
                         maxLines: null,
                         textInputAction: TextInputAction.send,
-                        onChanged: (_) => _startTyping(),
+                        onChanged: (val) {
+                          _startTyping();
+                          if (_isGroup) _checkForMention(val);
+                        },
                         onSubmitted: (_) => _sendTextMessage(),
                         onTap: () { if (_showEmojiPicker) setState(() => _showEmojiPicker = false); },
                         enabled: _canSend && !_isAnnouncementsOnly && !(_isBlocked && !_isGroup),
@@ -3201,6 +4000,17 @@ Future<void> _openLink(String url) async {
                               fileSize: message['file_size'], 
                               isMe: isMe,
                             )
+                          // NEW: location, contact, and poll bubbles (group
+                          // only in practice since only the group attachment
+                          // sheet can create them, but rendered generically
+                          // here in case a message is forwarded into a
+                          // direct chat).
+                          else if (type == 'location')
+                            _buildLocationBubble(message: message, isMe: isMe)
+                          else if (type == 'contact')
+                            _buildContactBubble(message: message, isMe: isMe)
+                          else if (type == 'poll')
+                            _buildPollBubble(message: message)
                           else if (type == 'link_preview' && mediaUrl != null)
                             _buildLinkPreviewBubble(
                               link: content,
@@ -3603,6 +4413,196 @@ Future<void> _openLink(String url) async {
   );
 }
 
+  // NEW: location bubble — tap to open in Google Maps.
+  Widget _buildLocationBubble({required Map<String, dynamic> message, required bool isMe}) {
+    final lat = (message['location_lat'] ?? 0).toDouble();
+    final lng = (message['location_lng'] ?? 0).toDouble();
+    final label = message['location_label'] ?? 'Shared location';
+    final isLive = message['location_live'] == true;
+    return GestureDetector(
+      onTap: () => _openLocationMap(lat, lng),
+      child: Container(
+        width: 220,
+        decoration: BoxDecoration(
+          color: isLive ? Colors.red.withOpacity(0.08) : const Color(0xFF8B5CF6).withOpacity(0.08),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: isLive ? Colors.red.withOpacity(0.3) : const Color(0xFF8B5CF6).withOpacity(0.2)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Stack(
+              children: [
+                Container(
+                  height: 100,
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: isLive
+                          ? [Colors.red.withOpacity(0.25), Colors.orange.withOpacity(0.15)]
+                          : [const Color(0xFF06B6D4).withOpacity(0.25), const Color(0xFF8B5CF6).withOpacity(0.25)],
+                    ),
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
+                  ),
+                  child: Icon(Icons.location_on, color: isLive ? Colors.red : const Color(0xFF8B5CF6), size: 36),
+                  alignment: Alignment.center,
+                ),
+                if (isLive)
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                      decoration: BoxDecoration(color: Colors.red.withOpacity(0.9), borderRadius: BorderRadius.circular(6)),
+                      child: const Text('LIVE', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+              ],
+            ),
+            Padding(
+              padding: const EdgeInsets.all(10),
+              child: Row(
+                children: [
+                  Icon(Icons.place, size: 14, color: isLive ? Colors.red : const Color(0xFF8B5CF6)),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // NEW: shared-contact bubble — tap to view their public profile.
+  Widget _buildContactBubble({required Map<String, dynamic> message, required bool isMe}) {
+    final contact = Map<String, dynamic>.from(message['contact'] ?? {});
+    final name = (contact['display_name'] ?? contact['username'] ?? 'Contact') as String;
+    final username = (contact['username'] ?? 'user') as String;
+    final avatarUrl = contact['avatar_url'] as String?;
+    final uid = contact['uid'] as String?;
+    return GestureDetector(
+      onTap: uid != null
+          ? () => Navigator.pushNamed(context, '/public_profile', arguments: {'userId': uid, 'username': username, 'avatar_url': avatarUrl})
+          : null,
+      child: Container(
+        width: 220,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: const Color(0xFF8B5CF6).withOpacity(0.08),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFF8B5CF6).withOpacity(0.2)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44, height: 44,
+              decoration: const BoxDecoration(shape: BoxShape.circle, gradient: LinearGradient(colors: [Color(0xFF8B5CF6), Color(0xFF06B6D4)])),
+              child: avatarUrl != null
+                  ? ClipOval(child: CachedNetworkImage(imageUrl: avatarUrl, fit: BoxFit.cover))
+                  : Center(child: Text(name.isNotEmpty ? name[0].toUpperCase() : 'U', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(name, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
+                  Text('@$username', style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 11)),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right, color: Colors.white.withOpacity(0.3), size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // NEW: poll bubble — tap an option to vote/change vote.
+  Widget _buildPollBubble({required Map<String, dynamic> message}) {
+    final poll = Map<String, dynamic>.from(message['poll'] ?? {});
+    final question = (poll['question'] ?? 'Poll') as String;
+    final options = List<String>.from(poll['options'] ?? []);
+    final votes = Map<String, dynamic>.from(poll['votes'] ?? {});
+    final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+    final myId = authProvider.user?.uid ?? authProvider.mockUserId;
+    final totalVotes = votes.length;
+
+    return Container(
+      width: 240,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF06B6D4).withOpacity(0.06),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFF06B6D4).withOpacity(0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(question, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 10),
+          ...options.asMap().entries.map((entry) {
+            final i = entry.key;
+            final optText = entry.value;
+            final count = votes.values.where((v) => v == i).length;
+            final myVote = votes[myId] == i;
+            final pct = totalVotes > 0 ? count / totalVotes : 0.0;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: GestureDetector(
+                onTap: () => _votePoll(message['id'], i),
+                child: Stack(
+                  children: [
+                    Container(
+                      height: 36,
+                      decoration: BoxDecoration(color: Colors.white.withOpacity(0.04), borderRadius: BorderRadius.circular(8)),
+                    ),
+                    FractionallySizedBox(
+                      widthFactor: pct.clamp(0.0, 1.0),
+                      child: Container(
+                        height: 36,
+                        decoration: BoxDecoration(color: const Color(0xFF8B5CF6).withOpacity(0.25), borderRadius: BorderRadius.circular(8)),
+                      ),
+                    ),
+                    Positioned.fill(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 16, height: 16,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: myVote ? const Color(0xFF8B5CF6) : Colors.transparent,
+                                border: Border.all(color: const Color(0xFF8B5CF6).withOpacity(0.6), width: 2),
+                              ),
+                              child: myVote ? const Icon(Icons.check, size: 10, color: Colors.white) : null,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(child: Text(optText, style: const TextStyle(color: Colors.white, fontSize: 12), overflow: TextOverflow.ellipsis)),
+                            if (count > 0) Text('$count', style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 11, fontWeight: FontWeight.w600)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }),
+          const SizedBox(height: 4),
+          Text('$totalVotes vote${totalVotes != 1 ? 's' : ''}', style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 10), textAlign: TextAlign.right),
+        ],
+      ),
+    );
+  }
+
   Widget _buildFileMessage({required String content, required String? mediaUrl, required String? fileName, required String? fileSize, required bool isMe}) {
     return GestureDetector(
       onTap: mediaUrl != null ? () => _openFile(mediaUrl, fileName) : null,
@@ -3716,6 +4716,16 @@ Future<void> _openLink(String url) async {
                 _buildAttachmentButton(icon: Icons.videocam, label: 'Video', color: Colors.purple, onTap: () { Navigator.pop(context); _pickVideoFromGallery(); }),
                 _buildAttachmentButton(icon: Icons.videocam_off, label: 'Record', color: Colors.pink, onTap: () { Navigator.pop(context); _recordVideo(); }),
                 _buildAttachmentButton(icon: Icons.insert_drive_file, label: 'Document', color: Colors.blue, onTap: () { Navigator.pop(context); _pickFile(); }),
+                // NEW: group-only extras, matching the website's
+                // group_chat.html attachment sheet (the direct-chat sheet on
+                // the website has none of these, so they're kept out of
+                // direct chats here too for parity).
+                if (_isGroup) ...[
+                  _buildAttachmentButton(icon: Icons.poll, label: 'Poll', color: const Color(0xFF06B6D4), onTap: () { Navigator.pop(context); _openPollDialog(); }),
+                  _buildAttachmentButton(icon: Icons.location_on, label: 'Location', color: const Color(0xFF10B981), onTap: _shareLocation),
+                  _buildAttachmentButton(icon: Icons.satellite_alt, label: 'Live Loc', color: Colors.red, onTap: _startLiveLocation),
+                  _buildAttachmentButton(icon: Icons.contact_page, label: 'Contact', color: Colors.amber, onTap: _openShareContactSheet),
+                ],
               ],
             ),
           ],
