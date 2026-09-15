@@ -782,14 +782,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
   Future<void> _loadPinnedMessages() async {
     if (_chatId == null) return;
     try {
+      final authProvider = Provider.of<AuraAuthProvider>(context, listen: false);
+      final userId = authProvider.user?.uid ?? authProvider.mockUserId;
+
       final snapshot = await FirebaseFirestore.instance
           .collection('chats')
           .doc(_chatId)
           .collection('pinned_messages')
           .orderBy('pinned_at', descending: true)
-          .limit(3)
+          .limit(10)
           .get();
 
+      // NEW: filter by per-user visibility. A pin is visible to the current
+      // user unless: (a) they've unpinned it for themselves (hidden_for), or
+      // (b) it was pinned with scope 'only_me' by someone else.
       final pinned = snapshot.docs.map((doc) {
         final data = doc.data();
         return {
@@ -797,9 +803,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver, Ti
           ...data,
           'message_id': data['message_id'],
         };
-      }).toList();
+      }).where((p) {
+        final hiddenFor = List<String>.from(p['hidden_for'] ?? []);
+        if (hiddenFor.contains(userId)) return false;
+        final scope = p['scope'] ?? 'both';
+        if (scope == 'only_me' && p['pinned_by'] != userId) return false;
+        return true;
+      }).take(3).toList();
 
-      setState(() => _pinnedMessages = pinned);
+      // FIX: _showPinned was declared `false` and nothing in the file ever
+      // set it back to true — so the pinned banner's visibility condition
+      // (_pinnedMessages.isNotEmpty && _showPinned) could never pass, even
+      // right after successfully pinning a message. Deriving it here from
+      // whether any pins are actually visible fixes that.
+      setState(() {
+        _pinnedMessages = pinned;
+        _showPinned = pinned.isNotEmpty;
+      });
     } catch (e) {
       debugPrint('Load pinned error: $e');
     }
@@ -1517,8 +1537,39 @@ Future<void> _openLink(String url) async {
     );
   }
 
-  Future<void> _pinMessage(String messageId) async {
+  // NEW: private chats ask whether to pin for just yourself or for both
+  // participants (matches Telegram); groups always pin for everyone since
+  // "just me" doesn't make sense with 3+ members.
+  void _openPinScopeDialog(String messageId) {
+    if (_isGroup) {
+      _pinMessage(messageId, scope: 'both');
+      return;
+    }
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1a103c),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Pin Message', style: TextStyle(color: Colors.white)),
+        content: Text('Pin this message for just you, or for both of you?', style: TextStyle(color: Colors.white.withOpacity(0.6))),
+        actions: [
+          TextButton(
+            onPressed: () { Navigator.pop(context); _pinMessage(messageId, scope: 'only_me'); },
+            child: const Text('Pin for me', style: TextStyle(color: Colors.white70)),
+          ),
+          TextButton(
+            onPressed: () { Navigator.pop(context); _pinMessage(messageId, scope: 'both'); },
+            child: const Text('Pin for both', style: TextStyle(color: Color(0xFF8B5CF6))),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _pinMessage(String messageId, {required String scope}) async {
     try {
+      final userId = Provider.of<AuraAuthProvider>(context, listen: false).user?.uid ??
+          Provider.of<AuraAuthProvider>(context, listen: false).mockUserId;
       await FirebaseFirestore.instance
           .collection('chats')
           .doc(_chatId)
@@ -1527,9 +1578,11 @@ Future<void> _openLink(String url) async {
           .set({
         'message_id': messageId,
         'pinned_at': FieldValue.serverTimestamp(),
-        'pinned_by': Provider.of<AuraAuthProvider>(context, listen: false).user?.uid,
+        'pinned_by': userId,
+        'scope': scope, // 'both' or 'only_me'
+        'hidden_for': [],
       });
-      _loadPinnedMessages();
+      await _loadPinnedMessages();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Message pinned')),
@@ -1540,15 +1593,31 @@ Future<void> _openLink(String url) async {
     }
   }
 
+  // FIX: unpinning used to always fully delete the shared pinned_messages
+  // doc, which would unpin it for the OTHER participant too — that's wrong
+  // for a "both" pin, where each person should be able to unpin just their
+  // own view (matches Telegram). Now: if it's your own "only_me" pin, delete
+  // it outright (nobody else could see it anyway); otherwise just add
+  // yourself to hidden_for so the other participant still sees it pinned.
   Future<void> _unpinMessage(String messageId) async {
     try {
-      await FirebaseFirestore.instance
+      final userId = Provider.of<AuraAuthProvider>(context, listen: false).user?.uid ??
+          Provider.of<AuraAuthProvider>(context, listen: false).mockUserId;
+      final ref = FirebaseFirestore.instance
           .collection('chats')
           .doc(_chatId)
           .collection('pinned_messages')
-          .doc(messageId)
-          .delete();
-      _loadPinnedMessages();
+          .doc(messageId);
+      final doc = await ref.get();
+      if (!doc.exists) { await _loadPinnedMessages(); return; }
+      final data = doc.data()!;
+      final scope = data['scope'] ?? 'both';
+      if (scope == 'only_me' && data['pinned_by'] == userId) {
+        await ref.delete();
+      } else {
+        await ref.update({'hidden_for': FieldValue.arrayUnion([userId])});
+      }
+      await _loadPinnedMessages();
     } catch (e) {
       debugPrint('Unpin error: $e');
     }
@@ -1826,7 +1895,7 @@ Future<void> _openLink(String url) async {
                 title: const Text('Pin', style: TextStyle(color: Colors.white)),
                 onTap: () {
                   Navigator.pop(context);
-                  _pinMessage(message['id']);
+                  _openPinScopeDialog(message['id']);
                 },
               ),
             ],
@@ -3214,14 +3283,27 @@ Future<void> _openLink(String url) async {
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(color: Colors.white.withOpacity(0.06)),
                         ),
-                        child: Text(
-                          message['content']?.toString() ?? 'Media',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: Colors.white.withOpacity(0.7),
-                            fontSize: 12,
-                          ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                message['content']?.toString() ?? 'Media',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.7),
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                            // NEW: per-message unpin (cancel) button —
+                            // unpins just for you if it was shared for both,
+                            // matching the Telegram behavior described.
+                            GestureDetector(
+                              onTap: () => _unpinMessage(pinned['message_id']),
+                              child: Icon(Icons.close, size: 14, color: Colors.white.withOpacity(0.4)),
+                            ),
+                          ],
                         ),
                       ),
                     );
@@ -3840,19 +3922,12 @@ Future<void> _openLink(String url) async {
     final reactions = Map<String, dynamic>.from(message['reactions'] ?? {});
 
     // FIX: More space between messages
-    return Align(
-      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: EdgeInsets.only(
-          bottom: reactions.isNotEmpty ? 16 : 8,  // FIX: Extra space for reactions
-          left: isMe ? 64 : (showAvatar ? 8 : 40), 
-          right: isMe ? 8 : 64,
-          top: 2,
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          mainAxisSize: MainAxisSize.min,
-          children: [
+    return Padding(
+      padding: EdgeInsets.only(bottom: reactions.isNotEmpty ? 18 : 12, top: 2),
+      child: Row(
+        mainAxisAlignment: isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
             if (!isMe && showAvatar)
               GestureDetector(
                 onTap: senderId != null
@@ -3868,7 +3943,9 @@ Future<void> _openLink(String url) async {
             if (!isMe && !showAvatar) const SizedBox(width: 32),
 
             Flexible(
-              child: GestureDetector(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
+                child: GestureDetector(
                 // FIX: Double-tap shows quick reaction bar instead of full picker
                 onDoubleTap: () => _showReactionPicker(message['id']),
                 onLongPress: () => _showMessageOptions(message, isMe),
@@ -4716,14 +4793,14 @@ Future<void> _openLink(String url) async {
                 _buildAttachmentButton(icon: Icons.videocam, label: 'Video', color: Colors.purple, onTap: () { Navigator.pop(context); _pickVideoFromGallery(); }),
                 _buildAttachmentButton(icon: Icons.videocam_off, label: 'Record', color: Colors.pink, onTap: () { Navigator.pop(context); _recordVideo(); }),
                 _buildAttachmentButton(icon: Icons.insert_drive_file, label: 'Document', color: Colors.blue, onTap: () { Navigator.pop(context); _pickFile(); }),
-                // NEW: group-only extras, matching the website's
-                // group_chat.html attachment sheet (the direct-chat sheet on
-                // the website has none of these, so they're kept out of
-                // direct chats here too for parity).
+                // NEW: location + live location are now available in BOTH
+                // direct and group chats (explicitly requested), while poll
+                // and contact-sharing stay group-only, matching the
+                // website's actual feature split.
+                _buildAttachmentButton(icon: Icons.location_on, label: 'Location', color: const Color(0xFF10B981), onTap: _shareLocation),
+                _buildAttachmentButton(icon: Icons.satellite_alt, label: 'Live Loc', color: Colors.red, onTap: _startLiveLocation),
                 if (_isGroup) ...[
                   _buildAttachmentButton(icon: Icons.poll, label: 'Poll', color: const Color(0xFF06B6D4), onTap: () { Navigator.pop(context); _openPollDialog(); }),
-                  _buildAttachmentButton(icon: Icons.location_on, label: 'Location', color: const Color(0xFF10B981), onTap: _shareLocation),
-                  _buildAttachmentButton(icon: Icons.satellite_alt, label: 'Live Loc', color: Colors.red, onTap: _startLiveLocation),
                   _buildAttachmentButton(icon: Icons.contact_page, label: 'Contact', color: Colors.amber, onTap: _openShareContactSheet),
                 ],
               ],
