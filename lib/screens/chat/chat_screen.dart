@@ -3978,7 +3978,7 @@ Future<void> _openLink(String url) async {
                                     'username': user?['username'], 
                                     'avatar_url': user?['avatar_url'], 
                                     'bio': user?['bio'],
-                                  }))
+                                  })),
                                 : null,
                               child: Padding(
                                 padding: const EdgeInsets.only(bottom: 4),
