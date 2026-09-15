@@ -2457,7 +2457,7 @@ Future<void> _openLink(String url) async {
     final safeCursor = cursor >= 0 ? cursor : value.length;
     final before = value.substring(0, safeCursor);
     final after = value.substring(safeCursor);
-    final newBefore = before.replaceFirst(RegExp(r'(^|\s)@([a-zA-Z0-9_]*)$'), (m) => '${m.group(1)}@$username ');
+    final newBefore = before.replaceFirstMapped(RegExp(r'(^|\s)@([a-zA-Z0-9_]*)$'), (m) => '${m.group(1)}@$username ');
     _messageController.text = newBefore + after;
     _messageController.selection = TextSelection.collapsed(offset: newBefore.length);
     setState(() => _showMentionPicker = false);
@@ -2655,7 +2655,7 @@ Future<void> _openLink(String url) async {
             Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(2))),
             const SizedBox(height: 16),
             ListTile(
-              leading: const Icon(Icons.bomb_outlined, color: Colors.red),
+              leading: const Icon(Icons.whatshot, color: Colors.red),
               title: const Text('Self-Destruct Timer', style: TextStyle(color: Colors.white)),
               subtitle: Text(_selfDestructSeconds > 0 ? 'On — ${_selfDestructSeconds}s' : 'Off', style: TextStyle(color: Colors.white.withOpacity(0.4))),
               onTap: () { Navigator.pop(context); _openSelfDestructDialog(); },
